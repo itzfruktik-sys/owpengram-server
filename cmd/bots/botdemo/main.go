@@ -158,11 +158,11 @@ func main() {
 
 	priv, err := mtprotoedge.LoadOrGenerateRSAKey(*rsaPath)
 	if err != nil {
-		logger.Fatal("加载 RSA key 失败", zap.Error(err))
+		logger.Fatal("load RSA key failed", zap.Error(err))
 	}
 	host, portStr, err := net.SplitHostPort(*addr)
 	if err != nil {
-		logger.Fatal("解析地址失败", zap.Error(err))
+		logger.Fatal("parse address failed", zap.Error(err))
 	}
 	port, _ := strconv.Atoi(portStr)
 
@@ -196,7 +196,7 @@ func main() {
 		// 3) 定时主动发送。
 		return runLoop(ctx, api, uploader.NewUploader(api), peer, cfg, logger)
 	}); err != nil {
-		logger.Fatal("运行失败", zap.Error(err))
+		logger.Fatal("run failed", zap.Error(err))
 	}
 	fmt.Println("已退出")
 }
@@ -286,7 +286,7 @@ func runLoop(ctx context.Context, api *tg.Client, up *uploader.Uploader, peer tg
 
 	// 立即发第一条（不必等满一个 interval），随后按 ticker 周期发。
 	if err := send(); err != nil {
-		logger.Warn("发送失败", zap.Error(err))
+		logger.Warn("send failed", zap.Error(err))
 	}
 	if cfg.count > 0 && seq >= cfg.count {
 		return nil
@@ -297,7 +297,7 @@ func runLoop(ctx context.Context, api *tg.Client, up *uploader.Uploader, peer tg
 			return nil
 		case <-ticker.C:
 			if err := send(); err != nil {
-				logger.Warn("发送失败", zap.Error(err))
+				logger.Warn("send failed", zap.Error(err))
 				continue
 			}
 			if cfg.count > 0 && seq >= cfg.count {

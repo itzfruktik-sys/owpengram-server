@@ -106,16 +106,16 @@ func main() {
 
 	priv, err := mtprotoedge.LoadOrGenerateRSAKey(*rsaPath)
 	if err != nil {
-		logger.Fatal("加载 RSA key 失败", zap.Error(err))
+		logger.Fatal("load RSA key failed", zap.Error(err))
 	}
 
 	host, portStr, err := net.SplitHostPort(*addr)
 	if err != nil {
-		logger.Fatal("解析地址失败", zap.Error(err))
+		logger.Fatal("parse address failed", zap.Error(err))
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
-		logger.Fatal("解析端口失败", zap.Error(err))
+		logger.Fatal("parse port failed", zap.Error(err))
 	}
 
 	var client *telegram.Client
@@ -240,7 +240,7 @@ func main() {
 		<-ctx.Done()
 		return nil
 	}); err != nil {
-		logger.Fatal("运行失败", zap.Error(err))
+		logger.Fatal("run failed", zap.Error(err))
 	}
 	fmt.Println("已退出")
 }
@@ -286,7 +286,7 @@ func echoUpdates(ctx context.Context, raw *tg.Client, u tg.UpdatesClass, logger 
 			Message:  "echo: " + msg.Message,
 			RandomID: rid,
 		}); err != nil {
-			logger.Warn("echo 回复失败", zap.Int64("to", from), zap.Error(err))
+			logger.Warn("echo reply failed", zap.Int64("to", from), zap.Error(err))
 			continue
 		}
 		fmt.Printf(">> 已回复 %d: %q\n", from, "echo: "+msg.Message)

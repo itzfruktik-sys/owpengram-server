@@ -91,7 +91,7 @@ func main() {
 	defer func() { _ = logger.Sync() }()
 	priv, err := mtprotoedge.LoadOrGenerateRSAKey(*rsaPath)
 	if err != nil {
-		logger.Fatal("加载 RSA key 失败", zap.Error(err))
+		logger.Fatal("load RSA key failed", zap.Error(err))
 	}
 	host, portStr, _ := net.SplitHostPort(*addr)
 	port, _ := strconv.Atoi(portStr)
@@ -183,7 +183,7 @@ func main() {
 		}
 		return nil
 	}); err != nil {
-		logger.Fatal("运行失败", zap.Error(err))
+		logger.Fatal("run failed", zap.Error(err))
 	}
 }
 

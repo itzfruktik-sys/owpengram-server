@@ -139,7 +139,7 @@ func New(cfg Config) (Service, error) {
 		zap.Int("relay_min_port", cfg.RelayMinPort),
 		zap.Int("relay_max_port", cfg.RelayMaxPort))
 	if cfg.AdvertiseIP == "127.0.0.1" {
-		cfg.Logger.Warn("TELESRV_TURN_ADVERTISE_IP 为 127.0.0.1：真机拿到的 relay candidate 不可达（跨网媒体面静默失败），跨设备通话必须设为客户端可达 IP")
+		cfg.Logger.Warn("TELESRV_TURN_ADVERTISE_IP is 127.0.0.1: real devices get an unreachable relay candidate (cross-network media silently fails); cross-device calls require a client-reachable IP")
 	}
 	return &pionTURN{cfg: cfg, server: server}, nil
 }
