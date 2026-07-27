@@ -6,16 +6,20 @@
 #   清空：  docker compose down -v        （连数据卷一起删，重置 schema/数据）
 #
 # server 端连接串见 internal/config/config.go 的默认值（localhost:5432 / localhost:6399）。
-name: telesrv
+#
+# 容器/卷命名可通过 TELESRV_DOCKER_PROJECT / TELESRV_DOCKER_PREFIX 覆盖（默认 owpengram）：
+# start-server.sh 对已存在 telesrv_* 卷、且用户拒绝一次性改名迁移的安装，会把这两个变量
+# 固定设为 telesrv，从而永久保留旧命名，不动用户现有的 telesrv_pgdata / telesrv_redisdata。
+name: ${TELESRV_DOCKER_PROJECT:-owpengram}
 
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: telesrv-postgres
+    container_name: ${TELESRV_DOCKER_PREFIX:-owpengram}-postgres
     # 全库已去分区（普通表），max_locks_per_transaction 默认 64 已够；512 仅留余量，对内存近乎零开销。
     # pg_stat_statements：聚合各 SQL 的累计/平均耗时与调用次数，用于定位 postgres 容器 CPU 热点
     # （telesrv 是宿主进程，docker stats 里的 CPU 尖峰是本容器）。需 CREATE EXTENSION 后才有视图：
-    #   docker exec -i telesrv-postgres psql -U telesrv -d telesrv -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
+    #   docker exec -i owpengram-postgres psql -U telesrv -d telesrv -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;"
     command:
       - "postgres"
       - "-c"
@@ -44,7 +48,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: telesrv-redis
+    container_name: ${TELESRV_DOCKER_PREFIX:-owpengram}-redis
     command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "6399:6379"   # 宿主 6379 常被其他项目占用，telesrv 对外用 6399（容器内仍 6379）
@@ -59,4 +63,6 @@ services:
 
 volumes:
   pgdata:
+    name: ${TELESRV_DOCKER_PREFIX:-owpengram}_pgdata
   redisdata:
+    name: ${TELESRV_DOCKER_PREFIX:-owpengram}_redisdata
