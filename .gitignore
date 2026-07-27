@@ -33,6 +33,7 @@ tmp/
 .secrets
 .docker_naming
 .db_naming
+.server_panel.json
 
 # IDE
 .idea/
