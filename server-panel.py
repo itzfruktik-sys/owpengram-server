@@ -25,15 +25,21 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import psutil
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.screen import Screen
-from textual.widgets import Footer, Header, Label, OptionList, RichLog, Static
+from textual.screen import ModalScreen, Screen
+from textual.widgets import Button, DataTable, Footer, Header, Label, OptionList, ProgressBar, RichLog, Static
 from textual.widgets.option_list import Option
 
 IS_WINDOWS = platform.system() == "Windows"
+
+# psutil.cpu_percent()'s first call always returns a meaningless 0.0 baseline
+# (it measures against process start); priming it once here means the first
+# real reading in the stats timer is already a proper since-last-call delta.
+psutil.cpu_percent(interval=None)
 
 ROOT = Path(__file__).resolve().parent
 DEPLOY_DIR = ROOT / "deploy"
@@ -295,33 +301,128 @@ class ServerManager:
 MANAGER = ServerManager()
 
 
+# --- .env / clipboard / system stats helpers --------------------------------
+
+
+def read_env_value(key: str) -> str | None:
+    if not ENV_FILE.exists():
+        return None
+    prefix = f"{key}="
+    for line in ENV_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if line.startswith(prefix):
+            return line[len(prefix):].strip()
+    return None
+
+
+def admin_ui_info() -> tuple[str, str | None] | None:
+    """Returns (url, password) for the admin UI, or None if it isn't
+    configured at all. password is None when TELESRV_ADMIN_UI_PASSWORD is
+    empty (token-only auth)."""
+    addr = read_env_value("TELESRV_ADMIN_UI_ADDR")
+    if not addr:
+        return None
+    url = addr if addr.startswith(("http://", "https://")) else f"http://{addr}"
+    return url, (read_env_value("TELESRV_ADMIN_UI_PASSWORD") or None)
+
+
+def copy_to_clipboard(text: str) -> bool:
+    if IS_WINDOWS:
+        candidates = [["clip"]]
+    elif platform.system() == "Darwin":
+        candidates = [["pbcopy"]]
+    else:
+        candidates = [
+            ["xclip", "-selection", "clipboard"],
+            ["xsel", "--clipboard", "--input"],
+            ["wl-copy"],
+        ]
+    for cmd in candidates:
+        try:
+            subprocess.run(cmd, input=text.encode("utf-8"), check=True, capture_output=True)
+            return True
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            continue
+    return False
+
+
+def system_stats() -> tuple[float, float, float]:
+    """Returns (cpu_percent, ram_percent, disk_percent) for the drive this
+    project lives on."""
+    cpu = psutil.cpu_percent(interval=None)
+    ram = psutil.virtual_memory().percent
+    disk = psutil.disk_usage(str(ROOT)).percent
+    return cpu, ram, disk
+
+
 # --- UI -----------------------------------------------------------------
 
 
-def status_text(status: Status) -> str:
-    def line(name: str, pid: int | None, alive: bool) -> str:
-        if alive:
-            return f"  {name}: [b green]RUNNING[/] (PID {pid})"
-        if pid:
-            return f"  {name}: [b red]STOPPED[/] (last PID {pid} not alive)"
-        return f"  {name}: [dim]not started[/]"
+class PasswordSpoiler(Static):
+    """Masks a password until clicked; the click handler (owned by whoever
+    creates this widget) decides whether/how to confirm before revealing."""
 
-    def container_line(name: str, state: str | None) -> str:
-        if state == "running":
-            return f"  {name}: [b green]RUNNING[/]"
-        if state is None:
-            return f"  {name}: [dim]not created[/]"
-        return f"  {name}: [b red]{state.upper()}[/]"
+    def __init__(self, password: str, on_click_callback, **kwargs):
+        super().__init__(**kwargs)
+        self.password = password
+        self.revealed = False
+        self._on_click_callback = on_click_callback
 
-    lines = [
-        "  Server binaries:",
-        line("owpengram-server", status.server_pid, status.server_alive),
-        line("owpengram-admin-panel", status.admin_pid, status.admin_alive),
-        "",
-        "  Docker containers:",
-    ]
-    lines += [container_line(name, state) for name, state in status.containers]
-    return "\n".join(lines)
+    def on_mount(self) -> None:
+        self._render_masked()
+
+    def _render_masked(self) -> None:
+        self.update("Password: [dim]" + "•" * 10 + "[/]  [i](click to reveal)[/]")
+
+    def reveal(self) -> None:
+        self.revealed = True
+        self.update(f"Password: [b green]{self.password}[/]")
+
+    def on_click(self, event) -> None:
+        if not self.revealed:
+            self._on_click_callback(self)
+
+
+class ConfirmRevealScreen(ModalScreen[bool]):
+    """Yes/no confirmation before a spoiler is revealed."""
+
+    CSS = """
+    ConfirmRevealScreen {
+        align: center middle;
+    }
+    #confirm-dialog {
+        width: 56;
+        height: auto;
+        padding: 1 2;
+        border: round $warning;
+        background: $surface;
+    }
+    #confirm-dialog Label {
+        width: 100%;
+        content-align: center middle;
+        margin-bottom: 1;
+    }
+    #confirm-buttons {
+        align: center middle;
+        height: auto;
+    }
+    #confirm-buttons Button {
+        margin: 0 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-dialog"):
+            yield Label("Show the admin UI password?\nIt will also be copied to the clipboard.")
+            with Horizontal(id="confirm-buttons"):
+                yield Button("Yes, show it", id="yes", variant="warning")
+                yield Button("Cancel", id="no", variant="default")
+
+    def on_mount(self) -> None:
+        self.query_one("#no", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "yes")
 
 
 class LogTailScreen(Screen):
@@ -431,7 +532,21 @@ class MainScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static(BANNER, id="banner")
-        yield Static(id="status")
+        with Horizontal(id="main-body"):
+            with Vertical(id="services-panel"):
+                yield Label("Services", classes="panel-title")
+                yield DataTable(id="services-table", cursor_type="none")
+            with Vertical(id="sidebar"):
+                yield Label("System", classes="panel-title")
+                yield Label("CPU", id="cpu-label", classes="stat-label")
+                yield ProgressBar(total=100, id="cpu-bar", show_eta=False)
+                yield Label("RAM", id="ram-label", classes="stat-label")
+                yield ProgressBar(total=100, id="ram-bar", show_eta=False)
+                yield Label("Disk", id="disk-label", classes="stat-label")
+                yield ProgressBar(total=100, id="disk-bar", show_eta=False)
+                yield Label("Admin UI", classes="panel-title")
+                yield Static(id="admin-link")
+                yield self._admin_password_widget()
         yield OptionList(
             Option("Start server", id="start"),
             Option("Stop server", id="stop"),
@@ -441,12 +556,72 @@ class MainScreen(Screen):
         )
         yield Footer()
 
+    def _admin_password_widget(self) -> Static:
+        info = admin_ui_info()
+        password = info[1] if info else None
+        if password:
+            return PasswordSpoiler(password, self._handle_password_click, id="admin-password")
+        return Static("Password: [dim]not set (token auth)[/]", id="admin-password")
+
+    def _handle_password_click(self, spoiler: PasswordSpoiler) -> None:
+        def handle(confirmed: bool | None) -> None:
+            if not confirmed:
+                return
+            spoiler.reveal()
+            if copy_to_clipboard(spoiler.password):
+                self.notify("Password revealed and copied to clipboard")
+            else:
+                self.notify("Password revealed (clipboard copy failed)", severity="warning")
+
+        self.app.push_screen(ConfirmRevealScreen(), handle)
+
     def on_mount(self) -> None:
+        self.query_one("#services-table", DataTable).add_columns("Service", "Type", "Status")
         self.refresh_status()
+        self.refresh_stats()
+        self.refresh_admin_link()
         self.set_interval(3, self.refresh_status)
+        self.set_interval(2, self.refresh_stats)
 
     def refresh_status(self) -> None:
-        self.query_one("#status", Static).update(status_text(MANAGER.status()))
+        status = MANAGER.status()
+        table = self.query_one("#services-table", DataTable)
+        table.clear()
+
+        table.add_row(
+            "owpengram-server", "binary",
+            "[b green]● RUNNING[/]" if status.server_alive else "[dim]○ stopped[/]",
+        )
+        table.add_row(
+            "owpengram-admin-panel", "binary",
+            "[b green]● RUNNING[/]" if status.admin_alive else "[dim]○ stopped[/]",
+        )
+        for name, state in status.containers:
+            if state == "running":
+                cell = "[b green]● RUNNING[/]"
+            elif state is None:
+                cell = "[dim]○ not created[/]"
+            else:
+                cell = f"[b red]● {state.upper()}[/]"
+            table.add_row(name, "container", cell)
+
+    def refresh_stats(self) -> None:
+        cpu, ram, disk = system_stats()
+        self.query_one("#cpu-bar", ProgressBar).update(progress=cpu)
+        self.query_one("#ram-bar", ProgressBar).update(progress=ram)
+        self.query_one("#disk-bar", ProgressBar).update(progress=disk)
+        self.query_one("#cpu-label", Label).update(f"CPU   {cpu:5.1f}%")
+        self.query_one("#ram-label", Label).update(f"RAM   {ram:5.1f}%")
+        self.query_one("#disk-label", Label).update(f"Disk  {disk:5.1f}%")
+
+    def refresh_admin_link(self) -> None:
+        info = admin_ui_info()
+        widget = self.query_one("#admin-link", Static)
+        if info:
+            url, _ = info
+            widget.update(f'[link="{url}"]{url}[/link]')
+        else:
+            widget.update("[dim]not configured[/]")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         option_id = event.option.id
@@ -611,10 +786,42 @@ class ServerPanelApp(App):
         text-style: bold;
         margin: 1 1 0 1;
     }
-    #status {
-        padding: 1 2;
-        border: round $accent;
+    #main-body {
+        height: 1fr;
         margin: 1 1 0 1;
+    }
+    .panel-title {
+        text-style: bold;
+        color: $accent;
+        margin-bottom: 1;
+    }
+    #services-panel {
+        width: 2fr;
+        height: 100%;
+        border: round $accent;
+        padding: 1 2;
+        margin-right: 1;
+    }
+    #services-table {
+        height: 1fr;
+    }
+    #sidebar {
+        width: 1fr;
+        height: 100%;
+        border: round $accent;
+        padding: 1 2;
+    }
+    .stat-label {
+        margin-top: 1;
+    }
+    #sidebar ProgressBar {
+        width: 100%;
+    }
+    #admin-link {
+        margin-top: 1;
+    }
+    #admin-password {
+        margin-top: 1;
     }
     LogTailScreen Horizontal {
         height: 1fr;
