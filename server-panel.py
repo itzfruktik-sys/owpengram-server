@@ -26,12 +26,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import psutil
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_private_key
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.screen import ModalScreen, Screen
-from textual.widgets import Button, DataTable, Footer, Header, Label, OptionList, ProgressBar, RichLog, Static
+from textual.screen import Screen
+from textual.widgets import DataTable, Footer, Header, Label, OptionList, ProgressBar, RichLog, Static
 from textual.widgets.option_list import Option
 
 IS_WINDOWS = platform.system() == "Windows"
@@ -326,6 +327,40 @@ def admin_ui_info() -> tuple[str, str | None] | None:
     return url, (read_env_value("TELESRV_ADMIN_UI_PASSWORD") or None)
 
 
+def server_address() -> str | None:
+    """The MTProto address clients connect to (advertise IP + listen port).
+    Present as soon as .env is configured, even before the first Start."""
+    ip = read_env_value("TELESRV_ADVERTISE_IP")
+    listen = read_env_value("TELESRV_LISTEN")
+    if not ip or not listen:
+        return None
+    port = listen.rsplit(":", 1)[-1]
+    if not port.isdigit():
+        return None
+    return f"{ip}:{port}"
+
+
+def server_public_key_pem() -> str | None:
+    """The server's RSA public key (PKCS1 "RSA PUBLIC KEY" PEM, the format
+    patched into client builds), derived from the private key file. That
+    file is only generated the first time telesrv actually starts, so this
+    is legitimately absent on a never-started install -- and returns None
+    rather than raising on a missing/corrupt/unparseable file instead of
+    crashing the panel over it."""
+    key_path_value = read_env_value("TELESRV_RSA_KEY") or "data/server_rsa.pem"
+    key_path = Path(key_path_value)
+    if not key_path.is_absolute():
+        key_path = ROOT / key_path
+    if not key_path.exists():
+        return None
+    try:
+        private_key = load_pem_private_key(key_path.read_bytes(), password=None)
+        public_pem = private_key.public_key().public_bytes(Encoding.PEM, PublicFormat.PKCS1)
+        return public_pem.decode("ascii").strip()
+    except Exception:  # noqa: BLE001 - any parse/format issue just means "unavailable"
+        return None
+
+
 def copy_to_clipboard(text: str) -> bool:
     if IS_WINDOWS:
         candidates = [["clip"]]
@@ -358,71 +393,32 @@ def system_stats() -> tuple[float, float, float]:
 # --- UI -----------------------------------------------------------------
 
 
-class PasswordSpoiler(Static):
-    """Masks a password until clicked; the click handler (owned by whoever
-    creates this widget) decides whether/how to confirm before revealing."""
+class CopyButton(Static):
+    """A clickable label that copies `value` to the clipboard on click. The
+    actual value is never shown on screen -- just the label and a "click to
+    copy" hint (optionally masked with dots for secret-looking fields, purely
+    cosmetic since nothing is ever displayed either way). value=None renders
+    as "not available" and isn't clickable -- used before the first Start,
+    when e.g. the RSA public key file doesn't exist yet."""
 
-    def __init__(self, password: str, on_click_callback, **kwargs):
+    def __init__(self, label: str, value: str | None, on_copy_callback, *, masked: bool = False, **kwargs):
         super().__init__(**kwargs)
-        self.password = password
-        self.revealed = False
-        self._on_click_callback = on_click_callback
+        self.label = label
+        self.value = value
+        self.masked = masked
+        self._on_copy_callback = on_copy_callback
 
     def on_mount(self) -> None:
-        self._render_masked()
-
-    def _render_masked(self) -> None:
-        self.update("Password: [dim]" + "•" * 10 + "[/]  [i](click to reveal)[/]")
-
-    def reveal(self) -> None:
-        self.revealed = True
-        self.update(f"Password: [b green]{self.password}[/]")
+        if self.value is None:
+            self.update(f"{self.label}: [dim]not available[/]")
+        elif self.masked:
+            self.update(f"{self.label}: [dim]{'•' * 10}[/]  [i](click to copy)[/]")
+        else:
+            self.update(f"{self.label}: [dim](click to copy)[/]")
 
     def on_click(self, event) -> None:
-        if not self.revealed:
-            self._on_click_callback(self)
-
-
-class ConfirmRevealScreen(ModalScreen[bool]):
-    """Yes/no confirmation before a spoiler is revealed."""
-
-    CSS = """
-    ConfirmRevealScreen {
-        align: center middle;
-    }
-    #confirm-dialog {
-        width: 56;
-        height: auto;
-        padding: 1 2;
-        border: round $warning;
-        background: $surface;
-    }
-    #confirm-dialog Label {
-        width: 100%;
-        content-align: center middle;
-        margin-bottom: 1;
-    }
-    #confirm-buttons {
-        align: center middle;
-        height: auto;
-    }
-    #confirm-buttons Button {
-        margin: 0 1;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="confirm-dialog"):
-            yield Label("Show the admin UI password?\nIt will also be copied to the clipboard.")
-            with Horizontal(id="confirm-buttons"):
-                yield Button("Yes, show it", id="yes", variant="warning")
-                yield Button("Cancel", id="no", variant="default")
-
-    def on_mount(self) -> None:
-        self.query_one("#no", Button).focus()
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(event.button.id == "yes")
+        if self.value is not None:
+            self._on_copy_callback(self)
 
 
 class LogTailScreen(Screen):
@@ -544,6 +540,9 @@ class MainScreen(Screen):
                 yield ProgressBar(total=100, id="ram-bar", show_eta=False)
                 yield Label("Disk", id="disk-label", classes="stat-label")
                 yield ProgressBar(total=100, id="disk-bar", show_eta=False)
+                yield Label("Server", classes="panel-title")
+                yield CopyButton("Address", server_address(), self._handle_copy_click, id="server-address")
+                yield CopyButton("Public key", server_public_key_pem(), self._handle_copy_click, masked=True, id="server-public-key")
                 yield Label("Admin UI", classes="panel-title")
                 yield Static(id="admin-link")
                 yield self._admin_password_widget()
@@ -560,20 +559,14 @@ class MainScreen(Screen):
         info = admin_ui_info()
         password = info[1] if info else None
         if password:
-            return PasswordSpoiler(password, self._handle_password_click, id="admin-password")
+            return CopyButton("Password", password, self._handle_copy_click, masked=True, id="admin-password")
         return Static("Password: [dim]not set (token auth)[/]", id="admin-password")
 
-    def _handle_password_click(self, spoiler: PasswordSpoiler) -> None:
-        def handle(confirmed: bool | None) -> None:
-            if not confirmed:
-                return
-            spoiler.reveal()
-            if copy_to_clipboard(spoiler.password):
-                self.notify("Password revealed and copied to clipboard")
-            else:
-                self.notify("Password revealed (clipboard copy failed)", severity="warning")
-
-        self.app.push_screen(ConfirmRevealScreen(), handle)
+    def _handle_copy_click(self, widget: CopyButton) -> None:
+        if copy_to_clipboard(widget.value):
+            self.notify(f"{widget.label} copied to clipboard")
+        else:
+            self.notify(f"{widget.label} copy failed", severity="warning")
 
     def on_mount(self) -> None:
         self.query_one("#services-table", DataTable).add_columns("Service", "Type", "Status")
@@ -810,6 +803,7 @@ class ServerPanelApp(App):
         height: 100%;
         border: round $accent;
         padding: 1 2;
+        overflow-y: auto;
     }
     .stat-label {
         margin-top: 1;
@@ -820,8 +814,9 @@ class ServerPanelApp(App):
     #admin-link {
         margin-top: 1;
     }
-    #admin-password {
+    #admin-password, #server-address, #server-public-key {
         margin-top: 1;
+        height: auto;
     }
     LogTailScreen Horizontal {
         height: 1fr;
