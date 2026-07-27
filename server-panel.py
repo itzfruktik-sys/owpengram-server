@@ -48,6 +48,13 @@ ADMIN_EXE = BIN_DIR / ("owpengram-admin-panel.exe" if IS_WINDOWS else "owpengram
 SERVER_LOG = LOG_DIR / "owpengram-server.log"
 ADMIN_LOG = LOG_DIR / "owpengram-admin-panel.log"
 
+BANNER = r"""
+   _____      _____ ___ _  _  ___ ___    _   __  __
+  / _ \ \    / / _ \ __| \| |/ __| _ \  /_\ |  \/  |
+ | (_) \ \/\/ /|  _/ _|| .` | (_ |   / / _ \| |\/| |
+  \___/ \_/\_/ |_| |___|_|\_|\___|_|_\/_/ \_\_|  |_|
+""".strip("\n")
+
 
 # --- Process/state management -----------------------------------------------
 
@@ -423,6 +430,7 @@ class MainScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Static(BANNER, id="banner")
         yield Static(id="status")
         yield OptionList(
             Option("Start server", id="start"),
@@ -593,6 +601,16 @@ class MainScreen(Screen):
 class ServerPanelApp(App):
     TITLE = "OwpenGram Server Panel"
     CSS = """
+    #banner {
+        width: 100%;
+        /* content-align centers the whole multi-line block as one unit;
+        text-align would instead justify each line independently by its own
+        width, which staggers hand-aligned ASCII art like this banner. */
+        content-align: center middle;
+        color: cyan;
+        text-style: bold;
+        margin: 1 1 0 1;
+    }
     #status {
         padding: 1 2;
         border: round $accent;
