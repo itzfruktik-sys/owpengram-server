@@ -112,6 +112,7 @@ class Status:
     server_alive: bool
     admin_pid: int | None
     admin_alive: bool
+    containers: list[tuple[str, str | None]]
 
     @property
     def running(self) -> bool:
@@ -123,15 +124,35 @@ class ServerManager:
     dependency in here on purpose, so it stays easy to reason about /
     reuse outside the TUI if that's ever useful."""
 
+    def container_status(self, name: str) -> str | None:
+        """Returns Docker's own State.Status (running/exited/created/...),
+        or None if the container doesn't exist at all."""
+        r = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Status}}", name],
+            capture_output=True, text=True,
+        )
+        if r.returncode != 0:
+            return None
+        return r.stdout.strip() or None
+
     def status(self) -> Status:
         state = load_state()
         server_pid = state.get("server_pid")
         admin_pid = state.get("admin_pid")
+        # Falls back to the cached naming decision (or the "owpengram"
+        # default for a never-started, fresh install) so the container list
+        # shows something sensible even before Start has ever run.
+        prefix = self.cached_docker_naming() or state.get("docker_prefix") or "owpengram"
+        containers = [
+            (f"{prefix}-{service}", self.container_status(f"{prefix}-{service}"))
+            for service in ("postgres", "redis")
+        ]
         return Status(
             server_pid=server_pid,
             server_alive=pid_alive(server_pid),
             admin_pid=admin_pid,
             admin_alive=pid_alive(admin_pid),
+            containers=containers,
         )
 
     # -- naming migrations (interactive, must run with the real terminal) --
@@ -278,11 +299,22 @@ def status_text(status: Status) -> str:
             return f"  {name}: [b red]STOPPED[/] (last PID {pid} not alive)"
         return f"  {name}: [dim]not started[/]"
 
-    return (
-        line("owpengram-server", status.server_pid, status.server_alive)
-        + "\n"
-        + line("owpengram-admin-panel", status.admin_pid, status.admin_alive)
-    )
+    def container_line(name: str, state: str | None) -> str:
+        if state == "running":
+            return f"  {name}: [b green]RUNNING[/]"
+        if state is None:
+            return f"  {name}: [dim]not created[/]"
+        return f"  {name}: [b red]{state.upper()}[/]"
+
+    lines = [
+        "  Server binaries:",
+        line("owpengram-server", status.server_pid, status.server_alive),
+        line("owpengram-admin-panel", status.admin_pid, status.admin_alive),
+        "",
+        "  Docker containers:",
+    ]
+    lines += [container_line(name, state) for name, state in status.containers]
+    return "\n".join(lines)
 
 
 class LogTailScreen(Screen):
