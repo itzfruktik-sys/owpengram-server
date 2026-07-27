@@ -31,16 +31,21 @@ services:
       - "-c"
       - "track_io_timing=on"
     environment:
-      POSTGRES_DB: telesrv
-      POSTGRES_USER: telesrv
-      POSTGRES_PASSWORD: telesrv
+      # Only take effect when Postgres bootstraps a brand-new, empty data
+      # volume; a pre-existing volume ignores these and keeps whatever
+      # role/database name it was originally initialized with. See
+      # deploy/migrate-db-naming.ps1 for renaming an existing telesrv-named
+      # role/database in-place.
+      POSTGRES_DB: owpengram
+      POSTGRES_USER: owpengram
+      POSTGRES_PASSWORD: owpengram
       TZ: UTC
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U telesrv -d telesrv"]
+      test: ["CMD-SHELL", "pg_isready -U owpengram -d owpengram"]
       interval: 5s
       timeout: 3s
       retries: 10

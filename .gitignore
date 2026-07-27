@@ -31,6 +31,8 @@ tmp/
 .public_ip
 .link_prefix
 .secrets
+.docker_naming
+.db_naming
 
 # IDE
 .idea/
