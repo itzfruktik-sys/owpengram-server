@@ -828,8 +828,18 @@ class MainScreen(Screen):
     def _handle_copy_click(self, widget: CopyButton) -> None:
         if copy_to_clipboard(widget.value):
             self.notify(f"{widget.label} copied to clipboard")
-        else:
-            self.notify(f"{widget.label} copy failed", severity="warning")
+            return
+        # No local clipboard tool worked -- typically means this is a
+        # headless remote server (e.g. reached over SSH), where
+        # xclip/xsel/wl-copy have no X/Wayland display to talk to even if
+        # they happen to be installed. Fall back to OSC 52: a terminal
+        # escape sequence that most modern terminal emulators (Windows
+        # Terminal, iTerm2, kitty, alacritty, WezTerm, ...) intercept and
+        # copy straight into the *local* client's clipboard, even across
+        # SSH. There's no way to confirm from here whether the terminal
+        # actually supports it, so the message says "sent", not "copied".
+        self.app.copy_to_clipboard(widget.value)
+        self.notify(f"{widget.label} sent to terminal clipboard (OSC 52) -- works if your terminal supports it")
 
     def on_mount(self) -> None:
         self.query_one("#services-table", DataTable).add_columns("Service", "Type", "Status")
