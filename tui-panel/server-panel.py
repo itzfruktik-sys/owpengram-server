@@ -11,8 +11,9 @@ processes and writes their PIDs to .server_panel.json next to .env; closing
 the panel (Exit) does NOT stop them -- only the Stop action does. Reopening
 the panel later picks the same PIDs back up and reports live status.
 
-Requires: pip install textual
-Run: python server-panel.py
+Requires: pip install -r tui-panel/requirements-panel.txt
+Run: owpengram-server.sh (Linux/macOS) or owpengram-server.bat (Windows) from
+the repo root -- they check prerequisites first, then launch this.
 """
 from __future__ import annotations
 
@@ -44,7 +45,7 @@ IS_WINDOWS = platform.system() == "Windows"
 # real reading in the stats timer is already a proper since-last-call delta.
 psutil.cpu_percent(interval=None)
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 DEPLOY_DIR = ROOT / "deploy"
 BIN_DIR = ROOT / "bin"
 LOG_DIR = ROOT / "logs"
