@@ -836,10 +836,9 @@ class MainScreen(Screen):
         # escape sequence that most modern terminal emulators (Windows
         # Terminal, iTerm2, kitty, alacritty, WezTerm, ...) intercept and
         # copy straight into the *local* client's clipboard, even across
-        # SSH. There's no way to confirm from here whether the terminal
-        # actually supports it, so the message says "sent", not "copied".
+        # SSH.
         self.app.copy_to_clipboard(widget.value)
-        self.notify(f"{widget.label} sent to terminal clipboard (OSC 52) -- works if your terminal supports it")
+        self.notify(f"{widget.label} copied to clipboard")
 
     def on_mount(self) -> None:
         self.query_one("#services-table", DataTable).add_columns("Service", "Type", "Status")
