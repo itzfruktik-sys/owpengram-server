@@ -22,6 +22,10 @@ if errorlevel 1 (
 )
 
 rem --- Python -------------------------------------------------------------
+rem Just checking "where" isn't enough: on Windows, python.exe / python3.exe
+rem can resolve to the Microsoft Store app-execution-alias stub, which sits
+rem on PATH but fails as soon as it's actually run instead of launching real
+rem Python. Confirm each candidate's --version actually succeeds too.
 set "PYTHON="
 where py >nul 2>&1
 if not errorlevel 1 (
@@ -30,7 +34,10 @@ if not errorlevel 1 (
 )
 if not defined PYTHON (
   where python >nul 2>&1
-  if not errorlevel 1 set "PYTHON=python"
+  if not errorlevel 1 (
+    python --version >nul 2>&1
+    if not errorlevel 1 set "PYTHON=python"
+  )
 )
 
 if not defined PYTHON (

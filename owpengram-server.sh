@@ -24,11 +24,19 @@ else
 fi
 
 # --- Python ---------------------------------------------------------------
+# Just checking `command -v` isn't enough: on Windows, `python3` (and
+# sometimes `python`) can resolve to the Microsoft Store app-execution-alias
+# stub, which exists on PATH but fails as soon as it's actually run instead
+# of launching real Python. Validate the version output too.
 PYTHON=""
+PYTHON_VERSION=""
 for cand in python3 python; do
   if command -v "$cand" >/dev/null 2>&1; then
-    PYTHON="$cand"
-    break
+    if VER_OUT="$("$cand" --version 2>&1)" && [[ "$VER_OUT" == Python\ 3* ]]; then
+      PYTHON="$cand"
+      PYTHON_VERSION="$VER_OUT"
+      break
+    fi
   fi
 done
 
@@ -37,7 +45,7 @@ if [[ -z "$PYTHON" ]]; then
   echo "       Install it from: https://www.python.org/downloads/"
   PROBLEMS=1
 else
-  ok "Python found: $("$PYTHON" --version 2>&1) (${PYTHON})"
+  ok "Python found: ${PYTHON_VERSION} (${PYTHON})"
 fi
 
 # --- Python dependencies ----------------------------------------------------
