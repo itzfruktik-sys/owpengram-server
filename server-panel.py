@@ -19,10 +19,12 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
+import shutil
 import signal
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import psutil
@@ -30,9 +32,9 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat,
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Label, OptionList, ProgressBar, RichLog, Static
+from textual.widgets import Button, Collapsible, DataTable, Footer, Header, Input, Label, OptionList, ProgressBar, RichLog, Static
 from textual.widgets.option_list import Option
 
 IS_WINDOWS = platform.system() == "Windows"
@@ -47,6 +49,7 @@ DEPLOY_DIR = ROOT / "deploy"
 BIN_DIR = ROOT / "bin"
 LOG_DIR = ROOT / "logs"
 ENV_FILE = ROOT / ".env"
+ENV_EXAMPLE_FILE = ROOT / ".env.example"
 COMPOSE_FILE = DEPLOY_DIR / "docker-compose.yml"
 STATE_FILE = ROOT / ".server_panel.json"
 
@@ -316,6 +319,154 @@ def read_env_value(key: str) -> str | None:
     return None
 
 
+# --- .env.example parsing / editing ------------------------------------
+
+_ACTIVE_FIELD_RE = re.compile(r"^(TELESRV_[A-Z0-9_]+)=(.*)$")
+_COMMENTED_FIELD_RE = re.compile(r"^#\s*(TELESRV_[A-Z0-9_]+)=(.*)$")
+_SENSITIVE_KEY_RE = re.compile(r"(PASSWORD|SECRET|_TOKEN|API_KEY)")
+
+
+@dataclass
+class EnvField:
+    key: str
+    default_value: str
+    description: str
+    enabled_by_default: bool
+
+    @property
+    def sensitive(self) -> bool:
+        return bool(_SENSITIVE_KEY_RE.search(self.key))
+
+
+@dataclass
+class EnvGroup:
+    title: str
+    fields: list[EnvField] = field(default_factory=list)
+
+
+def parse_env_template() -> list[EnvGroup]:
+    """Parses .env.example into groups of fields for the editor. Grouping
+    follows the file's own blank-line-separated blocks; a group's title is
+    the first sentence of whichever field in it has a comment (falling back
+    to its first key when none of them do, e.g. the bare Postgres/Redis DSN
+    pair that has no comment of its own)."""
+    if not ENV_EXAMPLE_FILE.exists():
+        return []
+
+    groups: list[EnvGroup] = []
+    current_fields: list[EnvField] = []
+    pending: list[str] = []
+    in_comment_run = False
+    seen_keys: set[str] = set()
+
+    def flush_group() -> None:
+        nonlocal current_fields
+        if current_fields:
+            described = next((f.description for f in current_fields if f.description), "")
+            if described:
+                title = described.split(". ", 1)[0].strip().rstrip(".")
+            else:
+                title = current_fields[0].key
+            groups.append(EnvGroup(title=title[:70], fields=current_fields))
+        current_fields = []
+
+    for raw_line in ENV_EXAMPLE_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
+        stripped = raw_line.strip()
+
+        if not stripped:
+            flush_group()
+            pending = []
+            in_comment_run = False
+            continue
+
+        active = _ACTIVE_FIELD_RE.match(stripped)
+        if active:
+            # TELESRV_AI_PROVIDERS legitimately appears twice in the file: once
+            # as the real setting, once as an inline "if you want Kimi" example
+            # inside an unrelated comment block further down. A second Input
+            # for the same env var would just be confusing, so the first
+            # occurrence wins and later repeats fold into descriptive text.
+            if active.group(1) not in seen_keys:
+                seen_keys.add(active.group(1))
+                current_fields.append(EnvField(
+                    key=active.group(1), default_value=active.group(2),
+                    description=" ".join(pending), enabled_by_default=True,
+                ))
+            in_comment_run = False
+            continue
+
+        if stripped.startswith("#"):
+            commented = _COMMENTED_FIELD_RE.match(stripped)
+            if commented and commented.group(1) not in seen_keys:
+                seen_keys.add(commented.group(1))
+                current_fields.append(EnvField(
+                    key=commented.group(1), default_value=commented.group(2),
+                    description=" ".join(pending), enabled_by_default=False,
+                ))
+                in_comment_run = False
+                continue
+            text = stripped.lstrip("#").strip()
+            if in_comment_run:
+                pending.append(text)
+            else:
+                pending = [text]
+            in_comment_run = True
+            continue
+
+        # Any other line (shouldn't normally happen in this file) just ends
+        # whatever comment run was in progress without touching fields.
+        in_comment_run = False
+
+    flush_group()
+    return groups
+
+
+def current_env_values(groups: list[EnvGroup]) -> dict[str, str]:
+    """Current value for every known field: from .env if it's set there,
+    otherwise the template's default -- EXCEPT for a field that's commented
+    out (disabled) in the template, whose "default_value" is only the
+    example shown in the comment (e.g. "openai_responses"), not something
+    that should silently start populated and get activated on save. Those
+    start blank; the example still shows as the input's placeholder."""
+    values: dict[str, str] = {}
+    for group in groups:
+        for f in group.fields:
+            existing = read_env_value(f.key)
+            if existing is not None:
+                values[f.key] = existing
+            elif f.enabled_by_default:
+                values[f.key] = f.default_value
+            else:
+                values[f.key] = ""
+    return values
+
+
+def save_env(values: dict[str, str]) -> None:
+    """(Re)writes .env from .env.example's exact text, substituting each
+    known field's value in place -- this is what preserves every comment and
+    the file's layout untouched. A template-commented optional field is
+    uncommented when given a non-empty value, and left as-is (commented,
+    disabled) when left empty."""
+    out_lines = []
+    seen_keys: set[str] = set()
+    for raw_line in ENV_EXAMPLE_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
+        stripped = raw_line.strip()
+        active = _ACTIVE_FIELD_RE.match(stripped)
+        if active and active.group(1) in values and active.group(1) not in seen_keys:
+            seen_keys.add(active.group(1))
+            out_lines.append(f"{active.group(1)}={values[active.group(1)]}")
+            continue
+        commented = _COMMENTED_FIELD_RE.match(stripped)
+        if commented and commented.group(1) in values and commented.group(1) not in seen_keys:
+            seen_keys.add(commented.group(1))
+            key = commented.group(1)
+            value = values[key]
+            out_lines.append(f"{key}={value}" if value else raw_line)
+            continue
+        out_lines.append(raw_line)
+    ENV_FILE.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+
+
 def admin_ui_info() -> tuple[str, str | None] | None:
     """Returns (url, password) for the admin UI, or None if it isn't
     configured at all. password is None when TELESRV_ADMIN_UI_PASSWORD is
@@ -409,12 +560,27 @@ class CopyButton(Static):
         self._on_copy_callback = on_copy_callback
 
     def on_mount(self) -> None:
+        self._update_display()
+
+    def _update_display(self) -> None:
+        # NOTE: deliberately not named `_render` -- that name collides with
+        # Widget's own internal `_render()` (returns a Visual, used by
+        # get_content_height during layout); shadowing it with a method that
+        # returns None broke height calculation as soon as anything forced a
+        # reflow (e.g. pushing another screen), with a `'NoneType' object has
+        # no attribute 'get_height'` crash.
         if self.value is None:
             self.update(f"{self.label}: [dim]not available[/]")
         elif self.masked:
             self.update(f"{self.label}: [dim]{'•' * 10}[/]  [i](click to copy)[/]")
         else:
             self.update(f"{self.label}: [dim](click to copy)[/]")
+
+    def set_value(self, value: str | None) -> None:
+        """Updates the underlying value (e.g. after the env editor changes
+        it) without ever having displayed the old one on screen."""
+        self.value = value
+        self._update_display()
 
     def on_click(self, event) -> None:
         if self.value is not None:
@@ -516,12 +682,98 @@ class LogPickerScreen(Screen):
             self.app.pop_screen()
 
 
+class EnvEditorScreen(Screen):
+    """Every field .env.example knows about, grouped and described, with an
+    Input per field. If .env doesn't exist yet, it's copied verbatim from
+    .env.example first (so editing starts from the same defaults a fresh
+    `cp .env.example .env` would have given you). Save rewrites .env from
+    .env.example's exact text with just the values swapped in, so every
+    comment and the file's layout survive untouched; Back discards unsaved
+    edits."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back"),
+        Binding("ctrl+s", "save", "Save"),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._created_env = False
+        if not ENV_FILE.exists() and ENV_EXAMPLE_FILE.exists():
+            shutil.copy(ENV_EXAMPLE_FILE, ENV_FILE)
+            self._created_env = True
+        self._groups: list[EnvGroup] = parse_env_template()
+        self._values: dict[str, str] = current_env_values(self._groups)
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Static("Environment configuration (.env)", id="env-title")
+        if not self._groups:
+            yield Static(
+                "[b red]No .env.example found -- nothing to configure.[/]",
+                id="env-missing",
+            )
+        else:
+            with VerticalScroll(id="env-scroll"):
+                for i, group in enumerate(self._groups):
+                    with Collapsible(title=f"{group.title} ({len(group.fields)})", id=f"env-group-{i}"):
+                        for f in group.fields:
+                            with Vertical(classes="env-field"):
+                                badge = "" if f.enabled_by_default else "  [dim i](optional, currently disabled)[/]"
+                                yield Static(f"[b]{f.key}[/]{badge}", classes="env-field-key")
+                                if f.description:
+                                    yield Static(f.description, classes="env-field-desc")
+                                yield Input(
+                                    value=self._values.get(f.key, ""),
+                                    placeholder=f.default_value if not f.enabled_by_default else "",
+                                    password=f.sensitive,
+                                    id=self._input_id(f.key),
+                                )
+            with Horizontal(id="env-actions"):
+                yield Button("Save", id="env-save-button", variant="success")
+                yield Button("Back", id="env-back-button", variant="default")
+        yield Footer()
+
+    @staticmethod
+    def _input_id(key: str) -> str:
+        return f"env-{key}"
+
+    def on_mount(self) -> None:
+        if self._created_env:
+            self.notify("Created .env from .env.example")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "env-save-button":
+            self.action_save()
+        elif event.button.id == "env-back-button":
+            self.action_back()
+
+    def action_save(self) -> None:
+        if not self._groups:
+            return
+        values = dict(self._values)
+        for group in self._groups:
+            for f in group.fields:
+                values[f.key] = self.query_one(f"#{self._input_id(f.key)}", Input).value
+        try:
+            save_env(values)
+        except OSError as exc:
+            self.notify(f"Failed to save .env: {exc}", severity="error", timeout=10)
+            return
+        self._values = values
+        self.notify(".env saved")
+
+    def action_back(self) -> None:
+        self.dismiss()
+
+
 class MainScreen(Screen):
     BINDINGS = [
         Binding("1", "start", "Start"),
         Binding("2", "stop", "Stop"),
         Binding("3", "restart", "Restart"),
         Binding("4", "logs", "Logs"),
+        Binding("5", "env", "Configure .env"),
         Binding("q", "quit_panel", "Exit"),
     ]
 
@@ -551,16 +803,15 @@ class MainScreen(Screen):
             Option("Stop server", id="stop"),
             Option("Restart server", id="restart"),
             Option("View logs", id="logs"),
+            Option("Configure .env", id="env"),
             Option("Exit panel (server keeps running)", id="exit"),
         )
         yield Footer()
 
-    def _admin_password_widget(self) -> Static:
+    def _admin_password_widget(self) -> CopyButton:
         info = admin_ui_info()
         password = info[1] if info else None
-        if password:
-            return CopyButton("Password", password, self._handle_copy_click, masked=True, id="admin-password")
-        return Static("Password: [dim]not set (token auth)[/]", id="admin-password")
+        return CopyButton("Password", password, self._handle_copy_click, masked=True, id="admin-password")
 
     def _handle_copy_click(self, widget: CopyButton) -> None:
         if copy_to_clipboard(widget.value):
@@ -572,9 +823,10 @@ class MainScreen(Screen):
         self.query_one("#services-table", DataTable).add_columns("Service", "Type", "Status")
         self.refresh_status()
         self.refresh_stats()
-        self.refresh_admin_link()
+        self.refresh_config_widgets()
         self.set_interval(3, self.refresh_status)
         self.set_interval(2, self.refresh_stats)
+        self.set_interval(3, self.refresh_config_widgets)
 
     def refresh_status(self) -> None:
         status = MANAGER.status()
@@ -616,6 +868,16 @@ class MainScreen(Screen):
         else:
             widget.update("[dim]not configured[/]")
 
+    def refresh_config_widgets(self) -> None:
+        """Re-reads .env-derived values into the already-mounted widgets --
+        matters after coming back from the env editor, since e.g. the admin
+        password or the server's advertise address may have just changed."""
+        self.refresh_admin_link()
+        info = admin_ui_info()
+        self.query_one("#admin-password", CopyButton).set_value(info[1] if info else None)
+        self.query_one("#server-address", CopyButton).set_value(server_address())
+        self.query_one("#server-public-key", CopyButton).set_value(server_public_key_pem())
+
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         option_id = event.option.id
         if option_id == "start":
@@ -626,11 +888,18 @@ class MainScreen(Screen):
             self.action_restart()
         elif option_id == "logs":
             self.action_logs()
+        elif option_id == "env":
+            self.action_env()
         elif option_id == "exit":
             self.action_quit_panel()
 
     def action_logs(self) -> None:
         self.app.push_screen(LogPickerScreen())
+
+    def action_env(self) -> None:
+        # Refresh once the editor screen is popped -- the admin password,
+        # server address, etc. it just edited are all shown right here too.
+        self.app.push_screen(EnvEditorScreen(), lambda _: self.refresh_config_widgets())
 
     def action_quit_panel(self) -> None:
         self.app.exit()
@@ -816,7 +1085,37 @@ class ServerPanelApp(App):
     }
     #admin-password, #server-address, #server-public-key {
         margin-top: 1;
+    }
+    #env-title {
+        text-style: bold;
+        color: $accent;
+        padding: 1 2 0 2;
+    }
+    #env-missing {
+        padding: 1 2;
+    }
+    #env-scroll {
+        height: 1fr;
+        padding: 1 2;
+    }
+    .env-field {
         height: auto;
+        margin: 1 0 0 2;
+    }
+    .env-field-key {
+        color: $accent;
+    }
+    .env-field-desc {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+    #env-actions {
+        height: auto;
+        padding: 1 2;
+        align: right middle;
+    }
+    #env-actions Button {
+        margin-left: 1;
     }
     LogTailScreen Horizontal {
         height: 1fr;
