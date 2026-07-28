@@ -324,6 +324,8 @@ def read_env_value(key: str) -> str | None:
 _ACTIVE_FIELD_RE = re.compile(r"^(TELESRV_[A-Z0-9_]+)=(.*)$")
 _COMMENTED_FIELD_RE = re.compile(r"^#\s*(TELESRV_[A-Z0-9_]+)=(.*)$")
 _SENSITIVE_KEY_RE = re.compile(r"(PASSWORD|SECRET|_TOKEN|API_KEY)")
+_GROUP_HEADER_RE = re.compile(r"^##\s*(.+?)\s*--\s*(.+)$")
+_SECTION_BREAK_RE = re.compile(r"^#\s*={10,}\s*$")
 
 
 @dataclass
@@ -341,40 +343,46 @@ class EnvField:
 @dataclass
 class EnvGroup:
     title: str
+    description: str = ""
     fields: list[EnvField] = field(default_factory=list)
 
 
 def parse_env_template() -> list[EnvGroup]:
-    """Parses .env.example into groups of fields for the editor. Grouping
-    follows the file's own blank-line-separated blocks; a group's title is
-    the first sentence of whichever field in it has a comment (falling back
-    to its first key when none of them do, e.g. the bare Postgres/Redis DSN
-    pair that has no comment of its own)."""
+    """Parses .env.example into panel-visible groups.
+
+    Only fields inside an explicit "## Title -- description." header belong
+    to a group and show up in the editor. A "# ====...====" banner line (the
+    "Advanced / internal tuning" divider) ends panel-group collection for
+    the rest of the file -- those fields are still perfectly valid config
+    the server reads normally, they're just left out of the TUI on purpose
+    to keep it to what a self-hoster actually needs to touch."""
     if not ENV_EXAMPLE_FILE.exists():
         return []
 
     groups: list[EnvGroup] = []
-    current_fields: list[EnvField] = []
+    current: EnvGroup | None = None
     pending: list[str] = []
     in_comment_run = False
     seen_keys: set[str] = set()
-
-    def flush_group() -> None:
-        nonlocal current_fields
-        if current_fields:
-            described = next((f.description for f in current_fields if f.description), "")
-            if described:
-                title = described.split(". ", 1)[0].strip().rstrip(".")
-            else:
-                title = current_fields[0].key
-            groups.append(EnvGroup(title=title[:70], fields=current_fields))
-        current_fields = []
 
     for raw_line in ENV_EXAMPLE_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
         stripped = raw_line.strip()
 
         if not stripped:
-            flush_group()
+            pending = []
+            in_comment_run = False
+            continue
+
+        header = _GROUP_HEADER_RE.match(stripped)
+        if header:
+            current = EnvGroup(title=header.group(1).strip(), description=header.group(2).strip())
+            groups.append(current)
+            pending = []
+            in_comment_run = False
+            continue
+
+        if _SECTION_BREAK_RE.match(stripped):
+            current = None
             pending = []
             in_comment_run = False
             continue
@@ -388,10 +396,11 @@ def parse_env_template() -> list[EnvGroup]:
             # occurrence wins and later repeats fold into descriptive text.
             if active.group(1) not in seen_keys:
                 seen_keys.add(active.group(1))
-                current_fields.append(EnvField(
-                    key=active.group(1), default_value=active.group(2),
-                    description=" ".join(pending), enabled_by_default=True,
-                ))
+                if current is not None:
+                    current.fields.append(EnvField(
+                        key=active.group(1), default_value=active.group(2),
+                        description=" ".join(pending), enabled_by_default=True,
+                    ))
             in_comment_run = False
             continue
 
@@ -399,10 +408,11 @@ def parse_env_template() -> list[EnvGroup]:
             commented = _COMMENTED_FIELD_RE.match(stripped)
             if commented and commented.group(1) not in seen_keys:
                 seen_keys.add(commented.group(1))
-                current_fields.append(EnvField(
-                    key=commented.group(1), default_value=commented.group(2),
-                    description=" ".join(pending), enabled_by_default=False,
-                ))
+                if current is not None:
+                    current.fields.append(EnvField(
+                        key=commented.group(1), default_value=commented.group(2),
+                        description=" ".join(pending), enabled_by_default=False,
+                    ))
                 in_comment_run = False
                 continue
             text = stripped.lstrip("#").strip()
@@ -417,8 +427,7 @@ def parse_env_template() -> list[EnvGroup]:
         # whatever comment run was in progress without touching fields.
         in_comment_run = False
 
-    flush_group()
-    return groups
+    return [g for g in groups if g.fields]
 
 
 def current_env_values(groups: list[EnvGroup]) -> dict[str, str]:
@@ -717,6 +726,8 @@ class EnvEditorScreen(Screen):
             with VerticalScroll(id="env-scroll"):
                 for i, group in enumerate(self._groups):
                     with Collapsible(title=f"{group.title} ({len(group.fields)})", id=f"env-group-{i}"):
+                        if group.description:
+                            yield Static(group.description, classes="env-group-desc")
                         for f in group.fields:
                             with Vertical(classes="env-field"):
                                 badge = "" if f.enabled_by_default else "  [dim i](optional, currently disabled)[/]"
@@ -1097,6 +1108,11 @@ class ServerPanelApp(App):
     #env-scroll {
         height: 1fr;
         padding: 1 2;
+    }
+    .env-group-desc {
+        color: $text-muted;
+        text-style: italic;
+        margin: 1 0 0 2;
     }
     .env-field {
         height: auto;
