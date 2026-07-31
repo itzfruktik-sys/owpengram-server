@@ -281,18 +281,31 @@ func (s *readStore) StickerSetDocumentIDs(ctx context.Context, setID int64) ([]s
 	return out, nil
 }
 
-func (s *readStore) SearchAccounts(ctx context.Context, q string) ([]AccountRow, error) {
+// SearchAccounts matches by exact id, phone prefix (uses users_phone_prefix_idx),
+// or substring on username/display name (uses the users_username_lower_trgm_idx
+// and users_name_lower_trgm_idx GIN indexes -- those existed unused by this
+// query before; exact-only matching made "search" effectively useless for
+// anything but a fully-known id/phone/username). Keyset-paginated exactly
+// like ListAccounts so results beyond the page limit are reachable instead of
+// being silently dropped.
+func (s *readStore) SearchAccounts(ctx context.Context, q string, beforeActiveUS, beforeID int64, limit int) ([]AccountRow, bool, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
-		return nil, nil
+		return nil, false, nil
+	}
+	if limit <= 0 {
+		limit = accountListDefaultLimit
+	}
+	if limit > accountListMaxLimit {
+		limit = accountListMaxLimit
 	}
 	id := int64(-1)
 	if n, err := strconv.ParseInt(q, 10, 64); err == nil {
 		id = n
 	}
-	phone := strings.TrimPrefix(strings.ReplaceAll(q, " ", ""), "+")
-	phoneRaw := strings.TrimSpace(q)
-	username := strings.ToLower(strings.TrimPrefix(q, "@"))
+	phonePrefix := strings.TrimPrefix(strings.ReplaceAll(q, " ", ""), "+") + "%"
+	term := strings.ToLower(strings.TrimPrefix(q, "@"))
+	substring := "%" + term + "%"
 	rows, err := s.pool.Query(ctx, `
 WITH auth AS (
 	SELECT user_id, max(active_at) AS last_active_at, count(*)::int AS device_count
@@ -310,22 +323,83 @@ LEFT JOIN account_restrictions r ON r.user_id = u.id
 LEFT JOIN peer_usernames p ON p.peer_type = 'user' AND p.peer_id = u.id
 LEFT JOIN auth a ON a.user_id = u.id
 LEFT JOIN account_passwords ap ON ap.user_id = u.id
-WHERE u.id = $1 OR u.phone = $2 OR u.phone = $3 OR lower(u.username) = $4 OR p.username_lower = $4
-ORDER BY u.id
-LIMIT $5`, id, phone, phoneRaw, username, accountSearchLimit)
+WHERE NOT u.is_bot
+	AND (
+		u.id = $1
+		OR u.phone LIKE $2
+		OR lower((u.username)::text) LIKE $3
+		OR p.username_lower = $4
+		OR lower(TRIM(BOTH FROM ((u.first_name)::text || ' '::text || (u.last_name)::text))) LIKE $3
+	)
+	AND ($5::bigint = 0 OR (COALESCE(a.last_active_at, '0001-01-01 00:00:00+00'::timestamptz), u.id) < (to_timestamp(($5::double precision) / 1000000.0), $6::bigint))
+ORDER BY COALESCE(a.last_active_at, '0001-01-01 00:00:00+00'::timestamptz) DESC, u.id DESC
+LIMIT $7`, id, phonePrefix, substring, term, beforeActiveUS, beforeID, limit+1)
 	if err != nil {
-		return nil, fmt.Errorf("search accounts: %w", err)
+		return nil, false, fmt.Errorf("search accounts: %w", err)
 	}
 	defer rows.Close()
-	out := make([]AccountRow, 0)
+	out := make([]AccountRow, 0, limit+1)
 	for rows.Next() {
 		var item AccountRow
 		if err := rows.Scan(&item.ID, &item.Phone, &item.Username, &item.FirstName, &item.LastName, &item.CreatedAt, &item.UpdatedAt, &item.Frozen, &item.Reason, &item.Verified, &item.Scam, &item.Fake, &item.PremiumUntil, &item.LastActiveAt, &item.DeviceCount, &item.Username, &item.LoginEmail); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	hasMore := len(out) > limit
+	if hasMore {
+		out = out[:limit]
+	}
+	return out, hasMore, nil
+}
+
+// systemAccountIDs excludes telesrv's built-in accounts (domain.SystemUserByID)
+// from counts meant to reflect real end users. BotFather/Stickers/ChatBot are
+// already is_bot=true and excluded that way, but the official 777000 service
+// account is deliberately NOT flagged is_bot (see domain.OfficialSystemUser)
+// so it still needs an explicit exclusion here.
+var systemAccountIDs = []int64{
+	domain.OfficialSystemUserID,
+	domain.BotFatherUserID,
+	domain.StickersBotUserID,
+	domain.ChatBotUserID,
+}
+
+// CountAccounts returns the total number of real (non-bot, non-system) user accounts.
+func (s *readStore) CountAccounts(ctx context.Context) (int64, error) {
+	var n int64
+	if err := s.pool.QueryRow(ctx, `
+SELECT count(*) FROM users WHERE NOT is_bot AND id <> ALL($1::bigint[])`,
+		systemAccountIDs).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count accounts: %w", err)
+	}
+	return n, nil
+}
+
+// CountOnlineAccounts counts accounts the live server currently considers
+// online. Presence itself lives only in the live server's in-process
+// presenceTracker (internal/rpc/presence.go), unreachable from this
+// out-of-process admin panel, but that tracker persists users.last_seen_at
+// continuously (at most every lastSeenPersistDebounce=25s) while a session
+// stays online -- unlike authorizations.active_at, which is only touched at
+// new-session/layer-negotiation time and goes stale for a long-lived
+// connection. last_seen_at within the same userOnlineTTL=5m window the
+// server itself uses is therefore the closest DB-side proxy available.
+func (s *readStore) CountOnlineAccounts(ctx context.Context) (int64, error) {
+	var n int64
+	if err := s.pool.QueryRow(ctx, `
+SELECT count(*)
+FROM users
+WHERE NOT is_bot
+  AND id <> ALL($1::bigint[])
+  AND last_seen_at > extract(epoch FROM now() - interval '5 minutes')::bigint`,
+		systemAccountIDs).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count online accounts: %w", err)
+	}
+	return n, nil
 }
 
 type BotRow struct {

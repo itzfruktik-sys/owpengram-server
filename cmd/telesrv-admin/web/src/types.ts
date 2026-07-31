@@ -354,6 +354,11 @@ export type AccountListResponse = {
   listing: boolean;
 };
 
+export type AccountStatsResponse = {
+  total: number;
+  online: number;
+};
+
 export type ChannelListResponse = {
   query: string;
   limit: number;

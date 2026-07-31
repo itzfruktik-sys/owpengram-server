@@ -1,6 +1,7 @@
 import type {
   AccountDetail,
   AccountListResponse,
+  AccountStatsResponse,
   BotDetail,
   BotListResponse,
   ChannelDetail,
@@ -58,6 +59,7 @@ export const api = {
   }),
   logout: () => request<{ ok: boolean }>("/api/logout", { method: "POST", body: "{}" }),
   accounts: (params: URLSearchParams) => request<AccountListResponse>(`/api/accounts?${params.toString()}`),
+  accountStats: () => request<AccountStatsResponse>("/api/accounts/stats"),
   account: (id: number) => request<AccountDetail>(`/api/accounts/${id}`),
   channels: (params: URLSearchParams) => request<ChannelListResponse>(`/api/channels?${params.toString()}`),
   channel: (id: number) => request<ChannelDetail>(`/api/channels/${id}`),

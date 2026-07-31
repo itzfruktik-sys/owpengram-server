@@ -50,6 +50,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/logout", s.handleAPILogout)
 	mux.Handle("GET /api/session", s.requireAuthAPI(http.HandlerFunc(s.handleSession)))
 	mux.Handle("GET /api/accounts", s.requireAuthAPI(http.HandlerFunc(s.handleAccountsAPI)))
+	mux.Handle("GET /api/accounts/stats", s.requireAuthAPI(http.HandlerFunc(s.handleAccountsStatsAPI)))
 	mux.Handle("GET /api/accounts/{id}", s.requireAuthAPI(http.HandlerFunc(s.handleAccountDetailAPI)))
 	mux.Handle("GET /api/accounts/{id}/avatar", s.requireAuthAPI(http.HandlerFunc(s.handleAccountAvatarAPI)))
 	mux.Handle("GET /api/channels", s.requireAuthAPI(http.HandlerFunc(s.handleChannelsAPI)))
@@ -409,7 +410,7 @@ func (s *server) handleAccountsAPI(w http.ResponseWriter, r *http.Request) {
 	hasMore := false
 	var err error
 	if strings.TrimSpace(q) != "" {
-		rows, err = s.read.SearchAccounts(r.Context(), q)
+		rows, hasMore, err = s.read.SearchAccounts(r.Context(), q, beforeActiveUS, beforeID, limit)
 	} else {
 		rows, hasMore, err = s.read.ListAccounts(r.Context(), beforeActiveUS, beforeID, limit)
 	}
@@ -438,6 +439,27 @@ func (s *server) handleAccountsAPI(w http.ResponseWriter, r *http.Request) {
 		"next_before_id":        nextBeforeID,
 		"next_before_active_us": nextBeforeActiveUS,
 		"listing":               strings.TrimSpace(q) == "",
+	})
+}
+
+func (s *server) handleAccountsStatsAPI(w http.ResponseWriter, r *http.Request) {
+	if s.read == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "read store is not configured")
+		return
+	}
+	total, err := s.read.CountAccounts(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	online, err := s.read.CountOnlineAccounts(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total":  total,
+		"online": online,
 	})
 }
 

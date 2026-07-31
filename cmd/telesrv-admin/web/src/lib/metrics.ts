@@ -4,11 +4,9 @@ export function accountMetrics(rows: AccountRow[]) {
   return rows.reduce(
     (acc, row) => {
       acc.devices += row.DeviceCount;
-      if (row.PremiumUntil > 0) acc.premium += 1;
-      if (row.Frozen) acc.frozen += 1;
       return acc;
     },
-    { devices: 0, premium: 0, frozen: 0 }
+    { devices: 0 }
   );
 }
 
