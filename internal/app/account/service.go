@@ -411,12 +411,46 @@ func (s *Service) RequestPasswordRecovery(ctx context.Context, userID int64) (st
 	if !settings.HasPassword || settings.RecoveryEmail == "" {
 		return "", domain.ErrPasswordRecoveryNA
 	}
-	settings.RecoveryCode = recoveryCode
-	settings.RecoveryCodeExpiresAt = time.Now().Unix() + recoveryCodeTTL
+	// A fixed recovery code was used here regardless of whether it was
+	// actually emailed anywhere, which let anyone reset 2FA on any account
+	// with a recovery email set. Recovery now requires a real sender and a
+	// freshly generated code delivered to it -- no sender, no recovery.
+	if s.loginEmailSender == nil {
+		return "", domain.ErrPasswordRecoveryNA
+	}
+	code, err := randomDigits(s.loginEmailCodeLength)
+	if err != nil {
+		return "", err
+	}
+	deliveryID, err := otpdelivery.NewDeliveryID()
+	if err != nil {
+		return "", err
+	}
+	expiresAtUnix := time.Now().Unix() + recoveryCodeTTL
+	expiresAt := time.Unix(expiresAtUnix, 0)
+	settings.RecoveryCode = code
+	settings.RecoveryCodeExpiresAt = expiresAtUnix
 	if s.passwords != nil {
 		if err := s.passwords.Save(ctx, userID, settings); err != nil {
 			return "", err
 		}
+	}
+	if err := deliverOTP(ctx, s.loginEmailSender, otpdelivery.Request{
+		DeliveryID: deliveryID,
+		Purpose:    otpdelivery.PurposePasswordRecovery,
+		Channel:    otpdelivery.ChannelEmail,
+		Recipient:  settings.RecoveryEmail,
+		Code:       code,
+		ExpiresAt:  expiresAt,
+	}); err != nil {
+		if s.passwords != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			defer cancel()
+			settings.RecoveryCode = ""
+			settings.RecoveryCodeExpiresAt = 0
+			_ = s.passwords.Save(cleanupCtx, userID, settings)
+		}
+		return "", err
 	}
 	return emailPattern(settings.RecoveryEmail), nil
 }
@@ -535,10 +569,9 @@ func (s *Service) CancelPasswordEmail(ctx context.Context, userID int64) error {
 }
 
 func checkRecoveryCode(settings domain.PasswordSettings, code string) error {
+	// No standing fixed-code fallback: an unrequested (or already consumed)
+	// recovery must not be satisfiable by any code at all.
 	if settings.RecoveryCode == "" {
-		if code == recoveryCode {
-			return nil
-		}
 		return domain.ErrPasswordRecoveryNA
 	}
 	if settings.RecoveryCodeExpiresAt > 0 && time.Now().Unix() > settings.RecoveryCodeExpiresAt {

@@ -69,7 +69,9 @@ func TestPasswordSRPRoundTrip(t *testing.T) {
 func TestRecoverPasswordClearsTwoFactorPassword(t *testing.T) {
 	ctx := context.Background()
 	const userID int64 = 1002
-	svc := NewService(memory.NewPasswordStore())
+	sender := &captureMailSender{}
+	svc := NewService(memory.NewPasswordStore(),
+		WithLoginEmailVerification(memory.NewCodeStore(), sender, time.Minute, 3, 6))
 
 	initial, err := svc.GetPassword(ctx, userID)
 	if err != nil {
@@ -93,7 +95,10 @@ func TestRecoverPasswordClearsTwoFactorPassword(t *testing.T) {
 	if pattern != "b***b@example.com" {
 		t.Fatalf("recovery pattern = %q, want masked email", pattern)
 	}
-	if err := svc.RecoverPassword(ctx, userID, recoveryCode, nil); err != nil {
+	if sender.to != "bob@example.com" || sender.code == "" {
+		t.Fatalf("sender = %+v, want delivered code to bob@example.com", sender)
+	}
+	if err := svc.RecoverPassword(ctx, userID, sender.code, nil); err != nil {
 		t.Fatalf("RecoverPassword clear: %v", err)
 	}
 	cleared, err := svc.GetPassword(ctx, userID)
