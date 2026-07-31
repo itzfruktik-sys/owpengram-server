@@ -391,6 +391,44 @@ func TestEmailSetupVerificationAuthorizesSignUpWithWelcomeMessageOnlyNoCodeEcho(
 	}
 }
 
+// TestLoginEmailResetUnavailableForEmailSignupAccounts locks down that the
+// SMS-fallback reset must stay refused for email-signup accounts even with a
+// real phoneCodeSender configured: their "phone" is a synthetic display
+// number nobody can receive SMS on, so email is the only real identity
+// factor and must never be strippable via this escape hatch.
+func TestLoginEmailResetUnavailableForEmailSignupAccounts(t *testing.T) {
+	ctx := context.Background()
+	users := memory.NewUserStore()
+	owner, err := users.Create(ctx, domain.User{Phone: "88800009999", FirstName: "Owner"})
+	if err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	codes := memory.NewCodeStore()
+	hash := "email-signup-reset"
+	if err := codes.Set(ctx, hash, store.PhoneCode{
+		Version:      store.PhoneCodeVersionCurrent,
+		IssuedUserID: owner.ID,
+		Phone:        owner.Phone,
+		Code:         "654321",
+		Channel:      codeChannelEmailLogin,
+		MaxAttempts:  5,
+	}, time.Minute); err != nil {
+		t.Fatalf("seed code: %v", err)
+	}
+	svc := NewService(users, memory.NewAuthorizationStore(), codes, nil, nil, "12345",
+		WithPhoneCodeDelivery(&captureOTPSender{}, 5), WithEmailSignup(true))
+
+	if svc.LoginEmailResetAvailable() {
+		t.Fatalf("LoginEmailResetAvailable = true, want false for an email-signup deployment")
+	}
+	if _, err := svc.ConsumeLoginEmailReset(ctx, owner.Phone, hash); !errors.Is(err, ErrCodeInvalid) {
+		t.Fatalf("ConsumeLoginEmailReset err=%v, want ErrCodeInvalid", err)
+	}
+	if _, found, err := codes.Get(ctx, hash); err != nil || !found {
+		t.Fatalf("reset probe destroyed the seeded code found=%v err=%v", found, err)
+	}
+}
+
 func TestConsumeLoginEmailResetRequiresExactIssuedHash(t *testing.T) {
 	ctx := context.Background()
 	baseUsers := memory.NewUserStore()

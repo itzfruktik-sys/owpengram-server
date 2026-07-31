@@ -499,7 +499,7 @@ func tgSMSSentCode(hash string, length int) tg.AuthSentCodeClass {
 	}
 }
 
-func tgEmailSentCode(hash, emailPattern string, length int) tg.AuthSentCodeClass {
+func tgEmailSentCode(hash, emailPattern string, length int, resetAvailable bool) tg.AuthSentCodeClass {
 	if length <= 0 {
 		length = devCodeLength
 	}
@@ -507,9 +507,14 @@ func tgEmailSentCode(hash, emailPattern string, length int) tg.AuthSentCodeClass
 		EmailPattern: emailPattern,
 		Length:       length,
 	}
-	// reset_available_period=0 表示可立即调用 auth.resetLoginEmail（开发环境无等待期），
-	// 让客户端的"无法访问邮箱?"逃生入口可用。
-	codeType.SetResetAvailablePeriod(0)
+	if resetAvailable {
+		// reset_available_period=0 表示可立即调用 auth.resetLoginEmail（开发环境无等待期），
+		// 让客户端的"无法访问邮箱?"逃生入口可用。留空（不调用 Set）时该入口在客户端
+		// 完全不显示——见 auth.Service.LoginEmailResetAvailable：这个逃生入口本来就
+		// 走不通（没有真实短信通道，或邮箱本身就是身份、没有"手机"可退回)时，不应该
+		// 让用户看到一个点了也没用、甚至只会用固定 dev code 顶替的按钮。
+		codeType.SetResetAvailablePeriod(0)
+	}
 	return &tg.AuthSentCode{
 		Type:          codeType,
 		PhoneCodeHash: hash,
@@ -521,6 +526,14 @@ func tgEmailSetupRequiredSentCode(hash string) tg.AuthSentCodeClass {
 		Type:          &tg.AuthSentCodeTypeSetUpEmailRequired{},
 		PhoneCodeHash: hash,
 	}
+}
+
+// loginEmailResetAvailabilityChecker lets tgSentCodeForHash ask whether
+// auth.resetLoginEmail could actually succeed right now, so the client is
+// never shown a "Can't access this email?" escape hatch it cannot use (see
+// auth.Service.LoginEmailResetAvailable / ConsumeLoginEmailReset).
+type loginEmailResetAvailabilityChecker interface {
+	LoginEmailResetAvailable() bool
 }
 
 func (r *Router) tgSentCodeForHash(ctx context.Context, hash string) (tg.AuthSentCodeClass, error) {
@@ -538,7 +551,11 @@ func (r *Router) tgSentCodeForHash(ctx context.Context, hash string) (tg.AuthSen
 	case domain.AuthCodeDeliverySMS:
 		return tgSMSSentCode(hash, delivery.Length), nil
 	case domain.AuthCodeDeliveryEmail:
-		return tgEmailSentCode(hash, delivery.EmailPattern, delivery.Length), nil
+		resetAvailable := false
+		if checker, ok := r.deps.Auth.(loginEmailResetAvailabilityChecker); ok {
+			resetAvailable = checker.LoginEmailResetAvailable()
+		}
+		return tgEmailSentCode(hash, delivery.EmailPattern, delivery.Length, resetAvailable), nil
 	case domain.AuthCodeDeliveryEmailSetupRequired:
 		return tgEmailSetupRequiredSentCode(hash), nil
 	default:

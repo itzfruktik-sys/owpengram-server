@@ -47,6 +47,44 @@ func TestEmailSentCodeUsesDeliveryLength(t *testing.T) {
 	}
 }
 
+// TestEmailSentCodeOmitsResetPeriodWhenUnavailable locks down the client
+// signal for "this server can't service auth.resetLoginEmail" (no real SMS
+// sender, or login email is this account's actual identity): the flags-
+// optional reset_available_period field must be entirely absent, not merely
+// 0, since 0 is also what "available right now" looks like on the wire.
+func TestEmailSentCodeOmitsResetPeriodWhenUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		resetAvailable bool
+	}{
+		{name: "unavailable", resetAvailable: false},
+		{name: "available", resetAvailable: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			authSvc := &captureAuthService{
+				codeDelivery: domain.AuthCodeDelivery{
+					Kind:         domain.AuthCodeDeliveryEmail,
+					EmailPattern: "a***e@example.test",
+					Length:       6,
+				},
+				resetAvailable: tc.resetAvailable,
+			}
+			r := New(Config{}, Deps{Auth: authSvc}, zaptest.NewLogger(t), fixedClock{now: time.Unix(1700000000, 0)})
+
+			sent, err := r.tgSentCodeForHash(context.Background(), "hash-email")
+			if err != nil {
+				t.Fatalf("tgSentCodeForHash: %v", err)
+			}
+			code := sent.(*tg.AuthSentCode)
+			emailType := code.Type.(*tg.AuthSentCodeTypeEmailCode)
+			_, ok := emailType.GetResetAvailablePeriod()
+			if ok != tc.resetAvailable {
+				t.Fatalf("reset_available_period present = %v, want %v", ok, tc.resetAvailable)
+			}
+		})
+	}
+}
+
 func TestAuthSignInRoutesOfficialEmailCodeCarriers(t *testing.T) {
 	const (
 		phone = "+86 188 0000 0021"

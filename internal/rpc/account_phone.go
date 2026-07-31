@@ -36,7 +36,7 @@ func (r *Router) onAccountSendChangePhoneCode(ctx context.Context, req *tg.Accou
 		return nil, phoneChangeErr(err)
 	}
 	if delivery.Kind == domain.AuthCodeDeliveryEmail {
-		return tgEmailSentCode(hash, delivery.EmailPattern, delivery.Length), nil
+		return tgEmailSentCode(hash, delivery.EmailPattern, delivery.Length, true), nil
 	}
 	return tgSMSSentCode(hash, delivery.Length), nil
 }

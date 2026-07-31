@@ -863,17 +863,34 @@ func (s *Service) CancelCodeForAuthKey(ctx context.Context, authKeyID [8]byte, p
 	return s.cancelCode(ctx, authKeyID, phone, phoneCodeHash)
 }
 
+// LoginEmailResetAvailable reports whether auth.resetLoginEmail's SMS
+// fallback could actually succeed on this deployment -- the exact same
+// condition ConsumeLoginEmailReset enforces. The RPC layer uses this to
+// decide whether to advertise reset_available_period at all, so the client
+// never offers a "Can't access this email?" escape hatch that can only ever
+// fail (or, before this was locked down, silently succeed with the
+// well-known fixed dev code).
+func (s *Service) LoginEmailResetAvailable() bool {
+	return s.phoneCodeSender != nil && !s.emailSignupEnabled
+}
+
 // ConsumeLoginEmailReset authorizes auth.resetLoginEmail with the exact
 // email-login hash previously issued for this phone owner. Possession of only
 // a phone number is never sufficient to remove an authentication factor.
 func (s *Service) ConsumeLoginEmailReset(ctx context.Context, phone, phoneCodeHash string) (int64, error) {
 	// This flow exists to fall back to an SMS code when the login email is
-	// unreachable. Without a real phoneCodeSender configured, that "SMS code"
-	// is always the well-known TELESRV_DEV_AUTH_CODE (see createPhoneCode),
-	// so anyone who can call sendCode for a phone (no email access required)
-	// could strip the login-email requirement with a publicly known code.
-	// Refuse up front, before ClearLoginEmail runs, so nothing is mutated.
-	if s.phoneCodeSender == nil {
+	// unreachable. Two independent reasons it must refuse outright, before
+	// ClearLoginEmail runs so nothing is ever mutated on a doomed request:
+	//   - no real phoneCodeSender: the "SMS code" is always the well-known
+	//     TELESRV_DEV_AUTH_CODE (see createPhoneCode), so anyone who can call
+	//     sendCode for a phone (no email access required) could strip the
+	//     login-email requirement with a publicly known code.
+	//   - emailSignupEnabled: this account's "phone" is a synthetic 888-
+	//     prefixed display number (domain.NewEmailSignupDisplayPhone), never
+	//     a real number anyone can receive SMS on. Email is the actual
+	//     identity here regardless of whether a real SMS sender happens to
+	//     be configured for other (real-phone) accounts on this server.
+	if s.phoneCodeSender == nil || s.emailSignupEnabled {
 		return 0, ErrCodeInvalid
 	}
 	phone = normalizePhone(phone)
