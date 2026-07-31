@@ -21,6 +21,7 @@ import json
 import os
 import platform
 import re
+import secrets
 import shutil
 import signal
 import subprocess
@@ -35,7 +36,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Collapsible, DataTable, Footer, Header, Input, Label, OptionList, ProgressBar, RichLog, Static
+from textual.widgets import Button, Checkbox, Collapsible, DataTable, Footer, Header, Input, Label, OptionList, ProgressBar, RichLog, Static
 from textual.widgets.option_list import Option
 
 IS_WINDOWS = platform.system() == "Windows"
@@ -307,6 +308,14 @@ MANAGER = ServerManager()
 
 
 # --- .env / clipboard / system stats helpers --------------------------------
+
+
+def is_initialized() -> bool:
+    """Whether this install has ever been through Setup. .env not existing
+    yet is the one reliable signal -- everything else (bin/, containers)
+    could plausibly be absent even on a configured install (e.g. right after
+    `docker compose down` or before the first build)."""
+    return ENV_FILE.exists()
 
 
 def read_env_value(key: str) -> str | None:
@@ -779,6 +788,277 @@ class EnvEditorScreen(Screen):
         self.dismiss()
 
 
+@dataclass
+class SetupField:
+    key: str
+    label: str
+    description: str = ""
+    required: bool = False
+    secret: bool = False
+    checkbox: bool = False
+
+
+SETUP_FIELDS: list[tuple[str, list[SetupField]]] = [
+    ("Server & Network", [
+        SetupField(
+            "TELESRV_ADVERTISE_IP", "Server public IP or hostname",
+            "What clients use to reach this server -- your VPS's public IP, "
+            "or a domain name if you have one pointed at it.",
+            required=True,
+        ),
+    ]),
+    ("Phone Login Codes", [
+        SetupField(
+            "TELESRV_DEV_AUTH_CODE", "Fixed dev code",
+            "Accepted for every phone number as long as no webhook is set "
+            "below -- fine for personal/testing use, but it's a well-known "
+            "default, so change it if this server will be reachable by "
+            "anyone else.",
+        ),
+        SetupField(
+            "TELESRV_OTP_WEBHOOK_URL", "OTP webhook URL -- optional",
+            "Leave blank to keep using the fixed dev code above. Fill in "
+            "to send real, per-login codes to phone numbers via your own "
+            "webhook endpoint instead (see docs/otp-delivery.md).",
+        ),
+        SetupField("TELESRV_OTP_WEBHOOK_SECRET", "OTP webhook secret", secret=True),
+    ]),
+    ("Public Links & Branding", [
+        SetupField(
+            "TELESRV_PUBLIC_BASE_URL", "Public base URL",
+            "Used for links this server generates (invites, sticker packs). "
+            "e.g. https://example.com",
+            required=True,
+        ),
+        SetupField(
+            "TELESRV_PUBLIC_APP_SCHEME", "Custom app link scheme",
+            "Must match what your client builds were compiled with (e.g. owpg).",
+            required=True,
+        ),
+        SetupField(
+            "TELESRV_PUBLIC_APP_NAME", "Product name",
+            "Shown on public landing pages.",
+        ),
+    ]),
+    ("Email Login & Signup -- optional", [
+        SetupField(
+            "TELESRV_LOGIN_EMAIL_ENABLE", "Allow email as a login method",
+            "Lets an existing phone-number account also add an email "
+            "address for login codes. Needs the SMTP fields below filled "
+            "in to actually deliver anything -- phone login keeps working "
+            "either way.",
+            checkbox=True,
+        ),
+        SetupField(
+            "TELESRV_EMAIL_SIGNUP_ENABLE", "Register with email instead of a phone number",
+            "Lets people sign up with just an email address. The account "
+            "still gets a phone number under the hood (the protocol needs "
+            "one), but it's a random one auto-generated from the prefixes "
+            "below, not something the user provides. Also needs SMTP "
+            "configured below to actually send codes.",
+            checkbox=True,
+        ),
+        SetupField(
+            "TELESRV_EMAIL_SIGNUP_PHONE_PREFIXES", "Random phone number prefixes",
+            "Comma-separated prefixes used to generate that random phone "
+            "number shown on email-signup accounts (e.g. \"888,380\") -- "
+            "purely cosmetic, doesn't need a client update to change.",
+        ),
+        SetupField(
+            "TELESRV_SMTP_HOST", "SMTP host",
+            "Required to actually deliver email codes if either checkbox "
+            "above is on. Leave every SMTP field blank to leave both "
+            "unchecked for now -- phone login already works out of the "
+            "box. You can always fill this in later from Configure .env.",
+        ),
+        SetupField("TELESRV_SMTP_PORT", "SMTP port"),
+        SetupField("TELESRV_SMTP_USERNAME", "SMTP username"),
+        SetupField("TELESRV_SMTP_PASSWORD", "SMTP password", secret=True),
+        SetupField("TELESRV_SMTP_FROM", "SMTP from address"),
+        SetupField(
+            "TELESRV_SMTP_TLS", "SMTP encryption",
+            "starttls, tls, or none -- use \"none\" only for a local test "
+            "server like Mailpit that doesn't support encryption at all.",
+        ),
+    ]),
+    ("Admin Panel", [
+        SetupField(
+            "TELESRV_ADMIN_UI_PASSWORD", "Admin panel password",
+            "Required, and chosen by you -- unlike the API token and "
+            "session key below, this is never auto-generated.",
+            required=True, secret=True,
+        ),
+    ]),
+]
+
+
+class SetupWizardScreen(Screen):
+    """Shown instead of Start/Stop on a fresh install (no .env yet). Asks
+    only the handful of values that actually need a human decision; every
+    other field gets its .env.example template default. The admin API token
+    and session key are generated here automatically -- the admin *password*
+    is deliberately not, since that's the one secret meant to be something
+    the operator actually chose and remembers."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Same template defaults the regular .env editor uses, so e.g. the
+        # app scheme/name fields start pre-filled with "owpg"/"OwpenGram"
+        # instead of empty -- fields with no sensible universal default
+        # (advertise IP, base URL, admin password) just come back empty.
+        self._template_values: dict[str, str] = current_env_values(parse_env_template())
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Static("First-time setup", id="env-title")
+        yield Static(
+            "This runs once. Fields marked [b]required[/] need an answer; "
+            "everything else can be left blank and configured later from "
+            "Configure .env. The admin API token and session key are "
+            "generated automatically -- only the admin password is yours "
+            "to choose.",
+            id="setup-intro",
+        )
+        with VerticalScroll(id="env-scroll"):
+            for title, fields in SETUP_FIELDS:
+                with Vertical(classes="env-field-group"):
+                    yield Static(title, classes="setup-section-title")
+                    for f in fields:
+                        with Vertical(classes="env-field"):
+                            if f.checkbox:
+                                checked = self._template_values.get(f.key, "").strip().lower() == "true"
+                                yield Checkbox(f.label, value=checked, id=self._input_id(f.key))
+                                if f.description:
+                                    yield Static(f.description, classes="env-field-desc")
+                            else:
+                                badge = "  [b red](required)[/]" if f.required else ""
+                                yield Static(f"[b]{f.label}[/]{badge}", classes="env-field-key")
+                                if f.description:
+                                    yield Static(f.description, classes="env-field-desc")
+                                yield Input(
+                                    value=self._template_values.get(f.key, ""),
+                                    password=f.secret,
+                                    id=self._input_id(f.key),
+                                )
+        with Horizontal(id="env-actions"):
+            yield Button("Begin setup", id="setup-begin-button", variant="success")
+            yield Button("Cancel", id="setup-cancel-button", variant="default")
+        yield Footer()
+
+    @staticmethod
+    def _input_id(key: str) -> str:
+        return f"setup-{key}"
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "setup-begin-button":
+            self.action_begin()
+        elif event.button.id == "setup-cancel-button":
+            self.action_cancel()
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+    def action_begin(self) -> None:
+        answers: dict[str, str] = {}
+        missing: list[str] = []
+        for _, fields in SETUP_FIELDS:
+            for f in fields:
+                if f.checkbox:
+                    checked = self.query_one(f"#{self._input_id(f.key)}", Checkbox).value
+                    answers[f.key] = "true" if checked else "false"
+                    continue
+                value = self.query_one(f"#{self._input_id(f.key)}", Input).value.strip()
+                answers[f.key] = value
+                if f.required and not value:
+                    missing.append(f.label)
+        if missing:
+            self.notify(f"Please fill in: {', '.join(missing)}", severity="error", timeout=6)
+            return
+
+        values = dict(self._template_values)
+        values.update(answers)
+
+        webhook_configured = bool(answers.get("TELESRV_OTP_WEBHOOK_URL"))
+        values["TELESRV_PHONE_CODE_DELIVERY_PROVIDER"] = "webhook" if webhook_configured else "development"
+
+        values["TELESRV_ADMIN_API_TOKEN"] = secrets.token_hex(32)
+        values["TELESRV_ADMIN_SESSION_KEY"] = secrets.token_urlsafe(32)
+
+        try:
+            save_env(values)
+        except OSError as exc:
+            self.notify(f"Failed to write .env: {exc}", severity="error", timeout=10)
+            return
+
+        self.dismiss(True)
+
+
+START_STEPS: list[tuple[str, str]] = [
+    ("docker", "Starting Docker infrastructure"),
+    ("postgres", "Waiting for PostgreSQL"),
+    ("build", "Building binaries"),
+    ("launch", "Launching binaries"),
+]
+RESTART_STEPS: list[tuple[str, str]] = [
+    ("stop", "Stopping current instance"),
+    *START_STEPS,
+]
+
+_STEP_ICONS = {
+    "active": "[b yellow]●[/]",
+    "done": "[b green]✓[/]",
+    "failed": "[b red]✗[/]",
+}
+
+
+class StartupProgressScreen(Screen):
+    """Persistent step checklist shown during Start/Restart, replacing the
+    old toast-only feedback. Not dismissible until the sequence finishes
+    (success or failure) -- there's no Escape binding while it's running,
+    just the Close button, which stays disabled until then."""
+
+    def __init__(self, title: str, steps: list[tuple[str, str]]) -> None:
+        super().__init__()
+        self._title = title
+        self._steps = steps
+        self._labels = dict(steps)
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Static(self._title, id="startup-title")
+        with Vertical(id="startup-steps"):
+            for key, label in self._steps:
+                yield Static(f"○ {label}", id=f"startup-step-{key}", classes="startup-step")
+        yield Static("", id="startup-result")
+        with Horizontal(id="startup-actions"):
+            yield Button("Close", id="startup-close-button", variant="default", disabled=True)
+        yield Footer()
+
+    def set_step(self, key: str, status: str, detail: str = "") -> None:
+        icon = _STEP_ICONS.get(status, "○")
+        text = f"{icon} {self._labels.get(key, key)}"
+        if detail:
+            text += f"  [dim]{detail}[/]"
+        try:
+            self.query_one(f"#startup-step-{key}", Static).update(text)
+        except Exception:  # noqa: BLE001 - screen may already be gone
+            pass
+
+    def finish(self, success: bool, message: str) -> None:
+        try:
+            result = self.query_one("#startup-result", Static)
+            result.update(f"[b green]{message}[/]" if success else f"[b red]{message}[/]")
+            self.query_one("#startup-close-button", Button).disabled = False
+        except Exception:  # noqa: BLE001 - screen may already be gone
+            pass
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "startup-close-button":
+            self.dismiss()
+
+
 class MainScreen(Screen):
     BINDINGS = [
         Binding("1", "start", "Start"),
@@ -788,6 +1068,10 @@ class MainScreen(Screen):
         Binding("5", "env", "Configure .env"),
         Binding("q", "quit_panel", "Exit"),
     ]
+
+    def __init__(self, auto_start: bool = False) -> None:
+        super().__init__()
+        self._auto_start = auto_start
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -804,20 +1088,27 @@ class MainScreen(Screen):
                 yield ProgressBar(total=100, id="ram-bar", show_eta=False)
                 yield Label("Disk", id="disk-label", classes="stat-label")
                 yield ProgressBar(total=100, id="disk-bar", show_eta=False)
-                yield Label("Server", classes="panel-title")
-                yield CopyButton("Address", server_address(), self._handle_copy_click, id="server-address")
-                yield CopyButton("Public key", server_public_key_pem(), self._handle_copy_click, masked=True, id="server-public-key")
-                yield Label("Admin UI", classes="panel-title")
-                yield Static(id="admin-link")
-                yield self._admin_password_widget()
-        yield OptionList(
-            Option("Start server", id="start"),
-            Option("Stop server", id="stop"),
-            Option("Restart server", id="restart"),
-            Option("View logs", id="logs"),
-            Option("Configure .env", id="env"),
-            Option("Exit panel (server keeps running)", id="exit"),
-        )
+                with Vertical(id="server-info-section"):
+                    yield Label("Server", classes="panel-title")
+                    yield CopyButton("Address", server_address(), self._handle_copy_click, id="server-address")
+                    yield CopyButton("Public key", server_public_key_pem(), self._handle_copy_click, masked=True, id="server-public-key")
+                    yield Label("Admin UI", classes="panel-title")
+                    yield Static(id="admin-link")
+                    yield self._admin_password_widget()
+        if is_initialized():
+            yield OptionList(
+                Option("Start server", id="start"),
+                Option("Stop server", id="stop"),
+                Option("Restart server", id="restart"),
+                Option("View logs", id="logs"),
+                Option("Configure .env", id="env"),
+                Option("Exit panel (server keeps running)", id="exit"),
+            )
+        else:
+            yield OptionList(
+                Option("Setup", id="setup"),
+                Option("Exit panel", id="exit"),
+            )
         yield Footer()
 
     def _admin_password_widget(self) -> CopyButton:
@@ -848,6 +1139,8 @@ class MainScreen(Screen):
         self.set_interval(3, self.refresh_status)
         self.set_interval(2, self.refresh_stats)
         self.set_interval(3, self.refresh_config_widgets)
+        if self._auto_start:
+            self.action_start()
 
     def refresh_status(self) -> None:
         status = MANAGER.status()
@@ -870,6 +1163,11 @@ class MainScreen(Screen):
             else:
                 cell = f"[b red]● {state.upper()}[/]"
             table.add_row(name, "container", cell)
+
+        # Address/public key/admin UI info is only meaningful while the
+        # server is actually up -- e.g. the admin UI address isn't reachable
+        # at all when the process behind it isn't running.
+        self.query_one("#server-info-section").display = status.server_alive
 
     def refresh_stats(self) -> None:
         cpu, ram, disk = system_stats()
@@ -911,8 +1209,20 @@ class MainScreen(Screen):
             self.action_logs()
         elif option_id == "env":
             self.action_env()
+        elif option_id == "setup":
+            self.action_setup()
         elif option_id == "exit":
             self.action_quit_panel()
+
+    def action_setup(self) -> None:
+        self.app.push_screen(SetupWizardScreen(), self._after_setup)
+
+    def _after_setup(self, completed: bool | None) -> None:
+        if completed:
+            # A fresh MainScreen recomposes the OptionList as the full
+            # Start/Stop/... menu now that .env exists, and immediately
+            # kicks off the same first-start sequence the Start action uses.
+            self.app.switch_screen(MainScreen(auto_start=True))
 
     def action_logs(self) -> None:
         self.app.push_screen(LogPickerScreen())
@@ -959,38 +1269,47 @@ class MainScreen(Screen):
             self.notify(".env not found — copy .env.example to .env and configure it first", severity="error")
             return
         self.query_one(OptionList).disabled = True
-        self._begin_start()
+        progress = StartupProgressScreen("Starting server", START_STEPS)
+        self.app.push_screen(progress)
+        self._begin_start(progress)
 
-    def _begin_start(self) -> None:
+    def _begin_start(self, progress: StartupProgressScreen) -> None:
         """Runs on the main thread: naming resolution may need suspend()."""
         try:
             project, prefix = self._resolve_naming()
         except Exception as exc:  # noqa: BLE001 - never leave the menu stuck
-            self.notify(f"Naming resolution failed: {exc}", severity="error", timeout=10)
+            progress.finish(False, f"Naming resolution failed: {exc}")
             self._unlock_menu()
             return
-        self._start_rest(project, prefix)
+        self._start_rest(project, prefix, progress)
 
     @work(thread=True, exclusive=True)
-    def _start_rest(self, project: str, prefix: str) -> None:
+    def _start_rest(self, project: str, prefix: str, progress: StartupProgressScreen) -> None:
         try:
-            self.app.call_from_thread(self.notify, "Starting Docker infrastructure...")
+            self.app.call_from_thread(progress.set_step, "docker", "active")
             ok, out = MANAGER.docker_compose_up(project, prefix)
             if not ok:
-                self.app.call_from_thread(self.notify, f"docker compose up failed:\n{out[-500:]}", severity="error", timeout=10)
+                self.app.call_from_thread(progress.set_step, "docker", "failed")
+                self.app.call_from_thread(progress.finish, False, f"docker compose up failed:\n{out[-300:]}")
                 return
+            self.app.call_from_thread(progress.set_step, "docker", "done")
 
-            self.app.call_from_thread(self.notify, "Waiting for PostgreSQL...")
+            self.app.call_from_thread(progress.set_step, "postgres", "active")
             if not MANAGER.wait_postgres(prefix):
-                self.app.call_from_thread(self.notify, "PostgreSQL not ready after 60s", severity="error")
+                self.app.call_from_thread(progress.set_step, "postgres", "failed")
+                self.app.call_from_thread(progress.finish, False, "PostgreSQL not ready after 60s")
                 return
+            self.app.call_from_thread(progress.set_step, "postgres", "done")
 
-            self.app.call_from_thread(self.notify, "Building binaries...")
+            self.app.call_from_thread(progress.set_step, "build", "active")
             ok, out = MANAGER.build()
             if not ok:
-                self.app.call_from_thread(self.notify, f"Build failed:\n{out[-500:]}", severity="error", timeout=10)
+                self.app.call_from_thread(progress.set_step, "build", "failed")
+                self.app.call_from_thread(progress.finish, False, f"Build failed:\n{out[-300:]}")
                 return
+            self.app.call_from_thread(progress.set_step, "build", "done")
 
+            self.app.call_from_thread(progress.set_step, "launch", "active")
             server_pid = MANAGER.launch(SERVER_EXE, SERVER_LOG)
             admin_pid = MANAGER.launch(ADMIN_EXE, ADMIN_LOG)
             save_state({
@@ -999,9 +1318,10 @@ class MainScreen(Screen):
                 "docker_project": project,
                 "docker_prefix": prefix,
             })
-            self.app.call_from_thread(self.notify, "Server started")
+            self.app.call_from_thread(progress.set_step, "launch", "done")
+            self.app.call_from_thread(progress.finish, True, "Server started")
         except Exception as exc:  # noqa: BLE001 - never leave the menu stuck
-            self.app.call_from_thread(self.notify, f"Start failed: {exc}", severity="error", timeout=10)
+            self.app.call_from_thread(progress.finish, False, f"Start failed: {exc}")
         finally:
             self.app.call_from_thread(self._unlock_menu)
 
@@ -1037,23 +1357,27 @@ class MainScreen(Screen):
 
     def action_restart(self) -> None:
         self.query_one(OptionList).disabled = True
-        self._restart_worker()
+        progress = StartupProgressScreen("Restarting server", RESTART_STEPS)
+        self.app.push_screen(progress)
+        self._restart_worker(progress)
 
     @work(thread=True, exclusive=True)
-    def _restart_worker(self) -> None:
+    def _restart_worker(self, progress: StartupProgressScreen) -> None:
         try:
+            self.app.call_from_thread(progress.set_step, "stop", "active")
             status = MANAGER.status()
             if status.running:
-                self.app.call_from_thread(self.notify, "Restarting: stopping...")
                 MANAGER.stop()
+            self.app.call_from_thread(progress.set_step, "stop", "done")
         except Exception as exc:  # noqa: BLE001 - never leave the menu stuck
-            self.app.call_from_thread(self.notify, f"Restart (stop phase) failed: {exc}", severity="error", timeout=10)
+            self.app.call_from_thread(progress.set_step, "stop", "failed")
+            self.app.call_from_thread(progress.finish, False, f"Restart (stop phase) failed: {exc}")
             self.app.call_from_thread(self._unlock_menu)
             return
         # Hand off to the main thread: starting back up needs to run there
         # (naming resolution may call suspend()), and _start_rest takes over
         # unlocking the menu once it's done.
-        self.app.call_from_thread(self._begin_start)
+        self.app.call_from_thread(self._begin_start, progress)
 
 
 class ServerPanelApp(App):
@@ -1142,6 +1466,41 @@ class ServerPanelApp(App):
     }
     #env-actions Button {
         margin-left: 1;
+    }
+    #setup-intro {
+        color: $text-muted;
+        padding: 0 2 1 2;
+    }
+    .env-field-group {
+        height: auto;
+        margin-bottom: 1;
+    }
+    .setup-section-title {
+        text-style: bold;
+        color: $accent;
+        margin: 1 0 0 2;
+    }
+    #startup-title {
+        text-style: bold;
+        color: $accent;
+        padding: 1 2 0 2;
+    }
+    #startup-steps {
+        height: auto;
+        padding: 1 2;
+    }
+    .startup-step {
+        height: auto;
+        margin-bottom: 1;
+    }
+    #startup-result {
+        height: auto;
+        padding: 0 2 1 2;
+    }
+    #startup-actions {
+        height: auto;
+        padding: 1 2;
+        align: right middle;
     }
     LogTailScreen Horizontal {
         height: 1fr;
