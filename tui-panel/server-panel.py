@@ -607,11 +607,18 @@ class CopyButton(Static):
 
 
 class LogTailScreen(Screen):
-    """Live-tails one or two log files. Escape/b goes back to the main menu."""
+    """Live-tails one or two log files. Escape/b goes back to the main menu.
+
+    RichLog renders through the terminal like everything else in this app,
+    so plain mouse-drag text selection doesn't reach the terminal -- Textual
+    captures the mouse for widget interaction instead. "c" copies everything
+    shown so far (all panes, with headers) as a workaround, using the same
+    clipboard/OSC 52 fallback as the CopyButton widgets."""
 
     BINDINGS = [
         Binding("escape", "back", "Back"),
         Binding("b", "back", "Back"),
+        Binding("c", "copy_logs", "Copy logs"),
     ]
 
     def __init__(self, panes: list[tuple[str, Path]]):
@@ -619,6 +626,7 @@ class LogTailScreen(Screen):
         self._panes = panes
         self._offsets: dict[Path, int] = {path: 0 for _, path in panes}
         self._logs: dict[Path, RichLog] = {}
+        self._buffers: dict[Path, list[str]] = {path: [] for _, path in panes}
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -649,6 +657,7 @@ class LogTailScreen(Screen):
         text = data.decode("utf-8", errors="replace")
         if text:
             self._logs[path].write(text)
+            self._buffers[path].append(text)
 
     def _poll(self) -> None:
         for _, path in self._panes:
@@ -664,10 +673,24 @@ class LogTailScreen(Screen):
                     f.seek(offset)
                     data = f.read()
                 self._offsets[path] = size
-                self._logs[path].write(data.decode("utf-8", errors="replace"))
+                text = data.decode("utf-8", errors="replace")
+                self._logs[path].write(text)
+                self._buffers[path].append(text)
 
     def action_back(self) -> None:
         self.app.pop_screen()
+
+    def action_copy_logs(self) -> None:
+        parts = []
+        for title, path in self._panes:
+            content = "".join(self._buffers[path]).strip()
+            parts.append(f"--- {title} ({path.name}) ---\n{content or '(no logs yet)'}")
+        text = "\n\n".join(parts)
+        if copy_to_clipboard(text):
+            self.notify("Logs copied to clipboard")
+            return
+        self.app.copy_to_clipboard(text)
+        self.notify("Logs copied to clipboard")
 
 
 class LogPickerScreen(Screen):
@@ -803,7 +826,12 @@ SETUP_FIELDS: list[tuple[str, list[SetupField]]] = [
         SetupField(
             "TELESRV_ADVERTISE_IP", "Server public IP or hostname",
             "What clients use to reach this server -- your VPS's public IP, "
-            "or a domain name if you have one pointed at it.",
+            "or a domain name if you have one pointed at it. Calls (TURN/SFU) "
+            "are the one exception: they need a literal IP address, not a "
+            "hostname, and default to reusing this value -- if you enter a "
+            "hostname here and want calls to work, set "
+            "TELESRV_TURN_ADVERTISE_IP / TELESRV_SFU_ADVERTISE_IP to a real "
+            "IP separately afterward, from Configure .env.",
             required=True,
         ),
     ]),
