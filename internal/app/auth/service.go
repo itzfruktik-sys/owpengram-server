@@ -867,6 +867,15 @@ func (s *Service) CancelCodeForAuthKey(ctx context.Context, authKeyID [8]byte, p
 // email-login hash previously issued for this phone owner. Possession of only
 // a phone number is never sufficient to remove an authentication factor.
 func (s *Service) ConsumeLoginEmailReset(ctx context.Context, phone, phoneCodeHash string) (int64, error) {
+	// This flow exists to fall back to an SMS code when the login email is
+	// unreachable. Without a real phoneCodeSender configured, that "SMS code"
+	// is always the well-known TELESRV_DEV_AUTH_CODE (see createPhoneCode),
+	// so anyone who can call sendCode for a phone (no email access required)
+	// could strip the login-email requirement with a publicly known code.
+	// Refuse up front, before ClearLoginEmail runs, so nothing is mutated.
+	if s.phoneCodeSender == nil {
+		return 0, ErrCodeInvalid
+	}
 	phone = normalizePhone(phone)
 	rec, found, err := s.codes.Get(ctx, phoneCodeHash)
 	if err != nil {

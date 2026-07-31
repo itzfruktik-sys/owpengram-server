@@ -76,6 +76,7 @@ func TestLoginEmailEndToEnd(t *testing.T) {
 	messageStore := memory.NewMessageStore(dialogStore)
 	updateEventStore := memory.NewUpdateEventStore()
 	emailSender := &loginEmailTestSender{}
+	phoneSender := &loginEmailTestSender{}
 	accountService := account.NewService(passwordStore,
 		account.WithUsers(userStore),
 		account.WithLoginEmailVerification(codeStore, emailSender, 5*time.Minute, 5, 6))
@@ -88,7 +89,8 @@ func TestLoginEmailEndToEnd(t *testing.T) {
 			CodeLength: 6,
 			Store:      accountService,
 			Sender:     emailSender,
-		}))
+		}),
+		auth.WithPhoneCodeDelivery(phoneSender, 5))
 
 	deps := rpc.Deps{
 		Auth:    authService,
@@ -135,7 +137,7 @@ func TestLoginEmailEndToEnd(t *testing.T) {
 			return err
 		}
 		hash := sent.(*tg.AuthSentCode).PhoneCodeHash
-		if _, err := raw.AuthSignIn(ctx, &tg.AuthSignInRequest{PhoneNumber: phone, PhoneCodeHash: hash, PhoneCode: code}); err != nil {
+		if _, err := raw.AuthSignIn(ctx, &tg.AuthSignInRequest{PhoneNumber: phone, PhoneCodeHash: hash, PhoneCode: phoneSender.code}); err != nil {
 			return err
 		}
 		if _, err := raw.AuthSignUp(ctx, &tg.AuthSignUpRequest{PhoneNumber: phone, PhoneCodeHash: hash, FirstName: "Owner"}); err != nil {
@@ -247,12 +249,12 @@ func TestLoginEmailEndToEnd(t *testing.T) {
 		if !ok {
 			return fmt.Errorf("resetLoginEmail result = %T, want *tg.AuthSentCode", resetRes)
 		}
-		if _, ok := resetSent.Type.(*tg.AuthSentCodeTypeApp); !ok {
-			return fmt.Errorf("resetLoginEmail sentCode type = %T, want *tg.AuthSentCodeTypeApp (back to phone)", resetSent.Type)
+		if _, ok := resetSent.Type.(*tg.AuthSentCodeTypeSMS); !ok {
+			return fmt.Errorf("resetLoginEmail sentCode type = %T, want *tg.AuthSentCodeTypeSMS (back to phone, real sender configured)", resetSent.Type)
 		}
 
-		// 用手机验证码完成登录。
-		signInRes, err := raw.AuthSignIn(ctx, &tg.AuthSignInRequest{PhoneNumber: phone, PhoneCodeHash: resetSent.PhoneCodeHash, PhoneCode: code})
+		// 用手机验证码完成登录（真实投递的随机码，不是固定 dev code）。
+		signInRes, err := raw.AuthSignIn(ctx, &tg.AuthSignInRequest{PhoneNumber: phone, PhoneCodeHash: resetSent.PhoneCodeHash, PhoneCode: phoneSender.code})
 		if err != nil {
 			return err
 		}
