@@ -825,13 +825,7 @@ SETUP_FIELDS: list[tuple[str, list[SetupField]]] = [
     ("Server & Network", [
         SetupField(
             "TELESRV_ADVERTISE_IP", "Server public IP or hostname",
-            "What clients use to reach this server -- your VPS's public IP, "
-            "or a domain name if you have one pointed at it. Calls (TURN/SFU) "
-            "are the one exception: they need a literal IP address, not a "
-            "hostname, and default to reusing this value -- if you enter a "
-            "hostname here and want calls to work, set "
-            "TELESRV_TURN_ADVERTISE_IP / TELESRV_SFU_ADVERTISE_IP to a real "
-            "IP separately afterward, from Configure .env.",
+            "Your server's public IP address.",
             required=True,
         ),
     ]),
