@@ -424,6 +424,11 @@ type PrivacyService interface {
 	SetRules(ctx context.Context, ownerUserID int64, key domain.PrivacyKey, rules []domain.PrivacyRule) (domain.PrivacyRules, error)
 	AddAllowUser(ctx context.Context, ownerUserID int64, key domain.PrivacyKey, targetUserID int64) (domain.PrivacyRules, bool, error)
 	CanSee(ctx context.Context, ownerUserID, viewerUserID int64, key domain.PrivacyKey) (bool, error)
+	// CanSeeBatch evaluates multiple keys for one (owner, viewer) pair with a
+	// single ListPrivacyRules + GetReverseContacts round trip, equivalent to
+	// one CanSee call per key. Used where a single projection (e.g.
+	// getFullUser) otherwise needs several keys checked at once.
+	CanSeeBatch(ctx context.Context, ownerUserIDs []int64, viewerUserID int64, keys []domain.PrivacyKey) (map[int64]map[domain.PrivacyKey]bool, error)
 }
 
 // HelpService 抽象启动配置与国家区号目录。

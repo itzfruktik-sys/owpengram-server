@@ -102,6 +102,18 @@ func (p stubPrivacy) CanSee(_ context.Context, _, _ int64, key domain.PrivacyKey
 	return !p.deny[key], nil
 }
 
+func (p stubPrivacy) CanSeeBatch(_ context.Context, ownerUserIDs []int64, _ int64, keys []domain.PrivacyKey) (map[int64]map[domain.PrivacyKey]bool, error) {
+	out := make(map[int64]map[domain.PrivacyKey]bool, len(ownerUserIDs))
+	for _, owner := range ownerUserIDs {
+		m := make(map[domain.PrivacyKey]bool, len(keys))
+		for _, k := range keys {
+			m[k] = !p.deny[k]
+		}
+		out[owner] = m
+	}
+	return out, nil
+}
+
 type phoneFixture struct {
 	t        *testing.T
 	ctx      context.Context

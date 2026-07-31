@@ -237,15 +237,40 @@ func applyContactNoteToUserFull(user domain.User, full *tg.UserFull) bool {
 }
 
 func (r *Router) buildUserFullProjection(ctx context.Context, currentUserID int64, u domain.User) (tg.UserFull, error) {
-	about := u.About
-	if r.deps.Privacy != nil && u.ID != currentUserID {
-		allowed, err := r.deps.Privacy.CanSee(ctx, u.ID, currentUserID, domain.PrivacyKeyAbout)
+	// One CanSeeBatch call replaces what used to be up to six sequential
+	// CanSee calls (about/phone_call/phone_p2p/profile_photo/saved_music/
+	// birthday) below and in fillUserFullPhotos -- each CanSee cost two
+	// queries (rules + contacts), so this alone was ~12 of the ~15 db
+	// queries getFullUser used to make.
+	var privacyVisibility map[domain.PrivacyKey]bool
+	if r.deps.Privacy != nil && currentUserID != 0 && u.ID != 0 && u.ID != currentUserID {
+		batch, err := r.deps.Privacy.CanSeeBatch(ctx, []int64{u.ID}, currentUserID, []domain.PrivacyKey{
+			domain.PrivacyKeyAbout,
+			domain.PrivacyKeyPhoneCall,
+			domain.PrivacyKeyPhoneP2P,
+			domain.PrivacyKeyProfilePhoto,
+			domain.PrivacyKeySavedMusic,
+			domain.PrivacyKeyBirthday,
+		})
 		if err != nil {
 			return tg.UserFull{}, internalErr()
 		}
-		if !allowed {
-			about = ""
+		privacyVisibility = batch[u.ID]
+	}
+	// canSee mirrors CanSee's own fail-open semantics: self is always
+	// visible, and an unset map means the batch call above was skipped
+	// (privacy service absent, or self) -- both cases default to visible,
+	// exactly like every "if r.deps.Privacy != nil" guard did individually.
+	canSee := func(key domain.PrivacyKey) bool {
+		if u.ID == currentUserID || privacyVisibility == nil {
+			return true
 		}
+		return privacyVisibility[key]
+	}
+
+	about := u.About
+	if u.ID != currentUserID && !canSee(domain.PrivacyKeyAbout) {
+		about = ""
 	}
 	// Surface the scam/fake warning to other viewers (never to the account
 	// itself), non-destructively over the projected About.
@@ -261,19 +286,8 @@ func (r *Router) buildUserFullProjection(ctx context.Context, currentUserID int6
 	// 通话入口：客户端不见 phone_calls_available=true 不显示通话按钮（P1 前置项）。
 	// phone_calls_private 标记对端禁 P2P（p2p_allowed 真值在通话确认时另行计算）。
 	if !u.Bot && u.ID != currentUserID {
-		callsAllowed, p2pAllowed := true, true
-		if r.deps.Privacy != nil {
-			allowed, err := r.deps.Privacy.CanSee(ctx, u.ID, currentUserID, domain.PrivacyKeyPhoneCall)
-			if err != nil {
-				return tg.UserFull{}, internalErr()
-			}
-			callsAllowed = allowed
-			allowed, err = r.deps.Privacy.CanSee(ctx, u.ID, currentUserID, domain.PrivacyKeyPhoneP2P)
-			if err != nil {
-				return tg.UserFull{}, internalErr()
-			}
-			p2pAllowed = allowed
-		}
+		callsAllowed := canSee(domain.PrivacyKeyPhoneCall)
+		p2pAllowed := canSee(domain.PrivacyKeyPhoneP2P)
 		full.PhoneCallsAvailable = callsAllowed
 		full.VideoCallsAvailable = callsAllowed
 		full.PhoneCallsPrivate = !p2pAllowed
@@ -302,15 +316,11 @@ func (r *Router) buildUserFullProjection(ctx context.Context, currentUserID int6
 			break
 		}
 	}
-	if err := r.fillUserFullPhotos(ctx, currentUserID, u.ID, &full); err != nil {
+	if err := r.fillUserFullPhotos(ctx, currentUserID, u.ID, &full, canSee(domain.PrivacyKeyProfilePhoto)); err != nil {
 		return tg.UserFull{}, err
 	}
 	if r.deps.Account != nil {
-		allowed, err := r.canSeeSavedMusic(ctx, currentUserID, u.ID)
-		if err != nil {
-			return tg.UserFull{}, err
-		}
-		if allowed {
+		if canSee(domain.PrivacyKeySavedMusic) {
 			music, err := r.deps.Account.ListSavedMusic(ctx, u.ID, 0, 1)
 			if err != nil {
 				return tg.UserFull{}, internalErr()
@@ -382,15 +392,7 @@ func (r *Router) buildUserFullProjection(ctx context.Context, currentUserID int6
 	// 生日（account.updateBirthday）：落 userFull.birthday，按 PrivacyKeyBirthday 对他人裁剪，
 	// 本人恒可见。
 	if u.Birthday.IsSet() {
-		birthdayVisible := true
-		if r.deps.Privacy != nil && u.ID != currentUserID {
-			allowed, err := r.deps.Privacy.CanSee(ctx, u.ID, currentUserID, domain.PrivacyKeyBirthday)
-			if err != nil {
-				return tg.UserFull{}, internalErr()
-			}
-			birthdayVisible = allowed
-		}
-		if birthdayVisible {
+		if canSee(domain.PrivacyKeyBirthday) {
 			full.SetBirthday(tgBirthday(u.Birthday))
 		}
 	}
@@ -570,7 +572,7 @@ func savedMusicDocumentIDs(docs []domain.Document) []int64 {
 	return ids
 }
 
-func (r *Router) fillUserFullPhotos(ctx context.Context, viewerUserID, ownerUserID int64, full *tg.UserFull) error {
+func (r *Router) fillUserFullPhotos(ctx context.Context, viewerUserID, ownerUserID int64, full *tg.UserFull, profileAllowed bool) error {
 	if r.deps.Files == nil || full == nil || ownerUserID == 0 {
 		return nil
 	}
@@ -600,14 +602,6 @@ func (r *Router) fillUserFullPhotos(ctx context.Context, viewerUserID, ownerUser
 			if found {
 				full.SetPersonalPhoto(tgPhoto(photo))
 			}
-		}
-	}
-	profileAllowed := true
-	if r.deps.Privacy != nil {
-		var err error
-		profileAllowed, err = r.deps.Privacy.CanSee(ctx, ownerUserID, viewerUserID, domain.PrivacyKeyProfilePhoto)
-		if err != nil {
-			return internalErr()
 		}
 	}
 	if profileAllowed {

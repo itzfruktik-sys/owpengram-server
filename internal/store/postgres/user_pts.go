@@ -30,15 +30,16 @@ ON CONFLICT (user_id) DO NOTHING`, userID)
 
 func reserveUserPts(ctx context.Context, db sqlcgen.DBTX, userID int64, count int) (int, error) {
 	count = normalizePtsCount(count)
-	if err := ensureUserUpdateWatermark(ctx, db, userID); err != nil {
-		return 0, err
-	}
+	// Single upsert instead of ensure-insert-then-update: this runs on every
+	// message send/update event, and the ensure step was a no-op round trip
+	// for every user past their first-ever pts allocation.
 	var pts int
 	if err := db.QueryRow(ctx, `
-UPDATE user_update_watermarks
-SET contiguous_pts = contiguous_pts + $2,
+INSERT INTO user_update_watermarks (user_id, contiguous_pts)
+VALUES ($1, $2)
+ON CONFLICT (user_id) DO UPDATE
+SET contiguous_pts = user_update_watermarks.contiguous_pts + $2,
     updated_at = now()
-WHERE user_id = $1
 RETURNING contiguous_pts`, userID, count).Scan(&pts); err != nil {
 		return 0, fmt.Errorf("reserve user pts: %w", err)
 	}
