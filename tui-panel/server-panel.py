@@ -486,6 +486,55 @@ def save_env(values: dict[str, str]) -> None:
     ENV_FILE.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
 
 
+def missing_env_fields() -> list[tuple[str, str]]:
+    """(key, default_value) pairs for every *active* (uncommented) field
+    .env.example defines that .env doesn't have at all -- e.g. after a git
+    pull brought in new TELESRV_* settings for features that didn't exist
+    when this install's .env was first created.
+
+    Deliberately scans the whole file, not just parse_env_template()'s
+    panel-visible groups, so an Advanced-section field missing from .env
+    gets caught too. Deliberately skips template-commented (disabled by
+    default) fields -- those are meant to stay absent/off unless a self-hoster
+    opts in, and the server already falls back to the same default shown in
+    the comment when the key isn't set at all, so there's nothing to fix.
+    A key already present in .env is never touched, even if blank -- clearing
+    a field on purpose must never get silently reintroduced."""
+    if not ENV_FILE.exists() or not ENV_EXAMPLE_FILE.exists():
+        return []
+    existing_keys: set[str] = set()
+    for line in ENV_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = _ACTIVE_FIELD_RE.match(line.strip())
+        if m:
+            existing_keys.add(m.group(1))
+    missing: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for line in ENV_EXAMPLE_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = _ACTIVE_FIELD_RE.match(line.strip())
+        if m and m.group(1) not in existing_keys and m.group(1) not in seen:
+            seen.add(m.group(1))
+            missing.append((m.group(1), m.group(2)))
+    return missing
+
+
+def append_missing_env_fields(missing: list[tuple[str, str]]) -> None:
+    """Appends (key, default_value) pairs to .env in one clearly-labeled,
+    timestamped block, so a self-hoster immediately sees what was added and
+    why. Purely additive -- never rewrites, reorders, or removes a single
+    existing line, unlike save_env()'s full rewrite-from-template."""
+    if not missing:
+        return
+    block = [
+        "",
+        f"# --- Added automatically by server-panel.py on "
+        f"{time.strftime('%Y-%m-%d %H:%M')}: new fields found in .env.example "
+        f"that this .env didn't have yet ---",
+    ]
+    block += [f"{key}={value}" for key, value in missing]
+    with ENV_FILE.open("a", encoding="utf-8") as f:
+        f.write("\n".join(block) + "\n")
+
+
 def admin_ui_info() -> tuple[str, str | None] | None:
     """Returns (url, password) for the admin UI, or None if it isn't
     configured at all. password is None when TELESRV_ADMIN_UI_PASSWORD is
@@ -1155,6 +1204,7 @@ class MainScreen(Screen):
 
     def on_mount(self) -> None:
         self.query_one("#services-table", DataTable).add_columns("Service", "Type", "Status")
+        self._sync_missing_env_fields()
         self.refresh_status()
         self.refresh_stats()
         self.refresh_config_widgets()
@@ -1163,6 +1213,23 @@ class MainScreen(Screen):
         self.set_interval(3, self.refresh_config_widgets)
         if self._auto_start:
             self.action_start()
+
+    def _sync_missing_env_fields(self) -> None:
+        """Catches .env falling behind .env.example -- e.g. a git pull that
+        added new TELESRV_* settings for a feature this install predates.
+        Runs once per panel launch, before Start, so a missing field never
+        surprises the server at startup instead. A no-op on a fresh install
+        (Setup already writes every field at once) and a no-op once .env has
+        caught up."""
+        missing = missing_env_fields()
+        if not missing:
+            return
+        append_missing_env_fields(missing)
+        keys = ", ".join(key for key, _ in missing)
+        self.notify(
+            f"Added {len(missing)} new field(s) to .env from .env.example: {keys}",
+            timeout=10,
+        )
 
     def refresh_status(self) -> None:
         status = MANAGER.status()
