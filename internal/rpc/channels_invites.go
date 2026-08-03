@@ -59,9 +59,14 @@ func (r *Router) onMessagesCheckChatInvite(ctx context.Context, hash string) (tg
 		return nil, channelInviteErr(err)
 	}
 	if res.Already {
-		return &tg.ChatInviteAlready{Chat: tgChannelChat(userID, res.Channel, &res.Self)}, nil
+		// chatInviteAlready#5a686d7c wraps a full Chat. Run the shared peer
+		// read-model pass before nesting it so collectible usernames and badge
+		// facts cannot be lost behind a scalar-only complete Channel.
+		chat := tgChannelChat(userID, res.Channel, &res.Self)
+		r.applyPeerReadModels(ctx, userID, nil, []tg.ChatClass{chat})
+		return &tg.ChatInviteAlready{Chat: chat}, nil
 	}
-	return &tg.ChatInvite{
+	invite := &tg.ChatInvite{
 		Channel:           true,
 		Broadcast:         res.Channel.Broadcast,
 		Megagroup:         res.Channel.Megagroup,
@@ -71,7 +76,37 @@ func (r *Router) onMessagesCheckChatInvite(ctx context.Context, hash string) (tg
 		About:             res.Channel.About,
 		Photo:             &tg.PhotoEmpty{},
 		ParticipantsCount: res.Channel.ParticipantsCount,
-	}, nil
+	}
+	// chatInvite#5c9d3702 carries verified:flags.7 / scam:flags.8 / fake:flags.9.
+	// A non-member sees only this preview, so the peer's moderation and official
+	// verification state must already be visible here: without it the badge (or the
+	// scam/fake warning) appears only after joining, which is exactly backwards.
+	// Set*, not raw field assignment, so Flags stays consistent before Encode.
+	applyChatInviteModerationFlags(invite, res.Channel)
+	// bot_verification:flags.13 extends the same reasoning one field further: the
+	// third-party mark is part of what identifies the peer, so the preview a
+	// non-member sees has to carry it as well.
+	r.applyBotVerificationToChatInvite(ctx, invite, res.Channel.ID)
+	return invite, nil
+}
+
+// applyChatInviteModerationFlags mirrors the persistent channel record's official
+// verification and moderation flags onto an invite preview. Absent flags are left
+// unset rather than explicitly cleared, so the encoded chatInvite matches what an
+// official server sends for an unflagged peer.
+func applyChatInviteModerationFlags(invite *tg.ChatInvite, ch domain.Channel) {
+	if invite == nil {
+		return
+	}
+	if ch.Verified {
+		invite.SetVerified(true)
+	}
+	if ch.Scam {
+		invite.SetScam(true)
+	}
+	if ch.Fake {
+		invite.SetFake(true)
+	}
 }
 
 func (r *Router) onMessagesImportChatInvite(ctx context.Context, hash string) (tg.MessagesChatInviteJoinResultClass, error) {

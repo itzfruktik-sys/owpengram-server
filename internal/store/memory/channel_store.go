@@ -73,15 +73,19 @@ type ChannelStore struct {
 	messages  map[int64][]domain.ChannelMessage
 	reactions map[int64]map[int]map[int64][]domain.ChannelMessagePeerReaction
 	// paidReactions 是 per-(channel,message,user) 付费 reaction 累计星数 + 匿名标志。
-	paidReactions          map[int64]map[int]map[int64]memoryPaidReaction
-	top                    map[int64]map[string]domain.TopMessageReaction
-	recent                 map[int64]map[string]domain.RecentMessageReaction
-	savedTags              map[int64]map[string]domain.SavedReactionTag
-	mentions               map[int64]map[int64]map[int]memoryMention
-	msgViews               map[int64]map[int]int
-	msgViewers             map[int64]map[int]map[int64]struct{}
-	events                 map[int64][]domain.ChannelUpdateEvent
-	retention              map[int64]domain.ChannelUpdateRetentionCheckpoint
+	paidReactions map[int64]map[int]map[int64]memoryPaidReaction
+	top           map[int64]map[string]domain.TopMessageReaction
+	recent        map[int64]map[string]domain.RecentMessageReaction
+	mentions      map[int64]map[int64]map[int]memoryMention
+	msgViews      map[int64]map[int]int
+	msgViewers    map[int64]map[int]map[int64]struct{}
+	events        map[int64][]domain.ChannelUpdateEvent
+	retention     map[int64]domain.ChannelUpdateRetentionCheckpoint
+	// historyClearDates is the no-PTS recovery timestamp for a future
+	// owner-local clear, keyed by channel then user. The member remains the
+	// absolute boundary authority; this map only makes account difference
+	// discovery bounded without scanning messages.
+	historyClearDates      map[int64]map[int64]int
 	adminLogs              map[int64][]domain.ChannelAdminLogEvent
 	invites                map[string]domain.ChannelInvite
 	importers              map[int64]map[int64]domain.ChannelInviteImporter
@@ -102,12 +106,21 @@ type ChannelStore struct {
 	// topicReads 是 per-(channel,user,topic) 已读水位（forum 话题独立已读，不碰频道级 member 水位）。
 	topicReads map[int64]map[int64]map[int]memoryTopicRead
 	// polls 是共享 poll 权威（与 MessageStore 同一实例）；nil 时 poll 链路按未接入处理。
-	polls *PollStore
+	polls            *PollStore
+	usernameRegistry *CollectibleUsernameStore
 }
 
 // AttachPollStore 注入共享 poll 权威。
 func (s *ChannelStore) AttachPollStore(polls *PollStore) {
 	s.polls = polls
+}
+
+// AttachUsernameRegistry gives the memory backend the same global username
+// index the PostgreSQL stores share through peer_usernames.
+func (s *ChannelStore) AttachUsernameRegistry(registry *CollectibleUsernameStore) {
+	s.mu.Lock()
+	s.usernameRegistry = registry
+	s.mu.Unlock()
 }
 
 // NewChannelStore creates an in-memory ChannelStore.
@@ -124,12 +137,12 @@ func NewChannelStore() *ChannelStore {
 		paidReactions:          make(map[int64]map[int]map[int64]memoryPaidReaction),
 		top:                    make(map[int64]map[string]domain.TopMessageReaction),
 		recent:                 make(map[int64]map[string]domain.RecentMessageReaction),
-		savedTags:              make(map[int64]map[string]domain.SavedReactionTag),
 		mentions:               make(map[int64]map[int64]map[int]memoryMention),
 		msgViews:               make(map[int64]map[int]int),
 		msgViewers:             make(map[int64]map[int]map[int64]struct{}),
 		events:                 make(map[int64][]domain.ChannelUpdateEvent),
 		retention:              make(map[int64]domain.ChannelUpdateRetentionCheckpoint),
+		historyClearDates:      make(map[int64]map[int64]int),
 		adminLogs:              make(map[int64][]domain.ChannelAdminLogEvent),
 		invites:                make(map[string]domain.ChannelInvite),
 		importers:              make(map[int64]map[int64]domain.ChannelInviteImporter),

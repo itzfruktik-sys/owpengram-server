@@ -478,6 +478,7 @@ func (r *Router) onContactsGetBlocked(ctx context.Context, req *tg.ContactsGetBl
 		})
 		users = append(users, r.tgUser(item.User))
 	}
+	r.applyUsernamesToPeerObjects(ctx, users, nil)
 	if list.Count > len(blocked)+req.Offset {
 		return &tg.ContactsBlockedSlice{Count: list.Count, Blocked: blocked, Chats: []tg.ChatClass{}, Users: users}, nil
 	}
@@ -540,6 +541,7 @@ func (r *Router) onContactsGetStatuses(ctx context.Context) ([]tg.ContactStatus,
 			}
 		}
 	}
+	statusVisible := r.statusTimestampVisibleToViewer(ctx, contactUserIDs, userID)
 	seen = make(map[int64]struct{}, len(list.Contacts))
 	for _, contact := range list.Contacts {
 		id := contact.User.ID
@@ -555,9 +557,19 @@ func (r *Router) onContactsGetStatuses(ctx context.Context) ([]tg.ContactStatus,
 			u.LastSeenAt = current.LastSeenAt
 			u.Status = current.Status
 		}
+		status := u.Status
+		if statusVisible[id] {
+			status = r.userPresenceStatusForUser(u)
+		} else {
+			switch status.Kind {
+			case domain.UserStatusRecently, domain.UserStatusLastWeek, domain.UserStatusLastMonth, domain.UserStatusEmpty:
+			default:
+				status = domain.ApproximateUserStatus(u.LastSeenAt, int(r.clock.Now().Unix()))
+			}
+		}
 		out = append(out, tg.ContactStatus{
 			UserID: id,
-			Status: tgUserStatus(r.userPresenceStatusForUser(u)),
+			Status: tgUserStatus(status),
 		})
 	}
 	return out, nil
@@ -626,7 +638,7 @@ func (r *Router) onContactsImportContacts(ctx context.Context, input []tg.InputP
 	for _, contact := range res.Contacts {
 		out.Users = append(out.Users, r.tgUser(contact.User))
 	}
-	r.applyStoryMaxIDsToPeerObjects(ctx, userID, out.Users, nil)
+	r.applyPeerReadModels(ctx, userID, out.Users, nil)
 	out.RetryContacts = append(out.RetryContacts, res.RetryContacts...)
 	for _, contact := range res.Contacts {
 		peer := domain.Peer{Type: domain.PeerTypeUser, ID: contact.User.ID}
@@ -824,6 +836,7 @@ func (r *Router) onContactsDeleteContacts(ctx context.Context, ids []tg.InputUse
 		}
 	}
 	r.invalidateRPCProjectionForViewer(userID)
+	r.applyUsernamesToPeerObjects(ctx, users, nil)
 	out := &tg.Updates{Updates: updates, Users: users, Date: int(r.clock.Now().Unix())}
 	r.pushUserUpdatesIfNoReliableDispatch(ctx, userID, out)
 	return out, nil
@@ -863,7 +876,7 @@ func (r *Router) onContactsUpdateContactNote(ctx context.Context, req *tg.Contac
 		// private note into the shared update log.
 		r.pushContactNoteRefreshIfReliableDispatch(ctx, userID, peerUser)
 	} else {
-		r.pushUserUpdates(ctx, userID, r.contactNoteRefreshUpdates(peerUser, int(r.clock.Now().Unix()), true))
+		r.pushUserUpdates(ctx, userID, r.contactNoteRefreshUpdates(ctx, userID, peerUser, int(r.clock.Now().Unix()), true))
 	}
 	return true, nil
 }
@@ -1052,17 +1065,19 @@ func contactUserForUpdates(contact domain.Contact) domain.User {
 	return peerUser
 }
 
-func (r *Router) contactNoteRefreshUpdates(peerUser domain.User, date int, includeContactsReset bool) *tg.Updates {
+func (r *Router) contactNoteRefreshUpdates(ctx context.Context, viewerUserID int64, peerUser domain.User, date int, includeContactsReset bool) *tg.Updates {
 	updates := make([]tg.UpdateClass, 0, 2)
 	if includeContactsReset {
 		updates = append(updates, &tg.UpdateContactsReset{})
 	}
 	updates = append(updates, &tg.UpdateUser{UserID: peerUser.ID})
-	return &tg.Updates{
+	out := &tg.Updates{
 		Updates: updates,
 		Users:   []tg.UserClass{r.tgUser(peerUser)},
 		Date:    date,
 	}
+	r.applyUsernamesToPeerObjects(ctx, out.Users, nil)
+	return out
 }
 
 // pushContactNoteRefreshIfReliableDispatch complements the durable
@@ -1077,7 +1092,7 @@ func (r *Router) pushContactNoteRefreshIfReliableDispatch(ctx context.Context, u
 		ctx,
 		userID,
 		"push contact note full-user refresh",
-		r.contactNoteRefreshUpdates(peerUser, int(r.clock.Now().Unix()), false),
+		r.contactNoteRefreshUpdates(ctx, userID, peerUser, int(r.clock.Now().Unix()), false),
 	)
 }
 
@@ -1100,7 +1115,7 @@ func (r *Router) contactPeerSettingsUpdates(ctx context.Context, userID int64, p
 		Date:  int(r.clock.Now().Unix()),
 		Seq:   0,
 	}
-	r.applyStoryMaxIDsToPeerObjects(ctx, userID, out.Users, nil)
+	r.applyPeerReadModels(ctx, userID, out.Users, nil)
 	return out
 }
 

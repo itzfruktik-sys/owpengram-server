@@ -5,7 +5,6 @@ import { api, errorMessage } from "../api";
 import { ActionButton } from "../components/ActionButton";
 import { StickerDocumentPreview } from "../components/StickerDocumentPreview";
 import { Alert } from "../components/ui";
-import { useI18n } from "../i18n";
 import type { StickerSetRow } from "../types";
 
 // Cells per modal page. Each page fully replaces the previous one (rather
@@ -15,7 +14,6 @@ import type { StickerSetRow } from "../types";
 const PAGE_SIZE = 24;
 
 export function StickerSetPreviewModal({ set, onClose }: { set: StickerSetRow; onClose: () => void }) {
-  const { t } = useI18n();
   const noun = set.Kind === "emoji" ? "emoji" : "sticker";
   const [documentIDs, setDocumentIDs] = useState<string[] | null>(null);
   const [error, setError] = useState("");
@@ -52,19 +50,19 @@ export function StickerSetPreviewModal({ set, onClose }: { set: StickerSetRow; o
       <section className="modal command-modal sticker-preview-modal" role="dialog" aria-modal="true" aria-label={set.Title || `#${set.ID}`}>
         <div className="modal-head">
           <div>
-            <div className="eyebrow">{t("stickers.previewEyebrow")}</div>
+            <div className="eyebrow">{"Set contents"}</div>
             <h2>{set.Title || `#${set.ID}`}</h2>
           </div>
-          <button className="icon-btn" type="button" onClick={onClose} aria-label={t("action.close")}><X size={15} /></button>
+          <button className="icon-btn" type="button" onClick={onClose} aria-label={"Close"}><X size={15} /></button>
         </div>
         <div className="command-body">
           <AddStickerForm setID={set.ID} noun={noun} onAdded={load} />
           {error && <Alert>{error}</Alert>}
           {!error && documentIDs === null && (
-            <div className="loading-line"><Loader2 className="spin" size={18} /> {t("common.loading")}</div>
+            <div className="loading-line"><Loader2 className="spin" size={18} /> {"Loading"}</div>
           )}
           {documentIDs !== null && total === 0 && !error && (
-            <div className="empty-panel">{t("stickers.previewEmpty")}</div>
+            <div className="empty-panel">{"This set has no documents."}</div>
           )}
           {pageItems.length > 0 && (
             <div className="sticker-doc-grid" key={currentPage}>
@@ -74,7 +72,7 @@ export function StickerSetPreviewModal({ set, onClose }: { set: StickerSetRow; o
                   <ActionButton
                     compact
                     tone="danger"
-                    label={t("stickers.removeSticker", { noun })}
+                    label={"Remove"}
                     icon={<Trash2 size={12} />}
                     path="/api/actions/remove-sticker-from-set"
                     payload={() => ({ set_id: set.ID, document_id: documentID })}
@@ -86,14 +84,14 @@ export function StickerSetPreviewModal({ set, onClose }: { set: StickerSetRow; o
           )}
           {total > PAGE_SIZE && (
             <div className="gift-pager">
-              <span className="gift-pager-range">{t("gifts.pageRange", { start: rangeStart, end: rangeEnd, total })}</span>
+              <span className="gift-pager-range">{`Showing ${rangeStart}-${rangeEnd} of ${total}`}</span>
               <div className="gift-pager-controls">
                 <button className="btn compact-btn" type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>
-                  <ChevronLeft size={14} /> {t("gifts.pagePrev")}
+                  <ChevronLeft size={14} /> {"Previous"}
                 </button>
-                <span className="gift-pager-page">{t("gifts.pageOf", { page: currentPage, total: totalPages })}</span>
+                <span className="gift-pager-page">{`Page ${currentPage} of ${totalPages}`}</span>
                 <button className="btn compact-btn" type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>
-                  {t("gifts.pageNext")} <ChevronRight size={14} />
+                  {"Next"} <ChevronRight size={14} />
                 </button>
               </div>
             </div>
@@ -110,7 +108,6 @@ export function StickerSetPreviewModal({ set, onClose }: { set: StickerSetRow; o
 // step): unlike destructive actions, materializing one sticker document is
 // low-risk and reversible via the per-cell Remove button.
 function AddStickerForm({ setID, noun, onAdded }: { setID: string; noun: string; onAdded: () => void }) {
-  const { t } = useI18n();
   const [file, setFile] = useState<File | null>(null);
   const [emoji, setEmoji] = useState("");
   const [reason, setReason] = useState("");
@@ -119,15 +116,15 @@ function AddStickerForm({ setID, noun, onAdded }: { setID: string; noun: string;
 
   async function submit() {
     if (!file) {
-      setError(t("stickers.fileRequired", { noun }));
+      setError(`Choose a ${noun} file first`);
       return;
     }
     if (!emoji.trim()) {
-      setError(t("stickers.emojiRequired"));
+      setError("An emoji is required.");
       return;
     }
     if (!reason.trim()) {
-      setError(t("action.reasonRequired"));
+      setError("Please enter an operation reason");
       return;
     }
     setBusy(true);
@@ -152,12 +149,12 @@ function AddStickerForm({ setID, noun, onAdded }: { setID: string; noun: string;
     <div className="sticker-add-form">
       <label className={`gift-file-picker compact ${file ? "has-file" : ""}`}>
         <input type="file" accept=".tgs,.json,.webp,application/json,application/x-tgsticker,image/webp" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
-        <span className="gift-file-copy"><strong>{file ? file.name : t("stickers.filePrompt")}</strong></span>
+        <span className="gift-file-copy"><strong>{file ? file.name : "Choose a TGS, Lottie JSON, or WebP file"}</strong></span>
       </label>
-      <input className="small-input" value={emoji} onChange={(event) => setEmoji(event.target.value)} placeholder={t("stickers.emojiPlaceholder")} />
-      <input className="small-input" value={reason} onChange={(event) => setReason(event.target.value)} placeholder={t("action.reasonPlaceholder")} />
+      <input className="small-input" value={emoji} onChange={(event) => setEmoji(event.target.value)} placeholder={"e.g. 😀"} />
+      <input className="small-input" value={reason} onChange={(event) => setReason(event.target.value)} placeholder={"Describe why this operation is being performed"} />
       <button className="btn primary compact-btn" type="button" onClick={submit} disabled={busy}>
-        {busy ? <Loader2 className="spin" size={14} /> : <Plus size={14} />} {t("stickers.addSticker", { noun })}
+        {busy ? <Loader2 className="spin" size={14} /> : <Plus size={14} />} {`Add ${noun}`}
       </button>
       {error && <span className="sticker-add-form-error">{error}</span>}
     </div>

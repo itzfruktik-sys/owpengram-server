@@ -342,11 +342,24 @@ func (s *Service) appendMissingChannelPeerPreviews(ctx context.Context, userID i
 		if !ok || view.Forbidden {
 			continue
 		}
+		if view.Self.Status == domain.ChannelMemberLeft && !view.Self.Guest {
+			// A visible public preview still needs one transient dialog so a
+			// client can finish bootstrapping the requested peer. Keep the top
+			// message and read state at zero: the response is an admission
+			// token, not a persisted/chat-list dialog snapshot. In particular,
+			// clients that persist non-zero top dialogs will instead continue
+			// with messages.getHistory, which is the authoritative preview
+			// history path.
+			out.Dialogs = append(out.Dialogs, publicChannelPreviewBootstrapDialog(view))
+			out.Channels = append(out.Channels, view.Channel)
+			out.Count++
+			present[channelID] = struct{}{}
+			continue
+		}
 		// Linked discussion guests need a transient peer-dialog snapshot so
 		// TDesktop can finish materializing the comments History after
 		// requestSelf. ChannelLeft keeps the snapshot out of the main chat list,
-		// and Guest guarantees this path never turns an ordinary public preview
-		// into a dialog.
+		// while Guest authorizes the target's real top-message snapshot.
 		if view.Self.Status != domain.ChannelMemberActive && !view.Self.Guest {
 			continue
 		}
@@ -378,6 +391,14 @@ func (s *Service) appendMissingChannelPeerPreviews(ctx context.Context, userID i
 	return out, nil
 }
 
+func publicChannelPreviewBootstrapDialog(view domain.ChannelView) domain.Dialog {
+	return domain.Dialog{
+		Peer:        domain.Peer{Type: domain.PeerTypeChannel, ID: view.Channel.ID},
+		ChannelLeft: true,
+		Pts:         view.Channel.Pts,
+	}
+}
+
 func isChannelPreviewAccessError(err error) bool {
 	return errors.Is(err, domain.ErrChannelPrivate) ||
 		errors.Is(err, domain.ErrChannelUserBanned) ||
@@ -387,22 +408,24 @@ func isChannelPreviewAccessError(err error) bool {
 func dialogFromChannelView(view domain.ChannelView) domain.Dialog {
 	dialog := view.Dialog
 	return domain.Dialog{
-		Peer:                domain.Peer{Type: domain.PeerTypeChannel, ID: dialog.ChannelID},
-		ChannelLeft:         view.Self.Status == domain.ChannelMemberLeft,
-		FolderID:            dialog.FolderID,
-		TopMessage:          dialog.TopMessageID,
-		TopMessageDate:      dialog.TopMessageDate,
-		ReadInboxMaxID:      dialog.ReadInboxMaxID,
-		ReadOutboxMaxID:     dialog.ReadOutboxMaxID,
-		UnreadCount:         dialog.UnreadCount,
-		UnreadMentions:      dialog.UnreadMentions,
-		UnreadReactions:     dialog.UnreadReactions,
-		Pinned:              dialog.Pinned,
-		PinnedOrder:         dialog.PinnedOrder,
-		UnreadMark:          dialog.UnreadMark,
-		ViewForumAsMessages: dialog.ViewForumAsMessages,
-		HasScheduled:        dialog.HasScheduled,
-		Pts:                 view.Channel.Pts,
+		Peer:                   domain.Peer{Type: domain.PeerTypeChannel, ID: dialog.ChannelID},
+		ChannelLeft:            view.Self.Status == domain.ChannelMemberLeft,
+		FolderID:               dialog.FolderID,
+		TopMessage:             dialog.TopMessageID,
+		TopMessageDate:         dialog.TopMessageDate,
+		HistoryClearAnchorID:   dialog.HistoryClearAnchorID,
+		HistoryClearAnchorDate: dialog.HistoryClearAnchorDate,
+		ReadInboxMaxID:         dialog.ReadInboxMaxID,
+		ReadOutboxMaxID:        dialog.ReadOutboxMaxID,
+		UnreadCount:            dialog.UnreadCount,
+		UnreadMentions:         dialog.UnreadMentions,
+		UnreadReactions:        dialog.UnreadReactions,
+		Pinned:                 dialog.Pinned,
+		PinnedOrder:            dialog.PinnedOrder,
+		UnreadMark:             dialog.UnreadMark,
+		ViewForumAsMessages:    dialog.ViewForumAsMessages,
+		HasScheduled:           dialog.HasScheduled,
+		Pts:                    view.Channel.Pts,
 	}
 }
 

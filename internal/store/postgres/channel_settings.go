@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
+
 	"telesrv/internal/domain"
 )
 
@@ -235,7 +238,7 @@ func (s *ChannelStore) UpdateUsername(ctx context.Context, req domain.UpdateChan
 	if strings.EqualFold(channel.Username, username) {
 		return domain.Channel{}, domain.ErrChannelNotModified
 	}
-	if err := replacePeerUsernameTx(ctx, tx, peerUsernameTypeChannel, req.ChannelID, usernameLower); err != nil {
+	if err := replacePeerUsernameTx(ctx, tx, peerUsernameTypeChannel, req.ChannelID, username, usernameLower); err != nil {
 		return domain.Channel{}, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE channels SET username = NULLIF($2,''), updated_at = now() WHERE id = $1`, req.ChannelID, username); err != nil {
@@ -292,16 +295,52 @@ func (s *ChannelStore) SetChannelScamFake(ctx context.Context, channelID int64, 
 	if scam && fake {
 		return domain.Channel{}, domain.ErrPeerModerationFlagsInvalid
 	}
-	channel, err := s.channelByID(ctx, s.db, channelID)
+	beginner, ok := s.db.(txBeginner)
+	if !ok {
+		return domain.Channel{}, fmt.Errorf("set channel scam/fake: db does not support transactions")
+	}
+	tx, err := beginner.Begin(ctx)
+	if err != nil {
+		return domain.Channel{}, fmt.Errorf("begin set channel scam/fake: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+	var currentScam, currentFake bool
+	if err := tx.QueryRow(ctx, `
+SELECT scam, fake
+FROM channels
+WHERE id = $1 AND NOT deleted
+FOR UPDATE`, channelID).Scan(&currentScam, &currentFake); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Channel{}, domain.ErrChannelInvalid
+		}
+		return domain.Channel{}, fmt.Errorf("lock channel scam/fake: %w", err)
+	}
+	channel, err := s.channelByID(ctx, tx, channelID)
 	if err != nil {
 		return domain.Channel{}, err
 	}
 	if channel.Scam == scam && channel.Fake == fake {
+		if err := tx.Commit(ctx); err != nil {
+			return domain.Channel{}, fmt.Errorf("commit unchanged channel scam/fake: %w", err)
+		}
+		committed = true
 		return channel, nil
 	}
-	if _, err := s.db.Exec(ctx, `UPDATE channels SET scam = $2, fake = $3, updated_at = now() WHERE id = $1 AND NOT deleted`, channelID, scam, fake); err != nil {
+	if currentScam != channel.Scam || currentFake != channel.Fake {
+		return domain.Channel{}, fmt.Errorf("channel scam/fake snapshot changed while locked")
+	}
+	if _, err := tx.Exec(ctx, `UPDATE channels SET scam = $2, fake = $3, updated_at = now() WHERE id = $1 AND NOT deleted`, channelID, scam, fake); err != nil {
 		return domain.Channel{}, fmt.Errorf("set channel scam/fake: %w", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Channel{}, fmt.Errorf("commit channel scam/fake: %w", err)
+	}
+	committed = true
 	if s.rowCache != nil {
 		s.rowCache.delete(channelID)
 	}
@@ -387,7 +426,7 @@ func (s *ChannelStore) SetChannelUsernameAdmin(ctx context.Context, channelID in
 	if strings.EqualFold(channel.Username, username) {
 		return channel, nil
 	}
-	if err := replacePeerUsernameTx(ctx, tx, peerUsernameTypeChannel, channelID, usernameLower); err != nil {
+	if err := replacePeerUsernameTx(ctx, tx, peerUsernameTypeChannel, channelID, username, usernameLower); err != nil {
 		return domain.Channel{}, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE channels SET username = NULLIF($2,''), updated_at = now() WHERE id = $1`, channelID, username); err != nil {
@@ -471,6 +510,9 @@ func (s *ChannelStore) ResolvePublicChannelUsername(ctx context.Context, viewerU
 	if !found || owner.peerType != peerUsernameTypeChannel {
 		return domain.Channel{}, false, nil
 	}
+	if !owner.active {
+		return domain.Channel{}, false, nil
+	}
 	ch, err := getChannelByID(ctx, s.db, owner.peerID)
 	if err != nil {
 		if errors.Is(err, domain.ErrChannelInvalid) {
@@ -478,7 +520,14 @@ func (s *ChannelStore) ResolvePublicChannelUsername(ctx context.Context, viewerU
 		}
 		return domain.Channel{}, false, fmt.Errorf("resolve public channel username channel: %w", err)
 	}
-	if !publicPreviewableChannel(ch) || !strings.EqualFold(ch.Username, usernameLower) {
+	if !publicPreviewableChannel(ch, true) {
+		return domain.Channel{}, false, nil
+	}
+	// A collectible row is authoritative for its own name: the channel's scalar
+	// username column only ever mirrors the editable slot, so re-checking it here
+	// would make collectible names unresolvable. The scalar comparison stays for
+	// the editable slot, where it guards against a stale registry row.
+	if !owner.collectible && !strings.EqualFold(ch.Username, usernameLower) {
 		return domain.Channel{}, false, nil
 	}
 	return ch, true, nil

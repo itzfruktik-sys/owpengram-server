@@ -50,10 +50,11 @@ func (r *Router) onMessagesSaveDraft(ctx context.Context, req *tg.MessagesSaveDr
 	if draft.TopMessageID > 0 {
 		update.SetTopMsgID(draft.TopMessageID)
 	}
+	users, chats := r.peerObjectsForDraftUpdate(ctx, userID, peer)
 	updates := &tg.Updates{
 		Updates: appendAuxPtsBookkeeping([]tg.UpdateClass{update}, recorded),
-		Users:   r.usersForDraftUpdate(ctx, userID, peer),
-		Chats:   r.chatsForDraftUpdate(ctx, userID, peer),
+		Users:   users,
+		Chats:   chats,
 		Date:    date,
 		Seq:     0,
 	}
@@ -95,8 +96,7 @@ func (r *Router) onMessagesGetAllDrafts(ctx context.Context) (tg.UpdatesClass, e
 		return nil, dialogDraftErr(err)
 	}
 	updates := make([]tg.UpdateClass, 0, len(drafts))
-	users := r.usersForDrafts(ctx, userID, drafts)
-	chats := r.chatsForDrafts(ctx, userID, drafts)
+	users, chats := r.peerObjectsForDrafts(ctx, userID, drafts)
 	for _, draft := range drafts {
 		peer := tgPeer(draft.Peer)
 		if peer == nil {
@@ -141,10 +141,11 @@ func (r *Router) onMessagesClearAllDrafts(ctx context.Context) (bool, error) {
 		}
 	}
 	r.bookkeepAuxPtsForCurrentSession(ctx, events...)
+	users, chats := r.peerObjectsForDrafts(ctx, userID, drafts)
 	r.pushUserUpdatesIfNoReliableDispatch(ctx, userID, &tg.Updates{
 		Updates: updates,
-		Users:   r.usersForDrafts(ctx, userID, drafts),
-		Chats:   r.chatsForDrafts(ctx, userID, drafts),
+		Users:   users,
+		Chats:   chats,
 		Date:    date,
 		Seq:     0,
 	})
@@ -346,6 +347,20 @@ func (r *Router) chatsForDrafts(ctx context.Context, userID int64, drafts []doma
 	return chats
 }
 
+func (r *Router) peerObjectsForDraftUpdate(ctx context.Context, userID int64, peer domain.Peer) ([]tg.UserClass, []tg.ChatClass) {
+	users := r.usersForDraftUpdate(ctx, userID, peer)
+	chats := r.chatsForDraftUpdate(ctx, userID, peer)
+	r.applyUsernamesToPeerObjects(ctx, users, chats)
+	return users, chats
+}
+
+func (r *Router) peerObjectsForDrafts(ctx context.Context, userID int64, drafts []domain.DialogDraft) ([]tg.UserClass, []tg.ChatClass) {
+	users := r.usersForDrafts(ctx, userID, drafts)
+	chats := r.chatsForDrafts(ctx, userID, drafts)
+	r.applyUsernamesToPeerObjects(ctx, users, chats)
+	return users, chats
+}
+
 func dialogDraftErr(err error) error {
 	switch {
 	case err == nil:
@@ -382,10 +397,11 @@ func (r *Router) clearDraftAfterSend(ctx context.Context, userID int64, peer dom
 	}
 	recorded := r.recordDraftMessageEvent(ctx, userID, peer, topMessageID, &date)
 	r.bookkeepAuxPtsForCurrentSession(ctx, recorded)
+	users, chats := r.peerObjectsForDraftUpdate(ctx, userID, peer)
 	r.pushUserUpdatesIfNoReliableDispatch(ctx, userID, &tg.Updates{
 		Updates: appendAuxPtsBookkeeping([]tg.UpdateClass{update}, recorded),
-		Users:   r.usersForDraftUpdate(ctx, userID, peer),
-		Chats:   r.chatsForDraftUpdate(ctx, userID, peer),
+		Users:   users,
+		Chats:   chats,
 		Date:    date,
 		Seq:     0,
 	})
@@ -534,9 +550,16 @@ func (r *Router) onMessagesGetPeerSettings(ctx context.Context, input tg.InputPe
 		}
 		r.peerSettingsProjectionCache.StoreIfEpoch(userID, peer, settings, loadEpoch)
 	}
+	users := r.peerSettingsUsers(ctx, userID, input)
+	// messages.getPeerSettings is requested while a chat is opened and official
+	// clients feed the returned peer objects into the same cache as getDialogs and
+	// getFullUser. Keep these auxiliary objects on the common response-boundary
+	// projection path: a full User without bot_verification_icon is authoritative
+	// to TDesktop/Android/TWeb and would clear a badge learned from another RPC.
+	r.applyPeerReadModels(ctx, userID, users, nil)
 	return &tg.MessagesPeerSettings{
 		Settings: tgPeerSettings(settings),
-		Users:    r.peerSettingsUsers(ctx, userID, input),
+		Users:    users,
 	}, nil
 }
 

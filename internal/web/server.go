@@ -21,20 +21,21 @@ import (
 )
 
 type Config struct {
-	Addr            string
-	PublicBaseURL   string
-	AppScheme       string
-	AppLinkBase     string
-	WebBaseURL      string
-	AppName         string
-	DownloadURL     string
-	StickerSets     StickerSetResolver
-	Users           UsernameResolver
-	Channels        PublicChannelResolver
-	Privacy         AnonymousPrivacyResolver
-	Photos          ProfilePhotoResolver
-	UniqueGifts     UniqueStarGiftResolver
-	GiftWithdrawals StarGiftWithdrawalResolver
+	Addr              string
+	PublicBaseURL     string
+	AppScheme         string
+	AppLinkBase       string
+	WebBaseURL        string
+	AppName           string
+	DownloadURL       string
+	StickerSets       StickerSetResolver
+	Users             UsernameResolver
+	Channels          PublicChannelResolver
+	Privacy           AnonymousPrivacyResolver
+	Photos            ProfilePhotoResolver
+	UniqueGifts       UniqueStarGiftResolver
+	GiftWithdrawals   StarGiftWithdrawalResolver
+	ModerationAppeals ModerationAppealResolver
 	// TelegramLogin is the optional OIDC/Login HTTP adapter. Public Web owns
 	// the listener so discovery/auth/token and public links share the exact
 	// externally registered origin behind one reverse proxy.
@@ -75,6 +76,12 @@ type UniqueStarGiftResolver interface {
 type StarGiftWithdrawalResolver interface {
 	ResolveWithdrawal(ctx context.Context, providerRequestID string) (domain.StarGiftWithdrawal, bool, error)
 	CompleteWithdrawal(ctx context.Context, providerRequestID string, date int) (domain.StarGiftWithdrawal, error)
+}
+
+type ModerationAppealResolver interface {
+	ResolveAppealLink(ctx context.Context, token string, now time.Time) (domain.ModerationAppealLink, bool, error)
+	Appeal(ctx context.Context, appealID int64) (domain.ModerationAppeal, bool, error)
+	SubmitAppealLink(ctx context.Context, token, text string, now time.Time) (domain.ModerationAppeal, bool, error)
 }
 
 func Start(ctx context.Context, cfg Config, logger *zap.Logger) (*http.Server, error) {
@@ -186,6 +193,7 @@ func newHandler(cfg Config, logger *zap.Logger) (http.Handler, error) {
 		photos:          cfg.Photos,
 		uniqueGifts:     cfg.UniqueGifts,
 		giftWithdrawals: cfg.GiftWithdrawals,
+		appeals:         cfg.ModerationAppeals,
 		publicBaseURL:   cfg.PublicBaseURL,
 		publicHost:      publicHost,
 		appScheme:       cfg.AppScheme,
@@ -199,6 +207,7 @@ func newHandler(cfg Config, logger *zap.Logger) (http.Handler, error) {
 	mux.HandleFunc("GET /healthz", h.healthz)
 	mux.HandleFunc("GET /_public/assets/logo.png", h.brandLogo)
 	mux.HandleFunc("GET /_public/assets/fonts/{file}", h.brandFont)
+	mux.HandleFunc("GET /payments/dev-stars", h.devStarsCheckout)
 	mux.HandleFunc("GET /_public/avatar/{username}/{photoID}", h.publicAvatar)
 	mux.HandleFunc("GET /_public/invite-avatar/{hash}/{photoID}", h.publicInviteAvatar)
 	mux.HandleFunc("GET /addstickers/{shortName}", h.addStickers)
@@ -208,6 +217,10 @@ func newHandler(cfg Config, logger *zap.Logger) (http.Handler, error) {
 	mux.HandleFunc("GET /nft/{slug}/{$}", h.uniqueGift)
 	mux.HandleFunc("GET /gift-withdrawal/{requestID}", h.starGiftWithdrawal)
 	mux.HandleFunc("POST /gift-withdrawal/{requestID}", h.completeStarGiftWithdrawal)
+	if cfg.ModerationAppeals != nil {
+		mux.HandleFunc("GET /appeal/{token}", h.moderationAppeal)
+		mux.HandleFunc("POST /appeal/{token}", h.moderationAppeal)
+	}
 	if cfg.TelegramLogin != nil {
 		mux.Handle("GET /.well-known/openid-configuration", cfg.TelegramLogin)
 		mux.Handle("GET /.well-known/jwks.json", cfg.TelegramLogin)
@@ -232,6 +245,7 @@ type handler struct {
 	photos          ProfilePhotoResolver
 	uniqueGifts     UniqueStarGiftResolver
 	giftWithdrawals StarGiftWithdrawalResolver
+	appeals         ModerationAppealResolver
 	publicBaseURL   string
 	publicHost      string
 	appScheme       string
@@ -240,6 +254,139 @@ type handler struct {
 	appName         string
 	downloadURL     string
 	logger          *zap.Logger
+}
+
+type moderationAppealPage struct {
+	AppName      string
+	CaseID       int64
+	ExpiresAt    string
+	Submitted    bool
+	AppealID     int64
+	AppealStatus domain.ModerationAppealStatus
+	Error        string
+	AppealText   string
+	CanSubmit    bool
+}
+
+type devStarsCheckoutPage struct {
+	AppName string
+	FormID  string
+}
+
+var devStarsCheckoutTemplate = template.Must(template.New("dev-stars-checkout").Parse(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><meta name="robots" content="noindex,nofollow">
+<title>Dev Stars checkout · {{.AppName}}</title><style>
+body{font:16px/1.5 system-ui,sans-serif;background:#f4f6f8;color:#17212b;margin:0;padding:24px}.card{max-width:520px;margin:9vh auto;background:#fff;border-radius:16px;padding:28px;box-shadow:0 8px 32px #0002}h1{margin-top:0}.note{color:#53606d}.status{min-height:24px;color:#b42318}button{width:100%;border:0;border-radius:10px;padding:13px 18px;background:#2481cc;color:#fff;font:inherit;font-weight:650;cursor:pointer}button:disabled{opacity:.55;cursor:default}
+</style></head><body><main class="card"><h1>Complete dev purchase</h1>
+<p>This is a local telesrv test checkout. No card, Google Play, App Store, or external payment provider will be charged.</p>
+<p class="note">The package and fiat amount shown by the client are bound to form {{.FormID}}.</p>
+<button id="complete" type="button">Complete test purchase</button><p id="status" class="status" role="status"></p>
+</main><script>
+(() => { const button=document.getElementById('complete'), status=document.getElementById('status');
+button.addEventListener('click', () => { const proxy=window.TelegramWebviewProxy;
+if(!proxy || typeof proxy.postEvent !== 'function'){status.textContent='Open this checkout inside Telegram.';return;}
+button.disabled=true;status.textContent='Submitting…';
+proxy.postEvent('payment_form_submit', JSON.stringify({title:'telesrv dev payment',credentials:{type:'telesrv_dev',form_id:'{{.FormID}}'}}));
+}); })();
+</script></body></html>`))
+
+func (h *handler) devStarsCheckout(w http.ResponseWriter, r *http.Request) {
+	raw := strings.TrimSpace(r.URL.Query().Get("form_id"))
+	formID, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || formID == 0 || raw != strconv.FormatInt(formID, 10) {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := devStarsCheckoutTemplate.Execute(w, devStarsCheckoutPage{AppName: h.appName, FormID: raw}); err != nil {
+		h.logger.Warn("render dev Stars checkout failed", zap.Error(err))
+	}
+}
+
+var moderationAppealTemplate = template.Must(template.New("moderation-appeal").Parse(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>Moderation appeal · {{.AppName}}</title><style>
+body{font:16px/1.5 system-ui,sans-serif;background:#f4f6f8;color:#17212b;margin:0;padding:24px}.card{max-width:620px;margin:6vh auto;background:#fff;border-radius:16px;padding:28px;box-shadow:0 8px 32px #0002}h1{margin-top:0}textarea{box-sizing:border-box;width:100%;min-height:160px;padding:12px;border:1px solid #ccd4dc;border-radius:10px;font:inherit}button{border:0;border-radius:10px;padding:12px 18px;background:#2481cc;color:#fff;font-weight:600;cursor:pointer}.meta{color:#53606d}.error{color:#b42318}.done{color:#18864b;font-weight:600}
+</style></head><body><main class="card"><h1>Moderation appeal</h1><p class="meta">Case #{{.CaseID}} · link expires {{.ExpiresAt}}</p>
+{{if .Submitted}}{{if eq .AppealStatus "granted"}}<p class="done">Your appeal #{{.AppealID}} was granted. Reversible restrictions are being removed through the audited action queue.</p>
+{{else if eq .AppealStatus "rejected"}}<p class="error">Your appeal #{{.AppealID}} was not granted.</p>
+{{else}}<p class="done">Your appeal #{{.AppealID}} has been submitted. It will be reviewed by a separate moderation step.</p>{{end}}
+{{else}}{{if .Error}}<p class="error">{{.Error}}</p>{{end}}{{if .CanSubmit}}<p>Explain why the moderation decision should be reviewed. Do not include passwords, login codes, or payment details.</p><form method="post"><textarea name="appeal_text" maxlength="4000" required>{{.AppealText}}</textarea><p><button type="submit">Submit appeal</button></p></form>{{end}}{{end}}
+</main></body></html>`))
+
+func (h *handler) moderationAppeal(w http.ResponseWriter, r *http.Request) {
+	if h.appeals == nil {
+		http.NotFound(w, r)
+		return
+	}
+	token := r.PathValue("token")
+	now := time.Now().UTC()
+	link, found, err := h.appeals.ResolveAppealLink(r.Context(), token, now)
+	if err != nil || !found {
+		http.NotFound(w, r)
+		return
+	}
+	page := moderationAppealPage{
+		AppName: h.appName, CaseID: link.CaseID,
+		ExpiresAt: link.ExpiresAt.UTC().Format(time.RFC3339),
+		Submitted: link.AppealID > 0, AppealID: link.AppealID,
+		CanSubmit: link.AppealID == 0,
+	}
+	if link.AppealID > 0 {
+		appeal, appealFound, appealErr := h.appeals.Appeal(r.Context(), link.AppealID)
+		if appealErr != nil || !appealFound || appeal.CaseID != link.CaseID {
+			h.logger.Warn("resolve linked moderation appeal status failed",
+				zap.Int64("case_id", link.CaseID),
+				zap.Int64("appeal_id", link.AppealID),
+				zap.Error(appealErr))
+			http.Error(w, "The appeal status is temporarily unavailable.", http.StatusServiceUnavailable)
+			return
+		}
+		page.AppealStatus = appeal.Status
+	}
+	status := http.StatusOK
+	if r.Method == http.MethodPost && !page.Submitted {
+		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+		if err := r.ParseForm(); err != nil {
+			page.Error = "The appeal form is too large or invalid."
+			status = http.StatusBadRequest
+		} else {
+			page.AppealText = strings.TrimSpace(r.FormValue("appeal_text"))
+			appeal, _, submitErr := h.appeals.SubmitAppealLink(
+				r.Context(), token, page.AppealText, now,
+			)
+			switch {
+			case submitErr == nil:
+				page.Submitted = true
+				page.CanSubmit = false
+				page.AppealID = appeal.ID
+				page.AppealStatus = appeal.Status
+				page.AppealText = ""
+			case errors.Is(submitErr, domain.ErrModerationCaseConflict):
+				page.Error = "The moderation action is still being finalized. Please retry shortly."
+				status = http.StatusConflict
+			case errors.Is(submitErr, domain.ErrModerationCaseInvalid):
+				page.Error = "The appeal text is invalid."
+				status = http.StatusBadRequest
+			default:
+				h.logger.Warn("moderation appeal submission failed",
+					zap.Int64("case_id", link.CaseID),
+					zap.Error(submitErr))
+				page.Error = "The appeal could not be submitted. Please retry."
+				status = http.StatusInternalServerError
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.WriteHeader(status)
+	if err := moderationAppealTemplate.Execute(w, page); err != nil {
+		h.logger.Warn("render moderation appeal page failed",
+			zap.Int64("case_id", link.CaseID), zap.Error(err))
+	}
 }
 
 type starGiftWithdrawalPage struct {
@@ -748,15 +895,20 @@ func (h *handler) resolvePublicPeer(ctx context.Context, username string) (publi
 }
 
 func (h *handler) publicUserPeer(ctx context.Context, requested string, u domain.User) (publicPeer, bool, error) {
-	if u.ID == 0 || !strings.EqualFold(strings.TrimSpace(u.Username), requested) || !validUsernamePath(u.Username) {
+	requested = domain.NormalizeUsername(requested)
+	if u.ID == 0 || !validUsernamePath(requested) {
 		return publicPeer{}, false, fmt.Errorf("user username lookup returned invalid owner for %q", requested)
+	}
+	canonicalUsername := requested
+	if strings.EqualFold(strings.TrimSpace(u.Username), requested) && validUsernamePath(u.Username) {
+		canonicalUsername = strings.TrimSpace(u.Username)
 	}
 	title := strings.TrimSpace(u.FirstName + " " + u.LastName)
 	if title == "" {
-		title = u.Username
+		title = canonicalUsername
 	}
 	if err := validatePublicPeerText(title, u.About); err != nil {
-		return publicPeer{}, false, fmt.Errorf("invalid public user %q: %w", u.Username, err)
+		return publicPeer{}, false, fmt.Errorf("invalid public user %q: %w", requested, err)
 	}
 	about := strings.TrimSpace(u.About)
 	photoKind := domain.ProfilePhotoKindProfile
@@ -779,7 +931,7 @@ func (h *handler) publicUserPeer(ctx context.Context, requested string, u domain
 	peer := publicPeer{
 		id:       u.ID,
 		kind:     publicPeerUser,
-		username: u.Username,
+		username: canonicalUsername,
 		title:    title,
 		about:    about,
 		verified: u.Verified,
@@ -802,30 +954,35 @@ func (h *handler) publicUserPeer(ctx context.Context, requested string, u domain
 }
 
 func (h *handler) publicChannelPeer(ctx context.Context, requested string, ch domain.Channel) (publicPeer, bool, error) {
-	if !strings.EqualFold(strings.TrimSpace(ch.Username), requested) || !validUsernamePath(ch.Username) {
+	requested = domain.NormalizeUsername(requested)
+	if !validUsernamePath(requested) {
 		return publicPeer{}, false, fmt.Errorf("channel username lookup returned invalid owner for %q", requested)
 	}
-	return h.channelToPublicPeer(ctx, ch)
+	canonicalUsername := requested
+	if strings.EqualFold(strings.TrimSpace(ch.Username), requested) && validUsernamePath(ch.Username) {
+		canonicalUsername = strings.TrimSpace(ch.Username)
+	}
+	return h.channelToPublicPeer(ctx, ch, canonicalUsername)
 }
 
 // publicInviteChannelPeer projects a channel resolved via an invite hash.
 // Unlike publicChannelPeer it does not require (or use) a public username —
 // invite links exist precisely for channels/groups that may not have one.
 func (h *handler) publicInviteChannelPeer(ctx context.Context, ch domain.Channel) (publicPeer, bool, error) {
-	return h.channelToPublicPeer(ctx, ch)
+	return h.channelToPublicPeer(ctx, ch, strings.TrimSpace(ch.Username))
 }
 
-func (h *handler) channelToPublicPeer(ctx context.Context, ch domain.Channel) (publicPeer, bool, error) {
+func (h *handler) channelToPublicPeer(ctx context.Context, ch domain.Channel, username string) (publicPeer, bool, error) {
 	if ch.ID == 0 || ch.Deleted || ch.ParticipantsCount < 0 || (!ch.Broadcast && !ch.Megagroup) {
 		return publicPeer{}, false, fmt.Errorf("channel %d is not eligible for a public projection", ch.ID)
 	}
 	if err := validatePublicPeerText(ch.Title, ch.About); err != nil {
-		return publicPeer{}, false, fmt.Errorf("invalid public channel %q: %w", ch.Username, err)
+		return publicPeer{}, false, fmt.Errorf("invalid public channel %q: %w", username, err)
 	}
 	peer := publicPeer{
 		id:          ch.ID,
 		kind:        publicPeerChannel,
-		username:    ch.Username,
+		username:    username,
 		title:       strings.TrimSpace(ch.Title),
 		about:       strings.TrimSpace(ch.About),
 		verified:    ch.Verified,
@@ -1135,21 +1292,7 @@ func validStarGiftSlugPath(slug string) bool {
 }
 
 func validUsernamePath(username string) bool {
-	if username == "" || len(username) < 5 || len(username) > 32 {
-		return false
-	}
-	for i, r := range username {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
-		case r >= '0' && r <= '9', r == '_':
-			if i == 0 {
-				return false
-			}
-		default:
-			return false
-		}
-	}
-	return true
+	return domain.ValidCollectibleUsername(domain.NormalizeUsername(username))
 }
 
 func validInviteHashPath(hash string) bool {

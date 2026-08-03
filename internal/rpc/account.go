@@ -25,6 +25,12 @@ const mtprotoPushTokenType = 7
 
 // registerAccount 注册 account.* RPC handler。
 func (r *Router) registerAccount(d *tlprofile.Dispatcher) {
+	registerRPC[*tg.AccountReportPeerRequest](d, tlprofile.SemanticMethodAccountReportPeer, func(ctx context.Context, req *tg.AccountReportPeerRequest) (any, error) {
+		return r.onAccountReportPeer(ctx, req)
+	})
+	registerRPC[*tg.AccountReportProfilePhotoRequest](d, tlprofile.SemanticMethodAccountReportProfilePhoto, func(ctx context.Context, req *tg.AccountReportProfilePhotoRequest) (any, error) {
+		return r.onAccountReportProfilePhoto(ctx, req)
+	})
 	registerRPC[*tg.AccountDeleteAccountRequest](d, tlprofile.SemanticMethodAccountDeleteAccount, func(ctx context.Context, req *tg.AccountDeleteAccountRequest) (any, error) {
 		return r.onAccountDeleteAccount(ctx, req)
 	})
@@ -68,6 +74,12 @@ func (r *Router) registerAccount(d *tlprofile.Dispatcher) {
 	registerRPC[*tg.AccountUpdateUsernameRequest](d, tlprofile.SemanticMethodAccountUpdateUsername, func(ctx context.Context, layerRequest *tg.AccountUpdateUsernameRequest) (any, error) {
 		return r.onAccountUpdateUsername(ctx, layerRequest.
 			Username)
+	})
+	registerRPC[*tg.AccountReorderUsernamesRequest](d, tlprofile.SemanticMethodAccountReorderUsernames, func(ctx context.Context, layerRequest *tg.AccountReorderUsernamesRequest) (any, error) {
+		return r.onAccountReorderUsernames(ctx, layerRequest)
+	})
+	registerRPC[*tg.AccountToggleUsernameRequest](d, tlprofile.SemanticMethodAccountToggleUsername, func(ctx context.Context, layerRequest *tg.AccountToggleUsernameRequest) (any, error) {
+		return r.onAccountToggleUsername(ctx, layerRequest)
 	})
 	registerRPC[*tg.AccountUpdateBirthdayRequest](d, tlprofile.SemanticMethodAccountUpdateBirthday, func(ctx context.Context, layerRequest *tg.AccountUpdateBirthdayRequest) (any, error) {
 		return r.onAccountUpdateBirthday(ctx, layerRequest)
@@ -216,12 +228,7 @@ func (r *Router) registerAccount(d *tlprofile.Dispatcher) {
 	registerRPC[*tg.AccountGetChatThemesRequest](d, tlprofile.SemanticMethodAccountGetChatThemes, func(ctx context.Context, layerRequest *tg.AccountGetChatThemesRequest) (any, error) {
 		hash := layerRequest.
 			Hash
-		_ = hash
-
-		if _, _, err := r.currentUserID(ctx); err != nil {
-			return nil, internalErr()
-		}
-		return tdesktop.ChatThemes(hash), nil
+		return r.onAccountGetChatThemes(ctx, hash)
 	})
 	registerRPC[
 
@@ -293,6 +300,7 @@ func (r *Router) registerAccount(d *tlprofile.Dispatcher) {
 			return false, tgerr400("WALLPAPER_INVALID")
 		}
 		if _, ok := tdesktop.LookupWallPaper(req.Wallpaper); !ok {
+			r.log.Info("wallpaper reference rejected", wallpaperReferenceLogFields("account.installWallPaper", req.Wallpaper)...)
 			return false, tgerr400("WALLPAPER_INVALID")
 		}
 		return true, nil
@@ -526,6 +534,20 @@ func (r *Router) unregisterPushSession(ctx context.Context, tokenType int, token
 	registrar.UnmarkPushSession(rawAuthKeyID, sessionID)
 }
 
+func wallpaperReferenceLogFields(method string, input tg.InputWallPaperClass) []zap.Field {
+	fields := []zap.Field{zap.String("method", method)}
+	switch wallpaper := input.(type) {
+	case *tg.InputWallPaperSlug:
+		return append(fields, zap.String("input_type", "inputWallPaperSlug"), zap.String("slug", wallpaper.Slug))
+	case *tg.InputWallPaper:
+		return append(fields, zap.String("input_type", "inputWallPaper"), zap.Int64("wallpaper_id", wallpaper.ID))
+	case *tg.InputWallPaperNoFile:
+		return append(fields, zap.String("input_type", "inputWallPaperNoFile"), zap.Int64("wallpaper_id", wallpaper.ID))
+	default:
+		return append(fields, zap.String("input_type", "unknown"))
+	}
+}
+
 func (r *Router) onAccountGetPassword(ctx context.Context) (*tg.AccountPassword, error) {
 	if r.deps.Account == nil {
 		return tgPassword(domain.PasswordSettings{SecureRandom: []byte("telesrv-tdesktop-dev-secure-rand")}), nil
@@ -657,7 +679,8 @@ func (r *Router) onAccountResetAuthorization(ctx context.Context, hash int64) (b
 	}
 	r.revokeAuthKeySessions(deleted.AuthKeyID)
 	_ = r.clearAuthKeyState(ctx, deleted.AuthKeyID)
-	// P1 修复：撤销该会话销毁其 auth_key，级联 discard 该设备绑定的活跃密聊并通知对端。
+	// 撤销该设备的业务授权后，级联 discard 其绑定的活跃密聊并通知对端。
+	// 协议 auth key 必须保留，供客户端重连后取得 AUTH_KEY_UNREGISTERED。
 	r.discardSecretChatsForAuthKey(ctx, businessAuthKeyInt64(deleted.AuthKeyID), userID)
 	return true, nil
 }
@@ -792,7 +815,7 @@ func (r *Router) onAccountVerifyEmail(ctx context.Context, req *tg.AccountVerify
 		if ClientTypeFrom(ctx) == ClientTypeAndroid {
 			return &tg.AccountEmailVerifiedLogin{
 				Email:    email,
-				SentCode: tgEmailSentCode(p.PhoneCodeHash, domain.MaskEmail(email), len(strings.TrimSpace(code)), true),
+				SentCode: tgEmailSentCode(p.PhoneCodeHash, domain.MaskEmail(email), len(strings.TrimSpace(code)), r.loginEmailResetAvailable()),
 			}, nil
 		}
 		u, _, needSignUp, signInErr := r.deps.Auth.SignInWithEmail(ctx, r.authzFromCtx(ctx), p.PhoneNumber, p.PhoneCodeHash, code)
@@ -946,6 +969,10 @@ func (r *Router) onAccountSetPrivacy(ctx context.Context, req *tg.AccountSetPriv
 		return nil, err
 	}
 	r.invalidateRPCProjectionForUser(userID)
+	// updatePrivacy is an absolute, non-PTS account-state notification. The
+	// originating session applies account.setPrivacy's response; other online
+	// sessions receive this best-effort update, while offline sessions reload
+	// the authoritative rules through account.getPrivacy.
 	r.pushUserUpdates(ctx, userID, &tg.Updates{
 		Updates: []tg.UpdateClass{&tg.UpdatePrivacy{
 			Key:   tgPrivacyKey(saved.Key),
@@ -953,7 +980,12 @@ func (r *Router) onAccountSetPrivacy(ctx context.Context, req *tg.AccountSetPriv
 		}},
 		Users: []tg.UserClass{},
 		Chats: []tg.ChatClass{},
+		Date:  int(r.clock.Now().Unix()),
+		Seq:   0,
 	})
+	if domainKey == domain.PrivacyKeyStatusTimestamp {
+		r.pushStatusPrivacyRefresh(ctx, userID)
+	}
 	return out, nil
 }
 
@@ -978,10 +1010,11 @@ func (r *Router) onAccountSetAccountTTL(ctx context.Context, ttl tg.AccountDaysT
 		return false, tgerr400("TTL_DAYS_INVALID")
 	}
 	if svc, ok := r.accountSettingsSvc(); ok {
-		if _, err := svc.SetAccountTTL(ctx, userID, ttl.Days); err != nil {
+		saved, err := svc.SetAccountTTL(ctx, userID, ttl.Days)
+		if err != nil {
 			return false, internalErr()
 		}
-		r.accountSettings.Delete(userID)
+		r.accountSettings.Store(userID, saved)
 	}
 	return true, nil
 }
@@ -1008,7 +1041,7 @@ func (r *Router) onAccountSetGlobalPrivacySettings(ctx context.Context, settings
 		if err != nil {
 			return nil, internalErr()
 		}
-		r.accountSettings.Delete(userID)
+		r.accountSettings.Store(userID, saved)
 		return tgGlobalPrivacySettings(saved.GlobalPrivacy), nil
 	}
 	return &settings, nil
@@ -1035,10 +1068,11 @@ func (r *Router) onAccountSetContentSettings(ctx context.Context, req *tg.Accoun
 		return false, inputRequestInvalidErr()
 	}
 	if svc, ok := r.accountSettingsSvc(); ok {
-		if _, err := svc.SetSensitiveContent(ctx, userID, req.SensitiveEnabled); err != nil {
+		saved, err := svc.SetSensitiveContent(ctx, userID, req.SensitiveEnabled)
+		if err != nil {
 			return false, internalErr()
 		}
-		r.accountSettings.Delete(userID)
+		r.accountSettings.Store(userID, saved)
 	}
 	return true, nil
 }
@@ -1061,10 +1095,11 @@ func (r *Router) onAccountSetContactSignUpNotification(ctx context.Context, sile
 		return false, internalErr()
 	}
 	if svc, ok := r.accountSettingsSvc(); ok {
-		if _, err := svc.SetContactSignUpSilent(ctx, userID, silent); err != nil {
+		saved, err := svc.SetContactSignUpSilent(ctx, userID, silent)
+		if err != nil {
 			return false, internalErr()
 		}
-		r.accountSettings.Delete(userID)
+		r.accountSettings.Store(userID, saved)
 	}
 	return true, nil
 }
@@ -1134,13 +1169,15 @@ func (r *Router) tgAccountPrivacyRules(ctx context.Context, viewerUserID int64, 
 			return nil, internalErr()
 		}
 	}
-	return &tg.AccountPrivacyRules{
+	out := &tg.AccountPrivacyRules{
 		Rules: tgPrivacyRules(rules.Rules),
 		// viewer 可能把自己（inputUserSelf）写进隐私名单，须带 self 标志，否则下发的
 		// self=false user 会被 DrKLO putUsers 覆盖账号缓存。
 		Users: tgUsersForViewer(viewerUserID, users),
 		Chats: []tg.ChatClass{},
-	}, nil
+	}
+	r.applyPeerReadModels(ctx, viewerUserID, out.Users, out.Chats)
+	return out, nil
 }
 
 func (r *Router) domainPrivacyRulesFromInput(ctx context.Context, userID int64, in []tg.InputPrivacyRuleClass) ([]domain.PrivacyRule, error) {
@@ -1568,8 +1605,7 @@ func (r *Router) onAccountUpdateProfile(ctx context.Context, req *tg.AccountUpda
 		return nil, profileErr(err)
 	}
 	r.invalidateRPCProjectionForUser(u.ID)
-	r.pushUsernameUpdate(ctx, u)
-	return r.tgSelfUser(u), nil
+	return r.pushUsernameUpdate(ctx, u), nil
 }
 
 func (r *Router) onAccountCheckUsername(ctx context.Context, username string) (bool, error) {
@@ -1602,8 +1638,55 @@ func (r *Router) onAccountUpdateUsername(ctx context.Context, username string) (
 		return nil, usernameErr(err)
 	}
 	r.invalidateRPCProjectionForUser(u.ID)
-	r.pushUsernameUpdate(ctx, u)
-	return r.tgSelfUser(u), nil
+	return r.pushUsernameUpdate(ctx, u), nil
+}
+
+// onAccountReorderUsernames rewrites the caller's active username order
+// (account.reorderUsernames). The editable slot is included when active, just as
+// it is in the vector sent by official clients.
+//
+// Without a username registry the account owns a single editable username, which
+// has no order to change: USERNAME_NOT_MODIFIED is the accurate answer and keeps
+// clients from believing a reorder took effect.
+func (r *Router) onAccountReorderUsernames(ctx context.Context, req *tg.AccountReorderUsernamesRequest) (bool, error) {
+	userID, _, err := r.currentUserID(ctx)
+	if err != nil {
+		return false, internalErr()
+	}
+	if req == nil {
+		return false, usernameInvalidErr()
+	}
+	if len(req.Order) > domain.MaxPeerCollectibleUsernames+1 {
+		return false, limitInvalidErr()
+	}
+	if r.deps.Usernames == nil {
+		return false, usernameNotModifiedErr()
+	}
+	if err := r.reorderRegistryUsernames(ctx, domain.Peer{Type: domain.PeerTypeUser, ID: userID}, req.Order); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// onAccountToggleUsername activates/deactivates one of the caller's own
+// collectible usernames (account.toggleUsername). Deactivating the editable slot
+// through this method is rejected by the domain rules with USERNAME_INVALID:
+// clearing the editable username is account.updateUsername's job.
+func (r *Router) onAccountToggleUsername(ctx context.Context, req *tg.AccountToggleUsernameRequest) (bool, error) {
+	userID, _, err := r.currentUserID(ctx)
+	if err != nil {
+		return false, internalErr()
+	}
+	if req == nil {
+		return false, usernameInvalidErr()
+	}
+	if r.deps.Usernames == nil {
+		return false, usernameNotModifiedErr()
+	}
+	if err := r.toggleRegistryUsername(ctx, domain.Peer{Type: domain.PeerTypeUser, ID: userID}, req.Username, req.Active); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // onAccountUpdateBirthday 持久化资料页生日（account.updateBirthday）。birthday 缺省即清除；
@@ -1716,12 +1799,13 @@ func (r *Router) onAccountUpdateEmojiStatus(ctx context.Context, status tg.Emoji
 	}
 	r.invalidateRPCProjectionForUser(u.ID)
 	update := &tg.UpdateUserEmojiStatus{UserID: u.ID, EmojiStatus: tgUserEmojiStatusValue(value)}
+	self := r.tgSelfUserWithUsernames(ctx, u)
 	if durableWrite {
 		if sessionID != 0 {
 			r.bookkeepAuxPtsForCurrentSession(ctx, event)
 		}
 		r.pushUserUpdatesIfNoReliableDispatch(ctx, u.ID, &tg.Updates{
-			Updates: []tg.UpdateClass{update}, Users: []tg.UserClass{r.tgSelfUser(u)}, Date: event.Date,
+			Updates: []tg.UpdateClass{update}, Users: []tg.UserClass{self}, Date: event.Date,
 		})
 	} else if updates, ok := r.deps.Updates.(UserEmojiStatusUpdatesService); ok {
 		event, _, recordErr := updates.RecordUserEmojiStatus(ctx, authKeyID, userID, value, rawAuthKeyIDForOrigin(ctx), sessionID)
@@ -1732,13 +1816,13 @@ func (r *Router) onAccountUpdateEmojiStatus(ctx context.Context, status tg.Emoji
 			r.bookkeepAuxPtsForCurrentSession(ctx, event)
 		}
 		r.pushUserUpdatesIfNoReliableDispatch(ctx, u.ID, &tg.Updates{
-			Updates: []tg.UpdateClass{update}, Users: []tg.UserClass{r.tgSelfUser(u)}, Date: event.Date,
+			Updates: []tg.UpdateClass{update}, Users: []tg.UserClass{self}, Date: event.Date,
 		})
 	} else {
 		// Lightweight test deployments without the durable extension retain the
 		// previous online-only behavior; production wiring implements it.
 		r.pushUserUpdates(ctx, u.ID, &tg.Updates{
-			Updates: []tg.UpdateClass{update}, Users: []tg.UserClass{r.tgSelfUser(u)}, Date: int(r.clock.Now().Unix()),
+			Updates: []tg.UpdateClass{update}, Users: []tg.UserClass{self}, Date: int(r.clock.Now().Unix()),
 		})
 	}
 	return true, nil
@@ -1812,7 +1896,7 @@ func (r *Router) onAccountUpdateColor(ctx context.Context, req *tg.AccountUpdate
 	r.invalidateRPCProjectionForUser(u.ID)
 	r.pushUserUpdates(ctx, u.ID, &tg.Updates{
 		Updates: []tg.UpdateClass{&tg.UpdateUser{UserID: u.ID}},
-		Users:   []tg.UserClass{r.tgSelfUser(u)},
+		Users:   []tg.UserClass{r.tgSelfUserWithUsernames(ctx, u)},
 		Date:    int(r.clock.Now().Unix()),
 	})
 	return true, nil
@@ -1916,20 +2000,35 @@ func (r *Router) onAccountGetCollectibleEmojiStatuses(ctx context.Context, hash 
 	return &tg.AccountEmojiStatuses{Hash: catalogHash, Statuses: statuses}, nil
 }
 
-func (r *Router) pushUsernameUpdate(ctx context.Context, u domain.User) {
+func (r *Router) pushUsernameUpdate(ctx context.Context, u domain.User) *tg.User {
+	// updateUserName carries the vector clients persist, so it has to be the full
+	// registry list when one exists. One peer, one registry read; the overlay
+	// degrades to tgUsernames(u.Username) whenever the registry is unavailable.
+	// Keep the RPC result and pushed update as distinct tg.User objects: TL Encode
+	// recomputes flags, so sharing one pointer across response and push delivery
+	// would make otherwise independent encoders mutate the same object.
+	self := r.tgSelfUser(u)
+	pushedSelf := r.tgSelfUser(u)
+	users := []tg.UserClass{self, pushedSelf}
+	r.applyUsernamesToPeerObjects(ctx, users, nil)
 	if u.ID == 0 {
-		return
+		return self
+	}
+	usernames := tgUsernames(u.Username)
+	if vector, ok := pushedSelf.GetUsernames(); ok && len(vector) > 0 {
+		usernames = vector
 	}
 	r.pushUserUpdates(ctx, u.ID, &tg.Updates{
 		Updates: []tg.UpdateClass{&tg.UpdateUserName{
 			UserID:    u.ID,
 			FirstName: u.FirstName,
 			LastName:  u.LastName,
-			Usernames: tgUsernames(u.Username),
+			Usernames: usernames,
 		}},
-		Users: []tg.UserClass{r.tgSelfUser(u)},
+		Users: []tg.UserClass{pushedSelf},
 		Date:  int(r.clock.Now().Unix()),
 	})
+	return self
 }
 
 func (r *Router) pushSelfUserChangedUpdate(ctx context.Context, u domain.User) {
@@ -1938,7 +2037,7 @@ func (r *Router) pushSelfUserChangedUpdate(ctx context.Context, u domain.User) {
 	}
 	r.pushUserUpdates(ctx, u.ID, &tg.Updates{
 		Updates: []tg.UpdateClass{&tg.UpdateUser{UserID: u.ID}},
-		Users:   []tg.UserClass{r.tgSelfUser(u)},
+		Users:   []tg.UserClass{r.tgSelfUserWithUsernames(ctx, u)},
 		Date:    int(r.clock.Now().Unix()),
 	})
 }

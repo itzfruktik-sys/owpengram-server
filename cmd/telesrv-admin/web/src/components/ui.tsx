@@ -1,8 +1,7 @@
 import { CircleAlert } from "lucide-react";
 import type { ReactNode } from "react";
-import { useI18n } from "../i18n";
-import { formatDate } from "../lib/format";
-import type { AuditLogRow } from "../types";
+import { displayUsername, formatDate } from "../lib/format";
+import type { AccountUsername, AuditLogRow } from "../types";
 
 type Tone = "neutral" | "good" | "danger" | "warn";
 
@@ -92,11 +91,10 @@ export function Summary({ label, value, mono = false }: { label: string; value: 
 }
 
 export function AuditTable({ rows }: { rows: AuditLogRow[] }) {
-  const { t } = useI18n();
   return (
     <div className="table-wrap">
       <table className="data-table">
-        <thead><tr><th>{t("audit.id")}</th><th>{t("audit.commandID")}</th><th>{t("audit.action")}</th><th>{t("audit.actor")}</th><th>{t("audit.status")}</th><th>{t("audit.dryRun")}</th><th>{t("audit.reason")}</th><th>{t("audit.time")}</th></tr></thead>
+        <thead><tr><th>{"ID"}</th><th>{"Command ID"}</th><th>{"Action"}</th><th>{"Actor"}</th><th>{"Status"}</th><th>{"Dry-run"}</th><th>{"Reason"}</th><th>{"Time"}</th></tr></thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.ID}>
@@ -105,7 +103,7 @@ export function AuditTable({ rows }: { rows: AuditLogRow[] }) {
               <td>{row.Action}</td>
               <td>{row.Actor}</td>
               <td>{row.Status}</td>
-              <td>{row.DryRun ? t("common.yes") : t("common.no")}</td>
+              <td>{row.DryRun ? "Yes" : "No"}</td>
               <td className="truncate">{row.Reason}</td>
               <td>{formatDate(row.CreatedAt)}</td>
             </tr>
@@ -118,8 +116,7 @@ export function AuditTable({ rows }: { rows: AuditLogRow[] }) {
 }
 
 export function EmptyRow({ colSpan }: { colSpan: number }) {
-  const { t } = useI18n();
-  return <tr><td colSpan={colSpan} className="empty-cell">{t("common.noResults")}</td></tr>;
+  return <tr><td colSpan={colSpan} className="empty-cell">{"No results"}</td></tr>;
 }
 
 export function LoadingSurface({ label }: { label: string }) {
@@ -128,4 +125,33 @@ export function LoadingSurface({ label }: { label: string }) {
 
 export function JsonBlock({ value }: { value: string }) {
   return <pre className="json-block">{value || "{}"}</pre>;
+}
+
+// UsernameCell renders a peer's editable username with its collectible usernames
+// branching off underneath, in the order clients project them.
+//
+// An inactive collectible is shown rather than hidden: the peer still owns it, it
+// just does not resolve publicly, and an operator looking for "where did that name
+// go" needs to see it. It is marked instead of dropped.
+// Pass an empty username to render the branch on its own, which is what the
+// detail header does: it already shows the editable slot on the line above.
+export function UsernameCell({ username, collectibles }: { username?: string; collectibles?: AccountUsername[] | null }) {
+  const main = displayUsername(username ?? "");
+  const branch = collectibles ?? [];
+  if (branch.length === 0) {
+    return <>{main || "-"}</>;
+  }
+  return (
+    <>
+      {main}
+      <ul className="username-branch">
+        {branch.map((item) => (
+          <li key={item.Username} className={item.Active ? "" : "inactive"}>
+            <span>{displayUsername(item.Username)}</span>
+            {!item.Active && <em>{"inactive"}</em>}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
 }

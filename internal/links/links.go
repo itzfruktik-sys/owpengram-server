@@ -8,7 +8,7 @@ import (
 
 const (
 	DefaultPublicBaseURL = "https://telesrv.net"
-	DefaultWebBaseURL    = "https://web.telesrv.net"
+	DefaultWebBaseURL    = "https://weba.telesrv.net"
 	DefaultAppScheme     = "telesrv"
 	DefaultAppName       = "telesrv"
 	DefaultDownloadURL   = "https://owpengram.org"
@@ -134,6 +134,24 @@ func (b AppLinkBuilder) BuildUsername(username string, query url.Values) string 
 	}
 	query.Set("domain", username)
 	return b.Build("resolve", query)
+}
+
+// AcceptsEntityURL reports whether a raw custom-scheme URL belongs to this
+// server's configured app-link namespace. The legacy route-as-host scheme is
+// accepted for rollout compatibility; a distinct host-based scheme is limited
+// to the exact configured host so arbitrary same-scheme links aren't promoted
+// to clickable message entities by the server.
+func (b AppLinkBuilder) AcceptsEntityURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Opaque != "" || parsed.User != nil || parsed.Hostname() == "" || parsed.Port() != "" {
+		return false
+	}
+	if strings.EqualFold(parsed.Scheme, b.legacyScheme) {
+		return true
+	}
+	return b.baseHost != "" &&
+		strings.EqualFold(parsed.Scheme, b.baseScheme) &&
+		strings.EqualFold(parsed.Host, b.baseHost)
 }
 
 // MatchesRoute accepts the exact configured host-path form and the retained

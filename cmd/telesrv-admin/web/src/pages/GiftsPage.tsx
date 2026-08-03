@@ -5,13 +5,19 @@ import { createPortal } from "react-dom";
 import { api, APIError, errorMessage } from "../api";
 import { ActionButton } from "../components/ActionButton";
 import { Alert, Badge, EmptyRow, Metric, PageFrame, QueryPanel } from "../components/ui";
-import { useI18n } from "../i18n";
 import { formatDate } from "../lib/format";
 import type { CommandResult, DefaultGiftRow, OfficialStarGiftRow, StarGiftRow } from "../types";
 import { GiftCollectiblesModal } from "./GiftCollectiblesModal";
 
 type OfficialGiftCategory = "all" | "upgrade" | "craft" | "basic";
 type GiftPageSize = 10 | 20 | 50 | 100 | "all";
+
+const officialCategoryLabels: Record<OfficialGiftCategory, string> = {
+  all: "All",
+  upgrade: "Upgradable",
+  craft: "Craftable",
+  basic: "Not upgradable"
+};
 
 // The demo pool only has 3 placeholder gifts left after pruning to one per
 // capability tier (Spark/Star/Coin); hide the tab until real custom designs
@@ -105,7 +111,6 @@ function OfficialLottiePreview({ sourceGiftID }: { sourceGiftID: string }) {
 }
 
 export function GiftsPage() {
-  const { t } = useI18n();
   const [gifts, setGifts] = useState<StarGiftRow[]>([]);
   const [query, setQuery] = useState("");
   const [importOpen, setImportOpen] = useState(false);
@@ -236,7 +241,7 @@ export function GiftsPage() {
 
   async function bulkSetEnabled(nextEnabled: boolean) {
     if (!bulkReason.trim()) {
-      setBulkError(t("action.reasonRequired"));
+      setBulkError("Please enter an operation reason");
       return;
     }
     setBulkBusy(true);
@@ -257,7 +262,7 @@ export function GiftsPage() {
     }
     setBulkBusy(false);
     if (failed > 0) {
-      setBulkError(t("gifts.bulkStatusFailed", { failed, total: ids.length }));
+      setBulkError(`${failed} of ${ids.length} failed`);
     } else {
       setSelected(new Set());
       setBulkReason("");
@@ -266,8 +271,8 @@ export function GiftsPage() {
   }
 
   function uploadForm(confirm: boolean, commandID = "") {
-    if (!file) throw new Error(t("gifts.fileRequired"));
-    if (!reason.trim()) throw new Error(t("action.reasonRequired"));
+    if (!file) throw new Error("Choose a TGS or Lottie file first");
+    if (!reason.trim()) throw new Error("Please enter an operation reason");
     const form = new FormData();
     form.set("metadata", JSON.stringify({
       command_id: commandID,
@@ -285,14 +290,14 @@ export function GiftsPage() {
   }
 
   function defaultPayload(confirm: boolean, commandID = "") {
-    if (!selectedDefaultID) throw new Error(t("gifts.defaultRequired"));
-    if (!reason.trim()) throw new Error(t("action.reasonRequired"));
+    if (!selectedDefaultID) throw new Error("Choose a default gift first");
+    if (!reason.trim()) throw new Error("Please enter an operation reason");
     return { command_id: commandID, reason: reason.trim(), confirm, id: selectedDefaultID };
   }
 
   function officialPayload(confirm: boolean, commandID = "") {
-    if (!sourceGiftID) throw new Error(t("gifts.officialRequired"));
-    if (!reason.trim()) throw new Error(t("action.reasonRequired"));
+    if (!sourceGiftID) throw new Error("Choose an official gift first");
+    if (!reason.trim()) throw new Error("Please enter an operation reason");
     return {
       command_id: commandID, reason: reason.trim(), confirm,
 		source_gift_id: sourceGiftID, gift_id: giftID, title: title.trim(),
@@ -304,7 +309,7 @@ export function GiftsPage() {
 
   function chooseOfficial(gift: OfficialStarGiftRow) {
     setSourceGiftID(gift.source_gift_id);
-    setTitle(gift.title || t("gifts.officialUnnamed", { id: gift.source_gift_id }));
+    setTitle(gift.title || `Unnamed official gift #${gift.source_gift_id}`);
     setStars(String(gift.stars));
     setConvertStars(String(gift.convert_stars));
     setIncludeCollectible(gift.can_upgrade);
@@ -343,7 +348,7 @@ export function GiftsPage() {
 
   async function runBulkImport() {
     if (!bulkImportOpen) return;
-    if (!bulkImportReason.trim()) { setBulkImportError(t("action.reasonRequired")); return; }
+    if (!bulkImportReason.trim()) { setBulkImportError("Please enter an operation reason"); return; }
     const source = bulkImportOpen;
     setBulkImportBusy(true); setBulkImportError(""); setBulkImportResult(null);
     setBulkImportProgress({ done: 0, total: bulkImportItems.length });
@@ -440,60 +445,60 @@ export function GiftsPage() {
     : Boolean(file);
 
   return (
-    <PageFrame title={t("gifts.pageTitle")} eyebrow={t("gifts.eyebrow")} actions={<>
-      <button className="btn" type="button" onClick={() => load()} disabled={busy}><RefreshCw size={15} /> {t("common.refresh")}</button>
-      <button className="btn primary" type="button" onClick={startImport}><Plus size={15} /> {t("gifts.add")}</button>
+    <PageFrame title={"Star Gift Catalog"} eyebrow={"Catalog, immutable revisions and animation assets"} actions={<>
+      <button className="btn" type="button" onClick={() => load()} disabled={busy}><RefreshCw size={15} /> {"Refresh"}</button>
+      <button className="btn primary" type="button" onClick={startImport}><Plus size={15} /> {"Add gift"}</button>
     </>}>
       {error && <Alert>{error}</Alert>}
       <div className="metric-row gift-metrics">
-        <Metric label={t("gifts.total")} value={String(gifts.length)} />
-        <Metric label={t("gifts.enabled")} value={String(gifts.filter((gift) => gift.Enabled).length)} tone="good" />
-		<Metric label={t("gifts.received")} value={gifts.reduce((sum, gift) => sum + BigInt(gift.ReceivedCount), 0n).toString()} />
-        <Metric label={t("gifts.formats")} value="TGS / Lottie" />
+        <Metric label={"Catalog entries"} value={String(gifts.length)} />
+        <Metric label={"Enabled"} value={String(gifts.filter((gift) => gift.Enabled).length)} tone="good" />
+		<Metric label={"Received gifts"} value={gifts.reduce((sum, gift) => sum + BigInt(gift.ReceivedCount), 0n).toString()} />
+        <Metric label={"Accepted formats"} value="TGS / Lottie" />
       </div>
       <QueryPanel>
         <div className="toolbar">
-          <label className="searchbox"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("gifts.searchPlaceholder")} /></label>
-          <label className="gift-page-size"><span>{t("gifts.perPage")}</span>
+          <label className="searchbox"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={"Search gift ID, title or format"} /></label>
+          <label className="gift-page-size"><span>{"Per page"}</span>
             <select value={String(pageSize)} onChange={(event) => setPageSize(event.target.value === "all" ? "all" : (Number(event.target.value) as GiftPageSize))}>
               <option value="10">10</option>
               <option value="20">20</option>
               <option value="50">50</option>
               <option value="100">100</option>
-              <option value="all">{t("gifts.perPageAll")}</option>
+              <option value="all">{"All"}</option>
             </select>
           </label>
-          <span className="gift-list-summary">{t("gifts.listSummary", { shown: visibleGifts.length, total: gifts.length })}</span>
+          <span className="gift-list-summary">{`Showing ${visibleGifts.length} of ${gifts.length}`}</span>
         </div>
       </QueryPanel>
       {selected.size > 0 && <div className="gift-bulk-toolbar">
-        <span className="gift-bulk-count">{t("gifts.bulkSelected", { count: selected.size })}</span>
-        <label className="gift-reason-field gift-bulk-reason"><span>{t("gifts.reason")}</span><input value={bulkReason} placeholder={t("gifts.reasonPlaceholder")} onChange={(e) => setBulkReason(e.target.value)} /></label>
+        <span className="gift-bulk-count">{`${selected.size} selected`}</span>
+        <label className="gift-reason-field gift-bulk-reason"><span>{"Audit reason"}</span><input value={bulkReason} placeholder={"Briefly describe why this gift is being imported"} onChange={(e) => setBulkReason(e.target.value)} /></label>
         <button className="btn" type="button" onClick={() => bulkSetEnabled(true)} disabled={bulkBusy}>
-          {bulkBusy ? <Loader2 className="spin" size={14} /> : <CheckCircle2 size={14} />} {t("gifts.bulkEnable")}
+          {bulkBusy ? <Loader2 className="spin" size={14} /> : <CheckCircle2 size={14} />} {"Enable selected"}
         </button>
         <button className="btn" type="button" onClick={() => bulkSetEnabled(false)} disabled={bulkBusy}>
-          {bulkBusy ? <Loader2 className="spin" size={14} /> : <Pause size={14} />} {t("gifts.bulkDisable")}
+          {bulkBusy ? <Loader2 className="spin" size={14} /> : <Pause size={14} />} {"Disable selected"}
         </button>
-        <button className="btn" type="button" onClick={() => { setSelected(new Set()); setBulkError(""); }} disabled={bulkBusy}>{t("common.close")}</button>
+        <button className="btn" type="button" onClick={() => { setSelected(new Set()); setBulkError(""); }} disabled={bulkBusy}>{"Close"}</button>
         {bulkError && <span className="gift-bulk-error">{bulkError}</span>}
       </div>}
       <div className="table-wrap gift-table-wrap">
         <table className="data-table gift-table">
-          <thead><tr><th className="gift-select-col"><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} aria-label={t("gifts.bulkSelectAll")} /></th><th>{t("gifts.animation")}</th><th>{t("gifts.idRevision")}</th><th>{t("gifts.title")}</th><th>{t("gifts.price")}</th><th>{t("gifts.source")}</th><th>{t("gifts.received")}</th><th>{t("common.status")}</th><th>{t("common.updatedAt")}</th><th>{t("common.actions")}</th></tr></thead>
+          <thead><tr><th className="gift-select-col"><input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} aria-label={"Select all visible gifts"} /></th><th>{"Animation file"}</th><th>{"ID / Revision"}</th><th>{"Display title"}</th><th>{"Price / Conversion"}</th><th>{"Source"}</th><th>{"Received gifts"}</th><th>{"Status"}</th><th>{"Updated"}</th><th>{"Actions"}</th></tr></thead>
           <tbody>
             {pagedGifts.map((gift) => (
               <tr className={gift.Enabled ? "" : "gift-row-disabled"} key={gift.GiftID}>
-                <td className="gift-select-col"><input type="checkbox" checked={selected.has(gift.GiftID)} onChange={() => toggleSelected(gift.GiftID)} aria-label={t("gifts.bulkSelectOne", { id: gift.GiftID })} /></td>
+                <td className="gift-select-col"><input type="checkbox" checked={selected.has(gift.GiftID)} onChange={() => toggleSelected(gift.GiftID)} aria-label={`Select gift ${gift.GiftID}`} /></td>
                 <td><LottiePreview giftID={gift.GiftID} revision={gift.Revision} compact /></td>
                 <td className="mono">{gift.GiftID} / {gift.Revision}</td>
-                <td><strong className="gift-table-title">{gift.Title || `Gift #${gift.GiftID}`}</strong><span className="gift-sort-order">{t("gifts.sortOrder")}: {gift.SortOrder}</span></td>
+                <td><strong className="gift-table-title">{gift.Title || `Gift #${gift.GiftID}`}</strong><span className="gift-sort-order">{"Sort order"}: {gift.SortOrder}</span></td>
                 <td><strong className="gift-table-price">⭐ {gift.Stars}</strong><span className="gift-convert-price">→ {gift.ConvertStars}</span></td>
                 <td><Badge>{gift.SourceFormat}</Badge><span className="gift-source-size">{formatBytes(gift.AnimationSize)}</span></td>
                 <td>{gift.ReceivedCount}</td>
-                <td><Badge tone={gift.Enabled ? "good" : "neutral"}>{gift.Enabled ? t("common.enabled") : t("common.disabled")}</Badge></td>
+                <td><Badge tone={gift.Enabled ? "good" : "neutral"}>{gift.Enabled ? "Enabled" : "Disabled"}</Badge></td>
                 <td>{formatDate(gift.UpdatedAt)}</td>
-                <td><div className="gift-table-actions"><button className="btn compact-btn collectible-button" type="button" onClick={() => setCollectibleGift(gift)}><Gem size={13} />{t("collectibles.manage")}</button><button className="btn compact-btn" type="button" onClick={() => startRevision(gift)}>{t("gifts.replace")}</button><ActionButton compact tone="neutral" label={gift.Enabled ? t("gifts.disable") : t("gifts.enable")} path="/api/actions/set-gift-enabled" payload={() => ({ gift_id: gift.GiftID, enabled: !gift.Enabled })} onDone={() => void load()} /></div></td>
+                <td><div className="gift-table-actions"><button className="btn compact-btn collectible-button" type="button" onClick={() => setCollectibleGift(gift)}><Gem size={13} />{"Attribute pool"}</button><button className="btn compact-btn" type="button" onClick={() => startRevision(gift)}>{"New revision"}</button><ActionButton compact tone="neutral" label={gift.Enabled ? "Disable" : "Enable"} path="/api/actions/set-gift-enabled" payload={() => ({ gift_id: gift.GiftID, enabled: !gift.Enabled })} onDone={() => void load()} /></div></td>
               </tr>
             ))}
             {pagedGifts.length === 0 && <EmptyRow colSpan={10} />}
@@ -501,45 +506,45 @@ export function GiftsPage() {
         </table>
       </div>
       {pageSize !== "all" && visibleGifts.length > 0 && <div className="gift-pager">
-        <span className="gift-pager-range">{t("gifts.pageRange", { start: pageRangeStart, end: pageRangeEnd, total: visibleGifts.length })}</span>
+        <span className="gift-pager-range">{`Showing ${pageRangeStart}-${pageRangeEnd} of ${visibleGifts.length}`}</span>
         <div className="gift-pager-controls">
           <button className="btn compact-btn" type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>
-            <ChevronLeft size={14} /> {t("gifts.pagePrev")}
+            <ChevronLeft size={14} /> {"Previous"}
           </button>
-          <span className="gift-pager-page">{t("gifts.pageOf", { page: currentPage, total: totalPages })}</span>
+          <span className="gift-pager-page">{`Page ${currentPage} of ${totalPages}`}</span>
           <button className="btn compact-btn" type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>
-            {t("gifts.pageNext")} <ChevronRight size={14} />
+            {"Next"} <ChevronRight size={14} />
           </button>
         </div>
       </div>}
 
       {importOpen && createPortal(
         <div className="modal-backdrop" role="presentation">
-			<section className="modal command-modal gift-import-modal" role="dialog" aria-modal="true" aria-label={giftID !== "0" ? t("gifts.newRevision", { id: giftID }) : t("gifts.importTitle")}>
+			<section className="modal command-modal gift-import-modal" role="dialog" aria-modal="true" aria-label={giftID !== "0" ? `Create revision for gift #${giftID}` : "Import a Star Gift"}>
             <div className="modal-head">
-				<div><div className="eyebrow">{t("gifts.importEyebrow")}</div><h2>{giftID !== "0" ? t("gifts.newRevision", { id: giftID }) : t("gifts.importTitle")}</h2></div>
-              <button className="icon-btn" type="button" onClick={() => setImportOpen(false)} disabled={busy} aria-label={t("action.close")}><X size={15} /></button>
+				<div><div className="eyebrow">{"Gift catalog operation"}</div><h2>{giftID !== "0" ? `Create revision for gift #${giftID}` : "Import a Star Gift"}</h2></div>
+              <button className="icon-btn" type="button" onClick={() => setImportOpen(false)} disabled={busy} aria-label={"Close"}><X size={15} /></button>
             </div>
             <div className="command-body gift-import-modal-body">
               <div className="command-steps">
-                <div className={`command-step ${step1Done ? "done" : "active"}`}><span>1</span><strong>{t("gifts.stepDetails")}</strong></div>
-                <div className={`command-step ${preview ? "done" : step1Done ? "active" : ""}`}><span>2</span><strong>{t("gifts.stepValidate")}</strong></div>
-                <div className={`command-step ${preview ? "active" : ""}`}><span>3</span><strong>{t("gifts.stepImport")}</strong></div>
+                <div className={`command-step ${step1Done ? "done" : "active"}`}><span>1</span><strong>{"File and details"}</strong></div>
+                <div className={`command-step ${preview ? "done" : step1Done ? "active" : ""}`}><span>2</span><strong>{"Dry-run validation"}</strong></div>
+                <div className={`command-step ${preview ? "active" : ""}`}><span>3</span><strong>{"Confirm import"}</strong></div>
               </div>
               {giftID === "0" && <div className="gift-source-tabs">
-                {SHOW_DEFAULT_GIFTS_TAB && <button className={`btn ${importSource === "default" ? "primary" : ""}`} type="button" onClick={() => { setImportSource("default"); setPreview(null); }}>{t("gifts.defaultSource")}</button>}
-                <button className={`btn ${importSource === "official" ? "primary" : ""}`} type="button" onClick={() => { setImportSource("official"); setPreview(null); }}>{t("gifts.officialSource")}</button>
-                <button className={`btn ${importSource === "file" ? "primary" : ""}`} type="button" onClick={() => { setImportSource("file"); setPreview(null); }}>{t("gifts.fileSource")}</button>
+                {SHOW_DEFAULT_GIFTS_TAB && <button className={`btn ${importSource === "default" ? "primary" : ""}`} type="button" onClick={() => { setImportSource("default"); setPreview(null); }}>{"Default gifts"}</button>}
+                <button className={`btn ${importSource === "official" ? "primary" : ""}`} type="button" onClick={() => { setImportSource("official"); setPreview(null); }}>{"Official snapshot"}</button>
+                <button className={`btn ${importSource === "file" ? "primary" : ""}`} type="button" onClick={() => { setImportSource("file"); setPreview(null); }}>{"Upload file"}</button>
               </div>}
               {importSource === "default" && giftID === "0" && SHOW_DEFAULT_GIFTS_TAB ? <section className="official-gift-picker">
-                <div className="gift-import-note"><span>{t("gifts.defaultHint")}</span><div className="gift-format-chips"><span>{defaultGifts.length}</span><span>OwpenGram</span></div></div>
+                <div className="gift-import-note"><span>{"Import our built-in original OwpenGram gifts. Complete collectible pools (upgrade + craft) are imported atomically."}</span><div className="gift-format-chips"><span>{defaultGifts.length}</span><span>OwpenGram</span></div></div>
                 <div className="official-gift-bulk-import">
                   <button className="btn" type="button" onClick={() => openBulkImport("default")}>
-                    <Upload size={14} /> {t("gifts.importAllDefault")}
+                    <Upload size={14} /> {"Import all default gifts"}
                   </button>
                 </div>
-                <label className="gift-switch"><input type="checkbox" checked={enabled} onChange={(e) => { setEnabled(e.target.checked); setPreview(null); }} /><span className="gift-switch-track" aria-hidden="true"><span /></span><span>{t("gifts.enableAfterImport")}</span></label>
-                <div className="official-gift-list" role="listbox" aria-label={t("gifts.defaultSelect")}>
+                <label className="gift-switch"><input type="checkbox" checked={enabled} onChange={(e) => { setEnabled(e.target.checked); setPreview(null); }} /><span className="gift-switch-track" aria-hidden="true"><span /></span><span>{"Enable after import"}</span></label>
+                <div className="official-gift-list" role="listbox" aria-label={"Choose a default gift"}>
                   {defaultGifts.map((gift) => {
                     const isSelected = gift.id === selectedDefaultID;
                     return <button key={gift.id} className={`official-gift-option ${isSelected ? "selected" : ""}`}
@@ -549,105 +554,105 @@ export function GiftsPage() {
                         <span className="mono">⭐ {gift.stars}</span>
                       </span>
                       <span className="official-gift-option-meta">
-                        <span>{t("gifts.officialAttributes", { count: defaultGiftAttributeCount(gift) })}</span>
-                        {gift.limited && <span>{t("gifts.limited", { total: gift.availability })}</span>}
-                        {gift.require_premium && <span>{t("gifts.premium")}</span>}
+                        <span>{`${defaultGiftAttributeCount(gift)} attributes`}</span>
+                        {gift.limited && <span>{`Limited · ${gift.availability}`}</span>}
+                        {gift.require_premium && <span>{"Premium only"}</span>}
                       </span>
                       <span className="official-gift-capabilities">
-                        <span className={gift.upgradeable ? "yes" : "no"}>{gift.upgradeable ? t("gifts.canUpgrade") : t("gifts.cannotUpgrade")}</span>
-                        <span className={gift.craftable ? "craft" : "no"}>{gift.craftable ? t("gifts.canCraft") : t("gifts.cannotCraft")}</span>
+                        <span className={gift.upgradeable ? "yes" : "no"}>{gift.upgradeable ? "Can upgrade" : "Cannot upgrade"}</span>
+                        <span className={gift.craftable ? "craft" : "no"}>{gift.craftable ? "Can Craft" : "Cannot Craft"}</span>
                       </span>
                     </button>;
                   })}
-                  {defaultGifts.length === 0 && <div className="official-gift-empty">{t("gifts.defaultEmpty")}</div>}
+                  {defaultGifts.length === 0 && <div className="official-gift-empty">{"No default gifts are available."}</div>}
                 </div>
                 {selectedDefault && <div className="official-gift-selected">
                   <DefaultLottiePreview id={selectedDefault.id} />
-                  <div><strong>{selectedDefault.title}</strong><span className="mono">⭐ {selectedDefault.stars} → {selectedDefault.convert_stars}</span><small>{selectedDefault.model_count} {t("collectibles.models")} · {selectedDefault.pattern_count} {t("collectibles.patterns")} · {selectedDefault.backdrop_count} {t("collectibles.backdrops")}</small><span className="official-gift-capabilities"><span className={selectedDefault.upgradeable ? "yes" : "no"}>{selectedDefault.upgradeable ? t("gifts.canUpgrade") : t("gifts.cannotUpgrade")}</span><span className={selectedDefault.craftable ? "craft" : "no"}>{selectedDefault.craftable ? t("gifts.canCraft") : t("gifts.cannotCraft")}</span></span></div>
+                  <div><strong>{selectedDefault.title}</strong><span className="mono">⭐ {selectedDefault.stars} → {selectedDefault.convert_stars}</span><small>{selectedDefault.model_count} {"Models"} · {selectedDefault.pattern_count} {"Patterns"} · {selectedDefault.backdrop_count} {"Backdrops"}</small><span className="official-gift-capabilities"><span className={selectedDefault.upgradeable ? "yes" : "no"}>{selectedDefault.upgradeable ? "Can upgrade" : "Cannot upgrade"}</span><span className={selectedDefault.craftable ? "craft" : "no"}>{selectedDefault.craftable ? "Can Craft" : "Cannot Craft"}</span></span></div>
                 </div>}
               </section> : importSource === "official" && giftID === "0" ? <section className="official-gift-picker">
-                <div className="gift-import-note"><span>{t("gifts.officialHint")}</span><div className="gift-format-chips"><span>{officialGifts.length}</span><span>SHA-256</span></div></div>
+                <div className="gift-import-note"><span>{"Choose a verified gift from data/official-gifts. Complete collectible pools are imported atomically."}</span><div className="gift-format-chips"><span>{officialGifts.length}</span><span>SHA-256</span></div></div>
                 <div className="official-gift-bulk-import">
                   <button className="btn" type="button" onClick={() => openBulkImport("official")}>
-                    <Upload size={14} /> {t("gifts.importAllOfficial")}
+                    <Upload size={14} /> {"Import all official gifts"}
                   </button>
                 </div>
                 <div className="official-gift-tools">
-                  <label className="searchbox"><Search size={15} /><input value={officialQuery} onChange={(e) => setOfficialQuery(e.target.value)} placeholder={t("gifts.officialSearch")} /></label>
-                  <span>{t("gifts.officialResults", { shown: visibleOfficial.length, total: officialGifts.length })}</span>
+                  <label className="searchbox"><Search size={15} /><input value={officialQuery} onChange={(e) => setOfficialQuery(e.target.value)} placeholder={"Search official gift ID or title"} /></label>
+                  <span>{`Showing ${visibleOfficial.length} of ${officialGifts.length}`}</span>
                 </div>
-                <div className="official-gift-categories" role="group" aria-label={t("gifts.officialCategoryLabel")}>
+                <div className="official-gift-categories" role="group" aria-label={"Official gift capability category"}>
                   {(["all", "upgrade", "craft", "basic"] as const).map((category) => (
                     <button key={category} className={officialCategory === category ? "active" : ""} type="button"
                       aria-pressed={officialCategory === category} onClick={() => setOfficialCategory(category)}>
-                      {t(`gifts.officialCategory.${category}`)}<span>{officialCategoryCounts[category]}</span>
+                      {officialCategoryLabels[category]}<span>{officialCategoryCounts[category]}</span>
                     </button>
                   ))}
                 </div>
-                <div className="official-gift-list" role="listbox" aria-label={t("gifts.officialSelect")}>
+                <div className="official-gift-list" role="listbox" aria-label={"Choose an official gift"}>
                   {visibleOfficial.map((gift) => {
                     const isSelected = gift.source_gift_id === sourceGiftID;
                     return <button key={gift.source_gift_id} className={`official-gift-option ${isSelected ? "selected" : ""}`}
                       type="button" role="option" aria-selected={isSelected} onClick={() => chooseOfficial(gift)}>
                       <span className="official-gift-option-head">
-                        <strong>{gift.title || t("gifts.officialUnnamed", { id: gift.source_gift_id })}</strong>
+                        <strong>{gift.title || `Unnamed official gift #${gift.source_gift_id}`}</strong>
                         <span className="mono">#{gift.source_gift_id}</span>
                       </span>
                       <span className="official-gift-option-meta">
                         <span>⭐ {gift.stars}</span>
-                        <span>{t("gifts.officialAttributes", { count: officialGiftAttributeCount(gift) })}</span>
+                        <span>{`${officialGiftAttributeCount(gift)} attributes`}</span>
                       </span>
                       <span className="official-gift-capabilities">
-                        <span className={gift.can_upgrade ? "yes" : "no"}>{gift.can_upgrade ? t("gifts.canUpgrade") : t("gifts.cannotUpgrade")}</span>
-                        <span className={gift.can_craft ? "craft" : "no"}>{gift.can_craft ? t("gifts.canCraft") : t("gifts.cannotCraft")}</span>
+                        <span className={gift.can_upgrade ? "yes" : "no"}>{gift.can_upgrade ? "Can upgrade" : "Cannot upgrade"}</span>
+                        <span className={gift.can_craft ? "craft" : "no"}>{gift.can_craft ? "Can Craft" : "Cannot Craft"}</span>
                       </span>
                     </button>;
                   })}
-                  {visibleOfficial.length === 0 && <div className="official-gift-empty">{t("gifts.officialEmpty")}</div>}
+                  {visibleOfficial.length === 0 && <div className="official-gift-empty">{"No official gifts match this category and search."}</div>}
                 </div>
                 {selectedOfficial && <div className="official-gift-selected">
                   <OfficialLottiePreview sourceGiftID={selectedOfficial.source_gift_id} />
-                  <div><strong>{selectedOfficial.title || t("gifts.officialUnnamed", { id: selectedOfficial.source_gift_id })}</strong><span className="mono">{selectedOfficial.source_gift_id}</span><small>{selectedOfficial.model_count} {t("collectibles.models")} · {selectedOfficial.pattern_count} {t("collectibles.patterns")} · {selectedOfficial.backdrop_count} {t("collectibles.backdrops")}</small><span className="official-gift-capabilities"><span className={selectedOfficial.can_upgrade ? "yes" : "no"}>{selectedOfficial.can_upgrade ? t("gifts.canUpgrade") : t("gifts.cannotUpgrade")}</span><span className={selectedOfficial.can_craft ? "craft" : "no"}>{selectedOfficial.can_craft ? t("gifts.canCraft") : t("gifts.cannotCraft")}</span></span></div>
+                  <div><strong>{selectedOfficial.title || `Unnamed official gift #${selectedOfficial.source_gift_id}`}</strong><span className="mono">{selectedOfficial.source_gift_id}</span><small>{selectedOfficial.model_count} {"Models"} · {selectedOfficial.pattern_count} {"Patterns"} · {selectedOfficial.backdrop_count} {"Backdrops"}</small><span className="official-gift-capabilities"><span className={selectedOfficial.can_upgrade ? "yes" : "no"}>{selectedOfficial.can_upgrade ? "Can upgrade" : "Cannot upgrade"}</span><span className={selectedOfficial.can_craft ? "craft" : "no"}>{selectedOfficial.can_craft ? "Can Craft" : "Cannot Craft"}</span></span></div>
                 </div>}
                 {selectedOfficial?.can_upgrade && <>
-                  <label className="gift-switch"><input type="checkbox" checked={includeCollectible} onChange={(e) => { setIncludeCollectible(e.target.checked); setPreview(null); }} /><span className="gift-switch-track" aria-hidden="true"><span /></span><span>{t("gifts.includeCollectible")}</span></label>
+                  <label className="gift-switch"><input type="checkbox" checked={includeCollectible} onChange={(e) => { setIncludeCollectible(e.target.checked); setPreview(null); }} /><span className="gift-switch-track" aria-hidden="true"><span /></span><span>{"Import the complete collectible pool, including crafted models"}</span></label>
                   {includeCollectible && <div className="gift-fields-grid">
-                    <label><span>{t("collectibles.upgradeStars")}</span><input type="number" min="1" value={upgradeStars} onChange={(e) => { setUpgradeStars(e.target.value); setPreview(null); }} /></label>
-                    <label><span>{t("collectibles.supply")}</span><input type="number" min="1" value={supplyTotal} onChange={(e) => { setSupplyTotal(e.target.value); setPreview(null); }} /></label>
-                    <label><span>{t("collectibles.slug")}</span><input value={slugPrefix} maxLength={48} onChange={(e) => { setSlugPrefix(e.target.value.toLowerCase()); setPreview(null); }} /></label>
+                    <label><span>{"Upgrade price in Stars"}</span><input type="number" min="1" value={upgradeStars} onChange={(e) => { setUpgradeStars(e.target.value); setPreview(null); }} /></label>
+                    <label><span>{"Unique supply"}</span><input type="number" min="1" value={supplyTotal} onChange={(e) => { setSupplyTotal(e.target.value); setPreview(null); }} /></label>
+                    <label><span>{"Public slug prefix"}</span><input value={slugPrefix} maxLength={48} onChange={(e) => { setSlugPrefix(e.target.value.toLowerCase()); setPreview(null); }} /></label>
                   </div>}
                 </>}
                 <div className="gift-fields-grid">
-                  <label><span>{t("gifts.title")}</span><input value={title} maxLength={128} placeholder={t("gifts.titlePlaceholder")} onChange={(e) => { setTitle(e.target.value); setPreview(null); }} /></label>
-                  <label><span>{t("gifts.stars")}</span><input type="number" min="1" value={stars} onChange={(e) => { setStars(e.target.value); setPreview(null); }} /></label>
-                  <label><span>{t("gifts.convertStars")}</span><input type="number" min="0" value={convertStars} onChange={(e) => { setConvertStars(e.target.value); setPreview(null); }} /></label>
-                  <label><span>{t("gifts.sortOrder")}</span><input type="number" value={sortOrder} onChange={(e) => { setSortOrder(e.target.value); setPreview(null); }} /></label>
+                  <label><span>{"Display title"}</span><input value={title} maxLength={128} placeholder={"e.g. Celebration Star"} onChange={(e) => { setTitle(e.target.value); setPreview(null); }} /></label>
+                  <label><span>{"Price in Stars"}</span><input type="number" min="1" value={stars} onChange={(e) => { setStars(e.target.value); setPreview(null); }} /></label>
+                  <label><span>{"Conversion Stars"}</span><input type="number" min="0" value={convertStars} onChange={(e) => { setConvertStars(e.target.value); setPreview(null); }} /></label>
+                  <label><span>{"Sort order"}</span><input type="number" value={sortOrder} onChange={(e) => { setSortOrder(e.target.value); setPreview(null); }} /></label>
                 </div>
-                <label className="gift-switch"><input type="checkbox" checked={enabled} onChange={(e) => { setEnabled(e.target.checked); setPreview(null); }} /><span className="gift-switch-track" aria-hidden="true"><span /></span><span>{t("gifts.enableAfterImport")}</span></label>
+                <label className="gift-switch"><input type="checkbox" checked={enabled} onChange={(e) => { setEnabled(e.target.checked); setPreview(null); }} /><span className="gift-switch-track" aria-hidden="true"><span /></span><span>{"Enable after import"}</span></label>
               </section> : <>
-                <div className="gift-import-note"><span>{t("gifts.importHint")}</span><div className="gift-format-chips" aria-label={t("gifts.formats")}><span>TGS</span><span>Lottie JSON</span></div></div>
+                <div className="gift-import-note"><span>{"Upload TGS or plain Lottie JSON. Lottie is normalized and compressed to TGS."}</span><div className="gift-format-chips" aria-label={"Accepted formats"}><span>TGS</span><span>Lottie JSON</span></div></div>
                 <label className={`gift-file-picker ${file ? "has-file" : ""}`}>
                   <input type="file" accept=".tgs,.json,.lottie,application/json,application/x-tgsticker" onChange={(e) => { setFile(e.target.files?.[0] ?? null); setPreview(null); }} />
                   <span className="gift-file-icon"><FileJson2 size={22} /></span>
-                  <span className="gift-file-copy"><span className="gift-field-label">{t("gifts.animation")}</span><strong>{file ? file.name : t("gifts.filePrompt")}</strong><small>{file ? formatBytes(file.size) : t("gifts.fileHint")}</small></span>
-                  <span className="gift-file-action">{file ? t("gifts.changeFile") : t("gifts.chooseFile")}</span>
+                  <span className="gift-file-copy"><span className="gift-field-label">{"Animation file"}</span><strong>{file ? file.name : "Drop or choose a TGS / Lottie file"}</strong><small>{file ? formatBytes(file.size) : "TGS, JSON or Lottie · validated before import"}</small></span>
+                  <span className="gift-file-action">{file ? "Change file" : "Choose file"}</span>
                 </label>
                 <div className="gift-fields-grid">
-                  <label><span>{t("gifts.title")}</span><input value={title} maxLength={128} placeholder={t("gifts.titlePlaceholder")} onChange={(e) => { setTitle(e.target.value); setPreview(null); }} /></label>
-                  <label><span>{t("gifts.stars")}</span><input type="number" min="1" value={stars} onChange={(e) => { setStars(e.target.value); setPreview(null); }} /></label>
-                  <label><span>{t("gifts.convertStars")}</span><input type="number" min="0" value={convertStars} onChange={(e) => { setConvertStars(e.target.value); setPreview(null); }} /></label>
-                  <label><span>{t("gifts.sortOrder")}</span><input type="number" value={sortOrder} onChange={(e) => { setSortOrder(e.target.value); setPreview(null); }} /></label>
+                  <label><span>{"Display title"}</span><input value={title} maxLength={128} placeholder={"e.g. Celebration Star"} onChange={(e) => { setTitle(e.target.value); setPreview(null); }} /></label>
+                  <label><span>{"Price in Stars"}</span><input type="number" min="1" value={stars} onChange={(e) => { setStars(e.target.value); setPreview(null); }} /></label>
+                  <label><span>{"Conversion Stars"}</span><input type="number" min="0" value={convertStars} onChange={(e) => { setConvertStars(e.target.value); setPreview(null); }} /></label>
+                  <label><span>{"Sort order"}</span><input type="number" value={sortOrder} onChange={(e) => { setSortOrder(e.target.value); setPreview(null); }} /></label>
                 </div>
-                <label className="gift-switch"><input type="checkbox" checked={enabled} onChange={(e) => { setEnabled(e.target.checked); setPreview(null); }} /><span className="gift-switch-track" aria-hidden="true"><span /></span><span>{t("gifts.enableAfterImport")}</span></label>
+                <label className="gift-switch"><input type="checkbox" checked={enabled} onChange={(e) => { setEnabled(e.target.checked); setPreview(null); }} /><span className="gift-switch-track" aria-hidden="true"><span /></span><span>{"Enable after import"}</span></label>
               </>}
-              <label className="gift-reason-field"><span>{t("gifts.reason")}</span><input value={reason} placeholder={t("gifts.reasonPlaceholder")} onChange={(e) => setReason(e.target.value)} /></label>
+              <label className="gift-reason-field"><span>{"Audit reason"}</span><input value={reason} placeholder={"Briefly describe why this gift is being imported"} onChange={(e) => setReason(e.target.value)} /></label>
               {importError && <Alert>{importError}</Alert>}
-              {preview && <div className="gift-validation"><div className="gift-validation-head"><CheckCircle2 size={17} /><div><strong>{t("gifts.validationReady")}</strong><span>{t("gifts.validationHint")}</span></div></div><pre>{JSON.stringify(preview.details, null, 2)}</pre></div>}
+              {preview && <div className="gift-validation"><div className="gift-validation-head"><CheckCircle2 size={17} /><div><strong>{"Validation passed"}</strong><span>{"Review the normalized metadata, then confirm the import."}</span></div></div><pre>{JSON.stringify(preview.details, null, 2)}</pre></div>}
             </div>
             <div className="modal-actions">
-              <button className="btn" type="button" onClick={() => setImportOpen(false)} disabled={busy}>{t("common.close")}</button>
-              <button className="btn" type="button" onClick={validateImport} disabled={busy}>{busy ? <Loader2 className="spin" size={15} /> : <ShieldCheck size={15} />}{t("gifts.validate")}</button>
-              <button className="btn primary" type="button" onClick={confirmImport} disabled={busy || !preview}><Upload size={15} />{t("gifts.confirmImport")}</button>
+              <button className="btn" type="button" onClick={() => setImportOpen(false)} disabled={busy}>{"Close"}</button>
+              <button className="btn" type="button" onClick={validateImport} disabled={busy}>{busy ? <Loader2 className="spin" size={15} /> : <ShieldCheck size={15} />}{"Dry-run validation"}</button>
+              <button className="btn primary" type="button" onClick={confirmImport} disabled={busy || !preview}><Upload size={15} />{"Confirm import"}</button>
             </div>
           </section>
         </div>,
@@ -656,29 +661,29 @@ export function GiftsPage() {
       {bulkImportOpen && createPortal(
         <div className="modal-backdrop" role="presentation">
           <section className="modal command-modal gift-bulk-import-modal" role="dialog" aria-modal="true"
-            aria-label={bulkImportOpen === "default" ? t("gifts.importAllDefault") : t("gifts.importAllOfficial")}>
+            aria-label={bulkImportOpen === "default" ? "Import all default gifts" : "Import all official gifts"}>
             <div className="modal-head">
-              <div><div className="eyebrow">{t("gifts.importEyebrow")}</div><h2>{bulkImportOpen === "default" ? t("gifts.importAllDefault") : t("gifts.importAllOfficial")}</h2></div>
-              <button className="icon-btn" type="button" onClick={closeBulkImport} disabled={bulkImportBusy} aria-label={t("action.close")}><X size={15} /></button>
+              <div><div className="eyebrow">{"Gift catalog operation"}</div><h2>{bulkImportOpen === "default" ? "Import all default gifts" : "Import all official gifts"}</h2></div>
+              <button className="icon-btn" type="button" onClick={closeBulkImport} disabled={bulkImportBusy} aria-label={"Close"}><X size={15} /></button>
             </div>
             <div className="command-body">
-              <div className="gift-import-note"><span>{t("gifts.bulkImportCount", { count: bulkImportItems.length })}</span></div>
-              <label className="gift-switch"><input type="checkbox" checked={bulkImportEnabled} disabled={bulkImportBusy} onChange={(e) => setBulkImportEnabled(e.target.checked)} /><span className="gift-switch-track" aria-hidden="true"><span /></span><span>{t("gifts.enableAfterImport")}</span></label>
-              <label className="gift-reason-field"><span>{t("gifts.reason")}</span><input value={bulkImportReason} placeholder={t("gifts.reasonPlaceholder")} disabled={bulkImportBusy} onChange={(e) => setBulkImportReason(e.target.value)} /></label>
+              <div className="gift-import-note"><span>{`${bulkImportItems.length} gifts available to import`}</span></div>
+              <label className="gift-switch"><input type="checkbox" checked={bulkImportEnabled} disabled={bulkImportBusy} onChange={(e) => setBulkImportEnabled(e.target.checked)} /><span className="gift-switch-track" aria-hidden="true"><span /></span><span>{"Enable after import"}</span></label>
+              <label className="gift-reason-field"><span>{"Audit reason"}</span><input value={bulkImportReason} placeholder={"Briefly describe why this gift is being imported"} disabled={bulkImportBusy} onChange={(e) => setBulkImportReason(e.target.value)} /></label>
               {bulkImportBusy && <div className="gift-bulk-import-progress">
                 <div className="gift-bulk-import-progress-bar"><div style={{ width: `${bulkImportProgress.total ? Math.round((bulkImportProgress.done / bulkImportProgress.total) * 100) : 0}%` }} /></div>
-                <span>{t("gifts.importingProgress", { done: bulkImportProgress.done, total: bulkImportProgress.total })}</span>
+                <span>{`Importing ${bulkImportProgress.done} of ${bulkImportProgress.total}`}</span>
               </div>}
               {bulkImportError && <Alert>{bulkImportError}</Alert>}
               {bulkImportResult && <div className="gift-validation">
-                <div className="gift-validation-head"><CheckCircle2 size={17} /><div><strong>{t("gifts.bulkImportDone")}</strong><span>{t("gifts.bulkImportSummary", { imported: bulkImportResult.imported, skipped: bulkImportResult.skipped, failed: bulkImportResult.failed })}</span></div></div>
+                <div className="gift-validation-head"><CheckCircle2 size={17} /><div><strong>{"Import complete"}</strong><span>{`Imported ${bulkImportResult.imported}, skipped ${bulkImportResult.skipped}, failed ${bulkImportResult.failed}`}</span></div></div>
                 {bulkImportResult.errors.length > 0 && <pre>{bulkImportResult.errors.join("\n")}</pre>}
               </div>}
             </div>
             <div className="modal-actions">
-              <button className="btn" type="button" onClick={closeBulkImport} disabled={bulkImportBusy}>{t("common.close")}</button>
+              <button className="btn" type="button" onClick={closeBulkImport} disabled={bulkImportBusy}>{"Close"}</button>
               <button className="btn primary" type="button" onClick={runBulkImport} disabled={bulkImportBusy || bulkImportItems.length === 0}>
-                {bulkImportBusy ? <Loader2 className="spin" size={15} /> : <Upload size={15} />} {t("gifts.startBulkImport")}
+                {bulkImportBusy ? <Loader2 className="spin" size={15} /> : <Upload size={15} />} {"Start import"}
               </button>
             </div>
           </section>

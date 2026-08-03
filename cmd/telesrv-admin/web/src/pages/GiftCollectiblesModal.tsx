@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, errorMessage } from "../api";
 import { Alert, Badge } from "../components/ui";
-import { useI18n } from "../i18n";
 import type { CommandResult, StarGiftCollectibleAttributeRow, StarGiftCollectiblePreview, StarGiftRow } from "../types";
 
 type AnimationData = Record<string, unknown>;
@@ -106,8 +105,25 @@ async function parseAnimationFile(file: File): Promise<AnimationData> {
 const colorNumber = (value: string) => Number.parseInt(value.replace("#", ""), 16);
 const rarityLabel = (attribute: StarGiftCollectibleAttributeRow) => attribute.rarity_kind === "permille" ? `${attribute.rarity_permille}‰` : attribute.rarity_kind;
 
+const collectibleGroupLabels: Record<"models" | "patterns", string> = {
+  models: "Models",
+  patterns: "Patterns"
+};
+
+const collectibleAttributeLabels: Record<"model" | "pattern" | "backdrop", string> = {
+  model: "Model",
+  pattern: "Pattern",
+  backdrop: "Backdrop"
+};
+
+const collectibleColorLabels: Record<"center" | "edge" | "pattern" | "text", string> = {
+  center: "Center",
+  edge: "Edge",
+  pattern: "Pattern",
+  text: "Text"
+};
+
 export function GiftCollectiblesModal({ gift, onClose, onPublished }: { gift: StarGiftRow; onClose: () => void; onPublished: () => void }) {
-  const { t } = useI18n();
   const [active, setActive] = useState<StarGiftCollectiblePreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -160,11 +176,11 @@ export function GiftCollectiblesModal({ gift, onClose, onPublished }: { gift: St
   }
 
   function buildForm(confirm: boolean, commandID = "") {
-    if (!reason.trim()) throw new Error(t("action.reasonRequired"));
-    if (models.length < 2 || patterns.length < 2 || backdrops.length < 2) throw new Error(t("collectibles.minimumAttributes"));
+    if (!reason.trim()) throw new Error("Please enter an operation reason");
+    if (models.length < 2 || patterns.length < 2 || backdrops.length < 2) throw new Error("Models, patterns, and backdrops must each contain at least two attributes.");
     const backdropIDs = backdrops.map((row) => Number(row.backdropID));
-    if (new Set(backdropIDs).size !== backdropIDs.length) throw new Error(t("collectibles.duplicateBackdropID"));
-    for (const row of [...models, ...patterns]) if (!row.file) throw new Error(t("collectibles.fileRequired"));
+    if (new Set(backdropIDs).size !== backdropIDs.length) throw new Error("Backdrop IDs must be unique within the pool.");
+    for (const row of [...models, ...patterns]) if (!row.file) throw new Error("Every model and pattern needs a TGS or Lottie file.");
     const form = new FormData();
     const animatedMetadata = (rows: AnimatedDraft[]) => rows.map((row) => ({ name: row.name.trim(), rarity_permille: Number(row.rarity), sort_order: Number(row.sortOrder), file_key: row.key }));
     form.set("metadata", JSON.stringify({
@@ -200,18 +216,18 @@ export function GiftCollectiblesModal({ gift, onClose, onPublished }: { gift: St
   const renderAnimatedRows = (kind: "models" | "patterns", rows: AnimatedDraft[], setRows: (rows: AnimatedDraft[]) => void) => (
     <section className="collectible-section">
       <div className="collectible-section-head">
-        <div><strong>{t(`collectibles.${kind}`)}</strong><span>{t("collectibles.rarityHint")}</span></div>
-        <div className="collectible-section-tools"><Badge tone={rarityTotals[kind] > 0 ? "good" : "neutral"}>{rarityTotals[kind]}‰</Badge><button className="btn compact-btn" type="button" onClick={() => { setRows(rebalanceRarity([...rows, newAnimated(kind === "models" ? "model" : "pattern", rows.length)])); invalidate(); }}><Plus size={13} />{t("collectibles.addAttribute")}</button></div>
+        <div><strong>{collectibleGroupLabels[kind]}</strong><span>{"Permille values are relative regular-upgrade weights; their total does not need to equal 1000."}</span></div>
+        <div className="collectible-section-tools"><Badge tone={rarityTotals[kind] > 0 ? "good" : "neutral"}>{rarityTotals[kind]}‰</Badge><button className="btn compact-btn" type="button" onClick={() => { setRows(rebalanceRarity([...rows, newAnimated(kind === "models" ? "model" : "pattern", rows.length)])); invalidate(); }}><Plus size={13} />{"Add"}</button></div>
       </div>
       <div className="collectible-rows">
         {rows.map((row, index) => <div className="collectible-row animated" key={row.key}>
           <div className="collectible-row-index">{index + 1}</div>
-          <label><span>{t("common.name")}</span><input value={row.name} maxLength={128} onChange={(e) => updateAnimated(kind, row.key, { name: e.target.value })} /></label>
-          <label><span>{t("collectibles.rarity")}</span><input type="number" min="1" max="1000" value={row.rarity} onChange={(e) => updateAnimated(kind, row.key, { rarity: e.target.value })} /></label>
-          <label><span>{t("gifts.sortOrder")}</span><input type="number" value={row.sortOrder} onChange={(e) => updateAnimated(kind, row.key, { sortOrder: e.target.value })} /></label>
-          <label className="collectible-file"><span>{t("gifts.animation")}</span><input type="file" accept=".tgs,.json,.lottie,application/json,application/x-tgsticker" onChange={(e) => void chooseFile(kind, row, e.target.files?.[0] ?? null)} /><em><FileJson2 size={13} />{row.file?.name ?? t("gifts.chooseFile")}</em></label>
+          <label><span>{"Name"}</span><input value={row.name} maxLength={128} onChange={(e) => updateAnimated(kind, row.key, { name: e.target.value })} /></label>
+          <label><span>{"Rarity ‰"}</span><input type="number" min="1" max="1000" value={row.rarity} onChange={(e) => updateAnimated(kind, row.key, { rarity: e.target.value })} /></label>
+          <label><span>{"Sort order"}</span><input type="number" value={row.sortOrder} onChange={(e) => updateAnimated(kind, row.key, { sortOrder: e.target.value })} /></label>
+          <label className="collectible-file"><span>{"Animation file"}</span><input type="file" accept=".tgs,.json,.lottie,application/json,application/x-tgsticker" onChange={(e) => void chooseFile(kind, row, e.target.files?.[0] ?? null)} /><em><FileJson2 size={13} />{row.file?.name ?? "Choose file"}</em></label>
           <div className="collectible-inline-preview">{row.animation ? <AnimationPreview data={row.animation} compact /> : <Sparkles size={16} />}</div>
-          <button className="icon-btn danger" type="button" disabled={rows.length <= 2} onClick={() => { setRows(rebalanceRarity(rows.filter((value) => value.key !== row.key))); invalidate(); }} aria-label={t("collectibles.remove")}><Trash2 size={14} /></button>
+          <button className="icon-btn danger" type="button" disabled={rows.length <= 2} onClick={() => { setRows(rebalanceRarity(rows.filter((value) => value.key !== row.key))); invalidate(); }} aria-label={"Remove attribute"}><Trash2 size={14} /></button>
           {row.fileError && <span className="collectible-file-error">{row.fileError}</span>}
         </div>)}
       </div>
@@ -219,51 +235,51 @@ export function GiftCollectiblesModal({ gift, onClose, onPublished }: { gift: St
   );
 
   return createPortal(<div className="modal-backdrop" role="presentation">
-    <section className="modal command-modal collectible-modal" role="dialog" aria-modal="true" aria-label={t("collectibles.title", { id: gift.GiftID })}>
+    <section className="modal command-modal collectible-modal" role="dialog" aria-modal="true" aria-label={`Collectible pool · Gift #${gift.GiftID}`}>
       <div className="modal-head">
-        <div><div className="eyebrow">{t("collectibles.eyebrow")}</div><h2>{t("collectibles.title", { id: gift.GiftID })}</h2><p>{gift.Title || `Gift #${gift.GiftID}`}</p></div>
-        <button className="icon-btn" type="button" onClick={onClose} disabled={busy} aria-label={t("action.close")}><X size={15} /></button>
+        <div><div className="eyebrow">{"Unique gift attributes"}</div><h2>{`Collectible pool · Gift #${gift.GiftID}`}</h2><p>{gift.Title || `Gift #${gift.GiftID}`}</p></div>
+        <button className="icon-btn" type="button" onClick={onClose} disabled={busy} aria-label={"Close"}><X size={15} /></button>
       </div>
       <div className="command-body collectible-modal-body">
-        {loading ? <div className="collectible-loading"><Loader2 className="spin" />{t("common.loading")}</div> : active?.found ? <section className="collectible-active">
-          <div className="collectible-active-head"><div><Gem size={18} /><div><strong>{t("collectibles.activeRevision", { revision: active.revision ?? 0 })}</strong><span>{active.slug_prefix} · ⭐ {active.upgrade_stars} · {active.issued} / {active.supply_total}</span></div></div><Badge tone="good">{t("collectibles.published")}</Badge></div>
+        {loading ? <div className="collectible-loading"><Loader2 className="spin" />{"Loading"}</div> : active?.found ? <section className="collectible-active">
+          <div className="collectible-active-head"><div><Gem size={18} /><div><strong>{`Published revision ${active.revision ?? 0}`}</strong><span>{active.slug_prefix} · ⭐ {active.upgrade_stars} · {active.issued} / {active.supply_total}</span></div></div><Badge tone="good">{"Published"}</Badge></div>
           <div className="collectible-active-grid">
-            {[...(active.models ?? []), ...(active.patterns ?? [])].map((attribute) => <article key={`${attribute.kind}-${attribute.id}`}><RemoteAnimation giftID={gift.GiftID} attribute={attribute} /><div><strong>{attribute.name}{attribute.crafted && <Badge>crafted</Badge>}</strong><span>{t(`collectibles.${attribute.kind}`)} · {rarityLabel(attribute)}</span></div></article>)}
-            {(active.backdrops ?? []).map((attribute) => <article key={`backdrop-${attribute.id}`}><div className="collectible-backdrop-preview" style={{ background: `radial-gradient(circle, #${(attribute.center_color ?? 0).toString(16).padStart(6, "0")}, #${(attribute.edge_color ?? 0).toString(16).padStart(6, "0")})`, color: `#${(attribute.text_color ?? 0xffffff).toString(16).padStart(6, "0")}` }}>Aa</div><div><strong>{attribute.name}</strong><span>{t("collectibles.backdrop")} · {rarityLabel(attribute)}</span></div></article>)}
+            {[...(active.models ?? []), ...(active.patterns ?? [])].map((attribute) => <article key={`${attribute.kind}-${attribute.id}`}><RemoteAnimation giftID={gift.GiftID} attribute={attribute} /><div><strong>{attribute.name}{attribute.crafted && <Badge>crafted</Badge>}</strong><span>{collectibleAttributeLabels[attribute.kind]} · {rarityLabel(attribute)}</span></div></article>)}
+            {(active.backdrops ?? []).map((attribute) => <article key={`backdrop-${attribute.id}`}><div className="collectible-backdrop-preview" style={{ background: `radial-gradient(circle, #${(attribute.center_color ?? 0).toString(16).padStart(6, "0")}, #${(attribute.edge_color ?? 0).toString(16).padStart(6, "0")})`, color: `#${(attribute.text_color ?? 0xffffff).toString(16).padStart(6, "0")}` }}>Aa</div><div><strong>{attribute.name}</strong><span>{"Backdrop"} · {rarityLabel(attribute)}</span></div></article>)}
           </div>
-        </section> : <div className="collectible-empty"><Gem size={22} /><div><strong>{t("collectibles.noPool")}</strong><span>{t("collectibles.noPoolHint")}</span></div></div>}
+        </section> : <div className="collectible-empty"><Gem size={22} /><div><strong>{"No collectible pool published"}</strong><span>{"Publish models, patterns and backdrops to enable upgrades."}</span></div></div>}
 
         <section className="collectible-definition">
-          <div className="collectible-definition-head"><div><strong>{t("collectibles.publishNew")}</strong><span>{t("collectibles.immutableHint")}</span></div><div className="gift-format-chips"><span>TGS</span><span>Lottie JSON</span></div></div>
+          <div className="collectible-definition-head"><div><strong>{"Publish a new immutable revision"}</strong><span>{"Dry-run checks every file and rarity total before the revision becomes active."}</span></div><div className="gift-format-chips"><span>TGS</span><span>Lottie JSON</span></div></div>
           <div className="gift-fields-grid collectible-main-fields">
-            <label><span>{t("collectibles.upgradeStars")}</span><input type="number" min="1" value={upgradeStars} onChange={(e) => { setUpgradeStars(e.target.value); invalidate(); }} /></label>
-            <label><span>{t("collectibles.supply")}</span><input type="number" min="1" value={supplyTotal} onChange={(e) => { setSupplyTotal(e.target.value); invalidate(); }} /></label>
-            <label><span>{t("collectibles.slug")}</span><input value={slugPrefix} maxLength={48} onChange={(e) => { setSlugPrefix(e.target.value.toLowerCase()); invalidate(); }} /></label>
-            <label><span>{t("gifts.reason")}</span><input value={reason} maxLength={1000} placeholder={t("gifts.reasonPlaceholder")} onChange={(e) => setReason(e.target.value)} /></label>
+            <label><span>{"Upgrade price in Stars"}</span><input type="number" min="1" value={upgradeStars} onChange={(e) => { setUpgradeStars(e.target.value); invalidate(); }} /></label>
+            <label><span>{"Unique supply"}</span><input type="number" min="1" value={supplyTotal} onChange={(e) => { setSupplyTotal(e.target.value); invalidate(); }} /></label>
+            <label><span>{"Public slug prefix"}</span><input value={slugPrefix} maxLength={48} onChange={(e) => { setSlugPrefix(e.target.value.toLowerCase()); invalidate(); }} /></label>
+            <label><span>{"Audit reason"}</span><input value={reason} maxLength={1000} placeholder={"Briefly describe why this gift is being imported"} onChange={(e) => setReason(e.target.value)} /></label>
           </div>
           {renderAnimatedRows("models", models, setModels)}
           {renderAnimatedRows("patterns", patterns, setPatterns)}
           <section className="collectible-section">
-            <div className="collectible-section-head"><div><strong>{t("collectibles.backdrops")}</strong><span>{t("collectibles.colorHint")}</span></div><div className="collectible-section-tools"><Badge tone={rarityTotals.backdrops > 0 ? "good" : "neutral"}>{rarityTotals.backdrops}‰</Badge><button className="btn compact-btn" type="button" onClick={() => { setBackdrops(rebalanceRarity([...backdrops, newBackdrop(backdrops)])); invalidate(); }}><Plus size={13} />{t("collectibles.addAttribute")}</button></div></div>
+            <div className="collectible-section-head"><div><strong>{"Backdrops"}</strong><span>{"Colors are stored as 24-bit RGB values."}</span></div><div className="collectible-section-tools"><Badge tone={rarityTotals.backdrops > 0 ? "good" : "neutral"}>{rarityTotals.backdrops}‰</Badge><button className="btn compact-btn" type="button" onClick={() => { setBackdrops(rebalanceRarity([...backdrops, newBackdrop(backdrops)])); invalidate(); }}><Plus size={13} />{"Add"}</button></div></div>
             <div className="collectible-rows">{backdrops.map((row, index) => <div className="collectible-row backdrop" key={row.key}>
               <div className="collectible-row-index">{index + 1}</div>
-              <label><span>{t("common.name")}</span><input value={row.name} maxLength={128} onChange={(e) => { setBackdrops(backdrops.map((value) => value.key === row.key ? { ...value, name: e.target.value } : value)); invalidate(); }} /></label>
-              <label><span>{t("collectibles.backdropID")}</span><input type="number" min="0" value={row.backdropID} onChange={(e) => { setBackdrops(backdrops.map((value) => value.key === row.key ? { ...value, backdropID: e.target.value } : value)); invalidate(); }} /></label>
-              <label><span>{t("collectibles.rarity")}</span><input type="number" min="1" max="1000" value={row.rarity} onChange={(e) => { setBackdrops(backdrops.map((value) => value.key === row.key ? { ...value, rarity: e.target.value } : value)); invalidate(); }} /></label>
-              <label><span>{t("gifts.sortOrder")}</span><input type="number" value={row.sortOrder} onChange={(e) => { setBackdrops(backdrops.map((value) => value.key === row.key ? { ...value, sortOrder: e.target.value } : value)); invalidate(); }} /></label>
-              {(["center", "edge", "pattern", "text"] as const).map((field) => <label className="collectible-color" key={field}><span>{t(`collectibles.color.${field}`)}</span><input type="color" value={row[field]} onChange={(e) => { setBackdrops(backdrops.map((value) => value.key === row.key ? { ...value, [field]: e.target.value } : value)); invalidate(); }} /></label>)}
+              <label><span>{"Name"}</span><input value={row.name} maxLength={128} onChange={(e) => { setBackdrops(backdrops.map((value) => value.key === row.key ? { ...value, name: e.target.value } : value)); invalidate(); }} /></label>
+              <label><span>{"Backdrop ID"}</span><input type="number" min="0" value={row.backdropID} onChange={(e) => { setBackdrops(backdrops.map((value) => value.key === row.key ? { ...value, backdropID: e.target.value } : value)); invalidate(); }} /></label>
+              <label><span>{"Rarity ‰"}</span><input type="number" min="1" max="1000" value={row.rarity} onChange={(e) => { setBackdrops(backdrops.map((value) => value.key === row.key ? { ...value, rarity: e.target.value } : value)); invalidate(); }} /></label>
+              <label><span>{"Sort order"}</span><input type="number" value={row.sortOrder} onChange={(e) => { setBackdrops(backdrops.map((value) => value.key === row.key ? { ...value, sortOrder: e.target.value } : value)); invalidate(); }} /></label>
+              {(["center", "edge", "pattern", "text"] as const).map((field) => <label className="collectible-color" key={field}><span>{collectibleColorLabels[field]}</span><input type="color" value={row[field]} onChange={(e) => { setBackdrops(backdrops.map((value) => value.key === row.key ? { ...value, [field]: e.target.value } : value)); invalidate(); }} /></label>)}
               <div className="collectible-backdrop-preview" style={{ background: `radial-gradient(circle, ${row.center}, ${row.edge})`, color: row.text }}>Aa</div>
-              <button className="icon-btn danger" type="button" disabled={backdrops.length <= 2} onClick={() => { setBackdrops(rebalanceRarity(backdrops.filter((value) => value.key !== row.key))); invalidate(); }} aria-label={t("collectibles.remove")}><Trash2 size={14} /></button>
+              <button className="icon-btn danger" type="button" disabled={backdrops.length <= 2} onClick={() => { setBackdrops(rebalanceRarity(backdrops.filter((value) => value.key !== row.key))); invalidate(); }} aria-label={"Remove attribute"}><Trash2 size={14} /></button>
             </div>)}</div>
           </section>
         </section>
         {error && <Alert>{error}</Alert>}
-        {preview && <div className="gift-validation"><div className="gift-validation-head"><CheckCircle2 size={17} /><div><strong>{t("collectibles.validationReady")}</strong><span>{t("collectibles.validationHint")}</span></div></div><pre>{JSON.stringify(preview.details, null, 2)}</pre></div>}
+        {preview && <div className="gift-validation"><div className="gift-validation-head"><CheckCircle2 size={17} /><div><strong>{"Attribute pool is valid"}</strong><span>{"Review the normalized assets, then publish this immutable revision."}</span></div></div><pre>{JSON.stringify(preview.details, null, 2)}</pre></div>}
       </div>
       <div className="modal-actions">
-        <button className="btn" type="button" onClick={onClose} disabled={busy}>{t("common.close")}</button>
-        <button className="btn" type="button" onClick={validate} disabled={busy}>{busy ? <Loader2 className="spin" size={15} /> : <ShieldCheck size={15} />}{t("gifts.validate")}</button>
-        <button className="btn primary" type="button" onClick={publish} disabled={busy || !preview}><Upload size={15} />{t("collectibles.publish")}</button>
+        <button className="btn" type="button" onClick={onClose} disabled={busy}>{"Close"}</button>
+        <button className="btn" type="button" onClick={validate} disabled={busy}>{busy ? <Loader2 className="spin" size={15} /> : <ShieldCheck size={15} />}{"Dry-run validation"}</button>
+        <button className="btn primary" type="button" onClick={publish} disabled={busy || !preview}><Upload size={15} />{"Publish revision"}</button>
       </div>
     </section>
   </div>, document.body);

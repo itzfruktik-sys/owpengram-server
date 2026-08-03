@@ -604,14 +604,15 @@ func (r *Router) registerMessages(d *tlprofile.Dispatcher) {
 				return &tg.MessagesMessages{}, nil
 			}
 			history, err := r.deps.Channels.GetHistory(ctx, userID, domain.ChannelHistoryFilter{
-				ChannelID:  filter.Peer.ID,
-				OffsetID:   filter.OffsetID,
-				OffsetDate: filter.OffsetDate,
-				AddOffset:  filter.AddOffset,
-				Limit:      filter.Limit,
-				MaxID:      filter.MaxID,
-				MinID:      filter.MinID,
-				Hash:       filter.Hash,
+				ChannelID:                 filter.Peer.ID,
+				OffsetID:                  filter.OffsetID,
+				OffsetDate:                filter.OffsetDate,
+				AddOffset:                 filter.AddOffset,
+				Limit:                     filter.Limit,
+				MaxID:                     filter.MaxID,
+				MinID:                     filter.MinID,
+				Hash:                      filter.Hash,
+				IncludeHistoryClearAnchor: true,
 			})
 			if err != nil {
 				return nil, channelInvalidErr(err)
@@ -702,7 +703,10 @@ func (r *Router) registerMessages(d *tlprofile.Dispatcher) {
 		if err != nil {
 			return nil, internalErr()
 		}
-		filter := r.messageFilterFromSearchRequest(userID, req)
+		filter, err := r.messageFilterFromSearchRequest(ctx, userID, req)
+		if err != nil {
+			return nil, err
+		}
 		if filter.HasPeer && filter.Peer.Type == domain.PeerTypeChannel {
 			if r.deps.Channels == nil {
 				return messagesNotModifiedOrEmpty(req.Hash), nil
@@ -722,7 +726,7 @@ func (r *Router) registerMessages(d *tlprofile.Dispatcher) {
 					Chats:    []tg.ChatClass{tgChannelChatForView(userID, view)},
 					Users:    []tg.UserClass{},
 				}
-				r.applyStoryMaxIDsToMessages(ctx, userID, out)
+				r.applyPeerReadModelsToMessages(ctx, userID, out)
 				return out, nil
 			}
 			if searchFilterNeedsMediaStore(req.Filter) {
@@ -742,7 +746,7 @@ func (r *Router) registerMessages(d *tlprofile.Dispatcher) {
 						Chats:    []tg.ChatClass{tgChannelChatForView(userID, view)},
 						Users:    []tg.UserClass{},
 					}
-					r.applyStoryMaxIDsToMessages(ctx, userID, out)
+					r.applyPeerReadModelsToMessages(ctx, userID, out)
 					return out, nil
 				}
 				if err := r.validateInputPeerChannelAccess(ctx, userID, req.Peer, filter.Peer.ID); err != nil {

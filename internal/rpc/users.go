@@ -125,7 +125,7 @@ func (r *Router) onUsersGetUsers(ctx context.Context, ids []tg.InputUserClass) (
 		}
 		out = append(out, r.tgUser(u))
 	}
-	r.applyStoryMaxIDsToPeerObjects(ctx, currentUserID, out, nil)
+	r.applyPeerReadModels(ctx, currentUserID, out, nil)
 	return out, nil
 }
 
@@ -154,7 +154,12 @@ func (r *Router) onUsersGetFullUser(ctx context.Context, id tg.InputUserClass) (
 	if err := r.applyBotCanEditToUser(ctx, currentUserID, u, user); err != nil {
 		return nil, err
 	}
-	r.applyStoryMaxIDsToPeerObjects(ctx, currentUserID, []tg.UserClass{user}, nil)
+	contactRestriction, err := r.privateContactRestrictionFor(ctx, currentUserID, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	applyPrivateContactRestrictionToUser(user, contactRestriction)
+	r.applyPeerReadModels(ctx, currentUserID, []tg.UserClass{user}, nil)
 	loadEpoch := r.userFullProjectionCache.LoadEpoch()
 	if full, ok := r.userFullProjectionCache.Lookup(currentUserID, u.ID); ok {
 		if !applyContactNoteToUserFull(u, &full) {
@@ -165,6 +170,8 @@ func (r *Router) onUsersGetFullUser(ctx context.Context, id tg.InputUserClass) (
 		}
 		r.applyStoriesPinnedAvailableToUserFull(ctx, currentUserID, u.ID, &full)
 		r.applyNotifySettingsToUserFull(ctx, currentUserID, u.ID, &full)
+		r.applyBotVerificationToUserFull(ctx, u.ID, &full)
+		applyPrivateContactRestrictionToUserFull(&full, contactRestriction)
 		chats := r.applyPersonalChannelToUserFull(ctx, currentUserID, u.PersonalChannelID, &full)
 		return &tg.UsersUserFull{
 			FullUser: full,
@@ -185,6 +192,11 @@ func (r *Router) onUsersGetFullUser(ctx context.Context, id tg.InputUserClass) (
 	}
 	r.applyStoriesPinnedAvailableToUserFull(ctx, currentUserID, u.ID, &full)
 	r.applyNotifySettingsToUserFull(ctx, currentUserID, u.ID, &full)
+	// Deliberately after StoreIfEpoch, like applyPersonalChannelToUserFull: the mark
+	// is not baked into the per-(viewer,target) cache, so a revoked badge is gone on
+	// the next response instead of lingering for the cache TTL.
+	r.applyBotVerificationToUserFull(ctx, u.ID, &full)
+	applyPrivateContactRestrictionToUserFull(&full, contactRestriction)
 	chats := r.applyPersonalChannelToUserFull(ctx, currentUserID, u.PersonalChannelID, &full)
 	return &tg.UsersUserFull{
 		FullUser: full,
@@ -237,45 +249,13 @@ func applyContactNoteToUserFull(user domain.User, full *tg.UserFull) bool {
 }
 
 func (r *Router) buildUserFullProjection(ctx context.Context, currentUserID int64, u domain.User) (tg.UserFull, error) {
-	// One CanSeeBatch call replaces what used to be up to six sequential
-	// CanSee calls (about/phone_call/phone_p2p/profile_photo/saved_music/
-	// birthday) below and in fillUserFullPhotos -- each CanSee cost two
-	// queries (rules + contacts), so this alone was ~12 of the ~15 db
-	// queries getFullUser used to make.
-	var privacyVisibility map[domain.PrivacyKey]bool
-	if r.deps.Privacy != nil && currentUserID != 0 && u.ID != 0 && u.ID != currentUserID {
-		batch, err := r.deps.Privacy.CanSeeBatch(ctx, []int64{u.ID}, currentUserID, []domain.PrivacyKey{
-			domain.PrivacyKeyAbout,
-			domain.PrivacyKeyPhoneCall,
-			domain.PrivacyKeyPhoneP2P,
-			domain.PrivacyKeyProfilePhoto,
-			domain.PrivacyKeySavedMusic,
-			domain.PrivacyKeyBirthday,
-		})
-		if err != nil {
-			return tg.UserFull{}, internalErr()
-		}
-		privacyVisibility = batch[u.ID]
+	visibility, err := r.userFullPrivacyVisibility(ctx, currentUserID, u.ID)
+	if err != nil {
+		return tg.UserFull{}, internalErr()
 	}
-	// canSee mirrors CanSee's own fail-open semantics: self is always
-	// visible, and an unset map means the batch call above was skipped
-	// (privacy service absent, or self) -- both cases default to visible,
-	// exactly like every "if r.deps.Privacy != nil" guard did individually.
-	canSee := func(key domain.PrivacyKey) bool {
-		if u.ID == currentUserID || privacyVisibility == nil {
-			return true
-		}
-		return privacyVisibility[key]
-	}
-
 	about := u.About
-	if u.ID != currentUserID && !canSee(domain.PrivacyKeyAbout) {
+	if !visibility[domain.PrivacyKeyAbout] {
 		about = ""
-	}
-	// Surface the scam/fake warning to other viewers (never to the account
-	// itself), non-destructively over the projected About.
-	if u.ID != currentUserID {
-		about = aboutWithModerationWarning(about, defaultScamWarningUser, defaultFakeWarningUser, u.Scam, u.Fake)
 	}
 	full := tg.UserFull{
 		ID:             u.ID,
@@ -283,14 +263,27 @@ func (r *Router) buildUserFullProjection(ctx context.Context, currentUserID int6
 		Settings:       tg.PeerSettings{},
 		NotifySettings: *tdesktop.NotifySettings(),
 	}
+	if u.ID != currentUserID {
+		if svc, ok := r.deps.Messages.(PrivateNoForwardsService); ok {
+			state, err := svc.GetPrivateNoForwards(ctx, currentUserID, u.ID)
+			if err != nil {
+				return tg.UserFull{}, internalErr()
+			}
+			myEnabled, peerEnabled := state.ForViewer(currentUserID)
+			full.SetNoforwardsMyEnabled(myEnabled)
+			full.SetNoforwardsPeerEnabled(peerEnabled)
+		}
+	}
 	// 通话入口：客户端不见 phone_calls_available=true 不显示通话按钮（P1 前置项）。
 	// phone_calls_private 标记对端禁 P2P（p2p_allowed 真值在通话确认时另行计算）。
 	if !u.Bot && u.ID != currentUserID {
-		callsAllowed := canSee(domain.PrivacyKeyPhoneCall)
-		p2pAllowed := canSee(domain.PrivacyKeyPhoneP2P)
+		callsAllowed := visibility[domain.PrivacyKeyPhoneCall]
+		p2pAllowed := visibility[domain.PrivacyKeyPhoneP2P]
+		voiceAllowed := visibility[domain.PrivacyKeyVoiceMessages]
 		full.PhoneCallsAvailable = callsAllowed
 		full.VideoCallsAvailable = callsAllowed
 		full.PhoneCallsPrivate = !p2pAllowed
+		full.VoiceMessagesForbidden = !voiceAllowed
 	}
 	if u.Bot {
 		full.SetBotInfo(r.tgBotInfo(ctx, u))
@@ -316,11 +309,11 @@ func (r *Router) buildUserFullProjection(ctx context.Context, currentUserID int6
 			break
 		}
 	}
-	if err := r.fillUserFullPhotos(ctx, currentUserID, u.ID, &full, canSee(domain.PrivacyKeyProfilePhoto)); err != nil {
+	if err := r.fillUserFullPhotos(ctx, currentUserID, u.ID, visibility[domain.PrivacyKeyProfilePhoto], &full); err != nil {
 		return tg.UserFull{}, err
 	}
 	if r.deps.Account != nil {
-		if canSee(domain.PrivacyKeySavedMusic) {
+		if visibility[domain.PrivacyKeySavedMusic] {
 			music, err := r.deps.Account.ListSavedMusic(ctx, u.ID, 0, 1)
 			if err != nil {
 				return tg.UserFull{}, internalErr()
@@ -392,14 +385,105 @@ func (r *Router) buildUserFullProjection(ctx context.Context, currentUserID int6
 	// 生日（account.updateBirthday）：落 userFull.birthday，按 PrivacyKeyBirthday 对他人裁剪，
 	// 本人恒可见。
 	if u.Birthday.IsSet() {
-		if canSee(domain.PrivacyKeyBirthday) {
+		if visibility[domain.PrivacyKeyBirthday] {
 			full.SetBirthday(tgBirthday(u.Birthday))
 		}
 	}
+	r.applyAccountRatingToUserFull(ctx, currentUserID, u, &full)
 	// 个人频道（account.updatePersonalChannel）不在此落地：它按 viewer 实时解析，作为缓存后的
 	// overlay 处理（applyPersonalChannelToUserFull），避免烤进 per-(viewer,target) 投影缓存以及
 	// build/chats 两次解析同一频道。
 	return full, nil
+}
+
+// userFullPrivacyVisibility evaluates every privacy-controlled UserFull field
+// from one owner snapshot when the service supports batching. Older test or
+// alternate implementations retain scalar parity; a missing batch key fails
+// closed instead of exposing that field.
+func (r *Router) userFullPrivacyVisibility(ctx context.Context, viewerUserID, ownerUserID int64) (map[domain.PrivacyKey]bool, error) {
+	keys := []domain.PrivacyKey{
+		domain.PrivacyKeyAbout,
+		domain.PrivacyKeyPhoneCall,
+		domain.PrivacyKeyPhoneP2P,
+		domain.PrivacyKeyVoiceMessages,
+		domain.PrivacyKeyProfilePhoto,
+		domain.PrivacyKeySavedMusic,
+		domain.PrivacyKeyBirthday,
+	}
+	out := make(map[domain.PrivacyKey]bool, len(keys))
+	if r.deps.Privacy == nil || ownerUserID == viewerUserID {
+		for _, key := range keys {
+			out[key] = true
+		}
+		return out, nil
+	}
+	if batch, ok := r.deps.Privacy.(batchPrivacyEvaluator); ok {
+		matrix, err := batch.CanSeeBatch(ctx, []int64{ownerUserID}, viewerUserID, keys)
+		if err != nil {
+			return nil, err
+		}
+		ownerVisibility, found := matrix[ownerUserID]
+		if !found {
+			return out, nil
+		}
+		for _, key := range keys {
+			out[key] = ownerVisibility[key]
+		}
+		return out, nil
+	}
+	for _, key := range keys {
+		allowed, err := r.deps.Privacy.CanSee(ctx, ownerUserID, viewerUserID, key)
+		if err != nil {
+			return nil, err
+		}
+		out[key] = allowed
+	}
+	return out, nil
+}
+
+// applyAccountRatingToUserFull projects gramsrv's stored composite rating through
+// the rating fields official clients already render. This is a gramsrv policy
+// score, not a promise that its inputs or thresholds match Telegram's service.
+//
+// The projection is built inside the existing per-(viewer,target) UserFull
+// cache. Therefore a cache miss adds at most one primary-key read and a cache hit
+// adds none. Recompute and writes remain exclusively in the bounded background
+// worker/admin paths.
+func (r *Router) applyAccountRatingToUserFull(ctx context.Context, viewerUserID int64, target domain.User, full *tg.UserFull) {
+	targetUserID := target.ID
+	if r.deps.AccountRatings == nil || full == nil || !domain.RatableAccount(targetUserID, target.Bot) {
+		return
+	}
+	rating, err := r.deps.AccountRatings.Rating(ctx, targetUserID)
+	if err != nil {
+		// Missing, disabled and temporarily unavailable projections all preserve
+		// the legacy wire shape instead of failing the surrounding profile read.
+		return
+	}
+	full.SetStarsRating(tgAccountRatingLevel(rating.LevelSnapshot()))
+	if viewerUserID == 0 || viewerUserID != targetUserID {
+		return
+	}
+	pending, ok := rating.PendingLevel()
+	if !ok {
+		return
+	}
+	full.SetStarsMyPendingRating(tgAccountRatingLevel(pending))
+	full.SetStarsMyPendingRatingDate(int(rating.PendingDate.Unix()))
+}
+
+// tgAccountRatingLevel maps the local level snapshot onto starsRating#1b0e4f07.
+// next_level_stars remains absent at the configured maximum local level.
+func tgAccountRatingLevel(in domain.AccountRatingLevel) tg.StarsRating {
+	out := tg.StarsRating{
+		Level:             in.Level,
+		CurrentLevelStars: in.CurrentLevelStars,
+		Stars:             in.Stars,
+	}
+	if in.HasNextLevelStars {
+		out.SetNextLevelStars(in.NextLevelStars)
+	}
+	return out
 }
 
 // tgBirthday 把 domain 生日转 tg.Birthday（Year 可选，0 表示不含年份）。
@@ -448,11 +532,95 @@ func (r *Router) onUsersGetRequirementsToContact(ctx context.Context, ids []tg.I
 	if len(ids) > maxRequirementsToContactUsers {
 		return nil, limitInvalidErr()
 	}
-	out := make([]tg.RequirementToContactClass, 0, len(ids))
-	for range ids {
-		out = append(out, &tg.RequirementToContactEmpty{})
+	currentUserID, authorized, err := r.currentUserID(ctx)
+	if err != nil {
+		return nil, internalErr()
+	}
+	if !authorized || r.deps.Users == nil {
+		out := make([]tg.RequirementToContactClass, len(ids))
+		for i := range out {
+			out[i] = &tg.RequirementToContactEmpty{}
+		}
+		return out, nil
+	}
+	type requirementInput struct {
+		userID     int64
+		accessHash int64
+		self       bool
+	}
+	inputs := make([]requirementInput, len(ids))
+	targetIDs := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for i, input := range ids {
+		switch value := input.(type) {
+		case *tg.InputUserSelf:
+			inputs[i] = requirementInput{userID: currentUserID, self: true}
+		case *tg.InputUser:
+			if value == nil || value.UserID == 0 {
+				continue
+			}
+			inputs[i] = requirementInput{userID: value.UserID, accessHash: value.AccessHash}
+			if _, ok := seen[value.UserID]; !ok {
+				seen[value.UserID] = struct{}{}
+				targetIDs = append(targetIDs, value.UserID)
+			}
+		}
+	}
+	usersByID := make(map[int64]domain.User, len(targetIDs))
+	if len(targetIDs) > 0 {
+		list, err := r.deps.Users.ByIDs(ctx, currentUserID, targetIDs)
+		if err != nil && !errors.Is(err, users.ErrNotAuthorized) {
+			return nil, internalErr()
+		}
+		for _, user := range list {
+			usersByID[user.ID] = user
+		}
+	}
+	validTargetIDs := make([]int64, 0, len(targetIDs))
+	for i, input := range inputs {
+		if input.self {
+			continue
+		}
+		user, ok := usersByID[input.userID]
+		if !ok || input.accessHash != 0 && input.accessHash != user.AccessHash {
+			inputs[i].userID = 0
+			continue
+		}
+		validTargetIDs = append(validTargetIDs, user.ID)
+	}
+	settingsByUser := make(map[int64]domain.AccountSettings, len(validTargetIDs))
+	if svc, ok := r.accountSettingsSvc(); ok {
+		settingsByUser, err = r.accountSettings.getOrLoadBatch(ctx, validTargetIDs, svc)
+		if err != nil {
+			return nil, internalErr()
+		}
+	}
+	freeByUser := make(map[int64]bool, len(validTargetIDs))
+	if evaluator, ok := r.deps.Privacy.(contactRequirementPrivacyEvaluator); ok {
+		freeByUser, err = evaluator.CanContactForFreeBatch(ctx, validTargetIDs, currentUserID)
+		if err != nil {
+			return nil, internalErr()
+		}
+	}
+	out := make([]tg.RequirementToContactClass, len(inputs))
+	for i, input := range inputs {
+		out[i] = &tg.RequirementToContactEmpty{}
+		if input.userID == 0 || input.self || input.userID == currentUserID || freeByUser[input.userID] {
+			continue
+		}
+		global := settingsByUser[input.userID].GlobalPrivacy
+		switch {
+		case global.NoncontactPeersPaidStars > 0:
+			out[i] = &tg.RequirementToContactPaidMessages{StarsAmount: global.NoncontactPeersPaidStars}
+		case global.NewNoncontactPeersRequirePremium:
+			out[i] = &tg.RequirementToContactPremium{}
+		}
 	}
 	return out, nil
+}
+
+type contactRequirementPrivacyEvaluator interface {
+	CanContactForFreeBatch(ctx context.Context, ownerUserIDs []int64, viewerUserID int64) (map[int64]bool, error)
 }
 
 func (r *Router) onUsersGetSavedMusic(ctx context.Context, req *tg.UsersGetSavedMusicRequest) (tg.UsersSavedMusicClass, error) {
@@ -572,7 +740,7 @@ func savedMusicDocumentIDs(docs []domain.Document) []int64 {
 	return ids
 }
 
-func (r *Router) fillUserFullPhotos(ctx context.Context, viewerUserID, ownerUserID int64, full *tg.UserFull, profileAllowed bool) error {
+func (r *Router) fillUserFullPhotos(ctx context.Context, viewerUserID, ownerUserID int64, profileAllowed bool, full *tg.UserFull) error {
 	if r.deps.Files == nil || full == nil || ownerUserID == 0 {
 		return nil
 	}
@@ -624,14 +792,16 @@ func (r *Router) fillUserFullPhotos(ctx context.Context, viewerUserID, ownerUser
 // TDesktop 的 botInfo.inited 永不置位，每次开聊/输 "/" 都会重拉 getFullUser；
 // user_id 必填且必须等于该 bot 的 id，不匹配会被客户端整体静默忽略。
 func (r *Router) tgBotInfo(ctx context.Context, u domain.User) tg.BotInfo {
-	if r.deps.Bots == nil {
-		return tgBotInfoFromProfile(u.ID, domain.BotProfile{}, false)
+	info := tgBotInfoFromProfile(u.ID, domain.BotProfile{}, false)
+	if r.deps.Bots != nil {
+		if profile, found, err := r.deps.Bots.BotInfo(ctx, u.ID); err == nil && found {
+			info = tgBotInfoFromProfile(u.ID, profile, true)
+		}
 	}
-	profile, found, err := r.deps.Bots.BotInfo(ctx, u.ID)
-	if err != nil || !found {
-		return tgBotInfoFromProfile(u.ID, domain.BotProfile{}, false)
-	}
-	return tgBotInfoFromProfile(u.ID, profile, true)
+	// botInfo#4d8a0299 verifier_settings:flags.9 -- present only for a bot that is
+	// itself an enabled verifier, and independent of the bot profile above.
+	r.applyVerifierSettingsToOneBotInfo(ctx, &info, u.ID)
+	return info
 }
 
 type botProfileBatchResolver interface {
@@ -657,10 +827,18 @@ func (r *Router) tgBotInfos(ctx context.Context, userIDs []int64) []tg.BotInfo {
 			}
 		}
 	}
+	// One verifier-settings query for the whole bot list, next to the profile batch
+	// above: channelFull.bot_info must not turn into an N+1 just to carry
+	// verifier_settings:flags.9.
+	verifiers := r.verifierSettingsBatch(ctx, ids)
 	out := make([]tg.BotInfo, 0, len(userIDs))
 	for _, id := range userIDs {
 		profile, found := profiles[id]
-		out = append(out, tgBotInfoFromProfile(id, profile, found))
+		info := tgBotInfoFromProfile(id, profile, found)
+		if settings, ok := verifiers[id]; ok {
+			applyVerifierSettingsToBotInfo(&info, id, settings)
+		}
+		out = append(out, info)
 	}
 	return out
 }

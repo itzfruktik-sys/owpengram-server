@@ -3,14 +3,11 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { api, errorMessage } from "../api";
 import { Alert } from "../components/ui";
-import { useI18n } from "../i18n";
-
 // Real Telegram sticker/emoji packs are created with at least one item, so
 // this form collects the title/short name plus a single starting file —
 // exactly like CreateStickerSet's domain-level requirement. More stickers
 // get added afterward from the pack's own preview modal.
 export function CreateStickerSetModal({ kind, onClose, onCreated }: { kind: "stickers" | "emoji"; onClose: () => void; onCreated: () => void }) {
-  const { t } = useI18n();
   const noun = kind === "emoji" ? "emoji" : "sticker";
   const [title, setTitle] = useState("");
   const [shortName, setShortName] = useState("");
@@ -22,11 +19,11 @@ export function CreateStickerSetModal({ kind, onClose, onCreated }: { kind: "sti
 
   async function submit() {
     if (!title.trim() || !shortName.trim() || !emoji.trim() || !file) {
-      setError(t("stickers.createFieldsRequired", { noun }));
+      setError(`Title, short name, emoji and a first ${noun} file are required.`);
       return;
     }
     if (!reason.trim()) {
-      setError(t("action.reasonRequired"));
+      setError("Please enter an operation reason");
       return;
     }
     setBusy(true);
@@ -50,33 +47,33 @@ export function CreateStickerSetModal({ kind, onClose, onCreated }: { kind: "sti
 
   return createPortal(
     <div className="modal-backdrop" role="presentation">
-      <section className="modal command-modal" role="dialog" aria-modal="true" aria-label={t("stickers.createTitle", { noun })}>
+      <section className="modal command-modal" role="dialog" aria-modal="true" aria-label={`Create a new ${noun} pack`}>
         <div className="modal-head">
           <div>
-            <div className="eyebrow">{t("stickers.createEyebrow")}</div>
-            <h2>{t("stickers.createTitle", { noun })}</h2>
+            <div className="eyebrow">{"New set"}</div>
+            <h2>{`Create a new ${noun} pack`}</h2>
           </div>
-          <button className="icon-btn" type="button" onClick={onClose} disabled={busy} aria-label={t("action.close")}><X size={15} /></button>
+          <button className="icon-btn" type="button" onClick={onClose} disabled={busy} aria-label={"Close"}><X size={15} /></button>
         </div>
         <div className="command-body">
           <div className="gift-fields-grid">
-            <label><span>{t("stickers.title")}</span><input value={title} maxLength={64} onChange={(event) => setTitle(event.target.value)} /></label>
-            <label><span>{t("stickers.shortName")}</span><input value={shortName} maxLength={32} onChange={(event) => setShortName(event.target.value)} placeholder={t("stickers.shortNamePlaceholder")} /></label>
-            <label><span>{t("stickers.emoji")}</span><input value={emoji} onChange={(event) => setEmoji(event.target.value)} placeholder={t("stickers.emojiPlaceholder")} /></label>
+            <label><span>{"Title"}</span><input value={title} maxLength={64} onChange={(event) => setTitle(event.target.value)} /></label>
+            <label><span>{"Short name"}</span><input value={shortName} maxLength={32} onChange={(event) => setShortName(event.target.value)} placeholder={"lowercase_short_name"} /></label>
+            <label><span>{"Emoji"}</span><input value={emoji} onChange={(event) => setEmoji(event.target.value)} placeholder={"e.g. 😀"} /></label>
           </div>
           <label className={`gift-file-picker ${file ? "has-file" : ""}`}>
             <input type="file" accept=".tgs,.json,.webp,application/json,application/x-tgsticker,image/webp" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
-            <span className="gift-file-copy"><span className="gift-field-label">{t("stickers.firstSticker", { noun })}</span><strong>{file ? file.name : t("stickers.filePrompt")}</strong></span>
-            <span className="gift-file-action">{file ? t("gifts.changeFile") : t("gifts.chooseFile")}</span>
+            <span className="gift-file-copy"><span className="gift-field-label">{`First ${noun}`}</span><strong>{file ? file.name : "Choose a TGS, Lottie JSON, or WebP file"}</strong></span>
+            <span className="gift-file-action">{file ? "Change file" : "Choose file"}</span>
           </label>
-          <label className="gift-reason-field"><span>{t("gifts.reason")}</span><input value={reason} placeholder={t("gifts.reasonPlaceholder")} onChange={(event) => setReason(event.target.value)} /></label>
+          <label className="gift-reason-field"><span>{"Audit reason"}</span><input value={reason} placeholder={"Briefly describe why this gift is being imported"} onChange={(event) => setReason(event.target.value)} /></label>
           {error && <Alert>{error}</Alert>}
         </div>
         <div className="modal-actions">
-          <button className="btn" type="button" onClick={onClose} disabled={busy}>{t("common.close")}</button>
+          <button className="btn" type="button" onClick={onClose} disabled={busy}>{"Close"}</button>
           <button className="btn primary" type="button" onClick={submit} disabled={busy}>
             {busy ? <Loader2 className="spin" size={15} /> : <Upload size={15} />}
-            {t("stickers.create", { noun })}
+            {`Create ${noun} pack`}
           </button>
         </div>
       </section>

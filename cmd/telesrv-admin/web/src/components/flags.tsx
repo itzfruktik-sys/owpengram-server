@@ -1,18 +1,16 @@
 import { ShieldAlert, ShieldX } from "lucide-react";
-import { useI18n } from "../i18n";
 import { ActionButton } from "./ActionButton";
 import { Badge } from "./ui";
 
 // ScamFakeBadges renders the SCAM/FAKE moderation labels when set.
 export function ScamFakeBadges({ scam, fake }: { scam: boolean; fake: boolean }) {
-  const { t } = useI18n();
   if (!scam && !fake) {
     return null;
   }
   return (
     <>
-      {scam && <Badge tone="danger">{t("flags.scam")}</Badge>}
-      {fake && <Badge tone="danger">{t("flags.fake")}</Badge>}
+      {scam && <Badge tone="danger">{"SCAM"}</Badge>}
+      {fake && <Badge tone="danger">{"FAKE"}</Badge>}
     </>
   );
 }
@@ -35,11 +33,10 @@ export function ScamFakeActions({
   fake: boolean;
   onDone: () => void;
 }) {
-  const { t } = useI18n();
   return (
     <div className="action-stack">
       <ActionButton
-        label={scam ? t("flags.clearScam") : t("flags.setScam")}
+        label={scam ? "Clear SCAM" : "Mark as SCAM"}
         icon={<ShieldAlert size={15} />}
         tone="danger"
         path={path}
@@ -47,7 +44,7 @@ export function ScamFakeActions({
         onDone={onDone}
       />
       <ActionButton
-        label={fake ? t("flags.clearFake") : t("flags.setFake")}
+        label={fake ? "Clear FAKE" : "Mark as FAKE"}
         icon={<ShieldX size={15} />}
         tone="danger"
         path={path}

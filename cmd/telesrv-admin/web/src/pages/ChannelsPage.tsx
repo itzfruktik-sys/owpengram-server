@@ -3,14 +3,12 @@ import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { Alert, Badge, EmptyRow, Metric, PageFrame, QueryPanel } from "../components/ui";
 import { ScamFakeBadges } from "../components/flags";
-import { useI18n } from "../i18n";
 import { channelKind, displayUsername, formatDate } from "../lib/format";
 import { channelMetrics } from "../lib/metrics";
 import type { Navigate } from "../routing";
 import type { ChannelListResponse } from "../types";
 
 export function ChannelsPage({ navigate }: { navigate: Navigate }) {
-  const { t } = useI18n();
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState("50");
   const [data, setData] = useState<ChannelListResponse | null>(null);
@@ -50,37 +48,37 @@ export function ChannelsPage({ navigate }: { navigate: Navigate }) {
 
   return (
     <PageFrame
-      title={t("channel.pageTitle")}
-      eyebrow={data?.listing === false ? t("account.queryResults") : t("channel.recentUpdated")}
+      title={"Supergroups and Channels"}
+      eyebrow={data?.listing === false ? "Search results" : "Recently updated"}
       actions={
         <button className="btn" type="button" onClick={() => load(false)} disabled={busy}>
-          <RefreshCw size={15} /> {t("common.refresh")}
+          <RefreshCw size={15} /> {"Refresh"}
         </button>
       }
     >
       {error && <Alert>{error}</Alert>}
       <div className="metric-row">
-        <Metric label={t("channel.currentPage")} value={String(data?.rows.length ?? 0)} />
-        <Metric label={t("channel.megagroups")} value={String(metrics.megagroups)} />
-        <Metric label={t("channel.broadcasts")} value={String(metrics.broadcasts)} />
-        <Metric label={t("channel.verifiedCount")} value={String(metrics.verified)} tone="good" />
+        <Metric label={"Entities on page"} value={String(data?.rows.length ?? 0)} />
+        <Metric label={"Supergroups"} value={String(metrics.megagroups)} />
+        <Metric label={"Channels"} value={String(metrics.broadcasts)} />
+        <Metric label={"Verified"} value={String(metrics.verified)} tone="good" />
       </div>
       <QueryPanel>
         <form className="toolbar" onSubmit={(event) => { event.preventDefault(); void load(false); }}>
           <label className="searchbox">
             <Search size={15} />
-            <input value={q} onChange={(event) => setQ(event.target.value)} placeholder={t("channel.searchPlaceholder")} />
+            <input value={q} onChange={(event) => setQ(event.target.value)} placeholder={"Channel ID / username / title"} />
           </label>
           <label className="field-inline">
-            <span>{t("common.limit")}</span>
+            <span>{"Limit"}</span>
             <input className="small-input" value={limit} onChange={(event) => setLimit(event.target.value)} type="number" min="1" max="100" />
           </label>
           <button className="btn primary icon-text" type="submit" disabled={busy}>
-            {busy ? <Loader2 size={15} className="spin" /> : <Search size={15} />} {t("common.search")}
+            {busy ? <Loader2 size={15} className="spin" /> : <Search size={15} />} {"Search"}
           </button>
           {data?.listing && data.has_more && (
             <button className="btn icon-text" type="button" onClick={() => load(true)} disabled={busy}>
-              <ChevronRight size={15} /> {t("messages.nextPage")}
+              <ChevronRight size={15} /> {"Next page"}
             </button>
           )}
         </form>
@@ -89,15 +87,15 @@ export function ChannelsPage({ navigate }: { navigate: Navigate }) {
         <table className="data-table">
           <thead>
             <tr>
-              <th>{t("channel.channelID")}</th>
-              <th>{t("channel.kind")}</th>
-              <th>{t("common.username")}</th>
-              <th>{t("channel.title")}</th>
-              <th>{t("common.members")}</th>
-              <th>{t("common.admins")}</th>
+              <th>{"Channel ID"}</th>
+              <th>{"Kind"}</th>
+              <th>{"Username"}</th>
+              <th>{"Title"}</th>
+              <th>{"Members"}</th>
+              <th>{"Admins"}</th>
               <th>PTS</th>
-              <th>{t("common.verified")}</th>
-              <th>{t("common.updatedAt")}</th>
+              <th>{"Verified"}</th>
+              <th>{"Updated"}</th>
               <th></th>
             </tr>
           </thead>
@@ -105,15 +103,15 @@ export function ChannelsPage({ navigate }: { navigate: Navigate }) {
             {data?.rows.map((row) => (
               <tr key={row.ID}>
                 <td className="mono">{row.ID}</td>
-                <td>{channelKind(row, t)}</td>
+                <td>{channelKind(row)}</td>
                 <td>{displayUsername(row.Username)}</td>
                 <td>{row.Title}</td>
                 <td>{row.ParticipantsCount}</td>
                 <td>{row.AdminsCount}</td>
                 <td>{row.PTS}</td>
-                <td>{row.Verified ? <Badge tone="good">{t("common.verified")}</Badge> : <Badge>{t("account.notVerified")}</Badge>} <ScamFakeBadges scam={row.Scam} fake={row.Fake} /></td>
+                <td>{row.Verified ? <Badge tone="good">{"Verified"}</Badge> : <Badge>{"Not verified"}</Badge>} <ScamFakeBadges scam={row.Scam} fake={row.Fake} /></td>
                 <td>{formatDate(row.UpdatedAt)}</td>
-                <td><button className="row-link" onClick={() => navigate(`/channels/${row.ID}`)}>{t("common.detail")} <ChevronRight size={14} /></button></td>
+                <td><button className="row-link" onClick={() => navigate(`/channels/${row.ID}`)}>{"Details"} <ChevronRight size={14} /></button></td>
               </tr>
             ))}
             {(!data || data.rows.length === 0) && <EmptyRow colSpan={10} />}

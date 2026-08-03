@@ -68,8 +68,6 @@ type AccountPassword struct {
 	SrpBSecret              []byte
 	SrpB                    []byte
 	RecoveryEmail           string
-	RecoveryCode            string
-	RecoveryCodeExpiresAt   pgtype.Timestamptz
 	LoginEmail              string
 	PasswordChangedAt       pgtype.Timestamptz
 }

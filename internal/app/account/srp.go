@@ -12,7 +12,6 @@ import (
 
 const (
 	passwordHashSize = 256
-	recoveryCodeTTL  = 15 * 60
 )
 
 var (

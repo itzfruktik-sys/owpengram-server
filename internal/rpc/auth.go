@@ -63,6 +63,9 @@ func (r *Router) registerAuth(d *tlprofile.Dispatcher) {
 	registerRPC[*tg.AuthSendCodeRequest](d, tlprofile.SemanticMethodAuthSendCode, func(ctx context.Context, layerRequest *tg.AuthSendCodeRequest) (any, error) {
 		return r.onAuthSendCode(ctx, layerRequest)
 	})
+	registerRPC[*tg.AuthReportMissingCodeRequest](d, tlprofile.SemanticMethodAuthReportMissingCode, func(ctx context.Context, req *tg.AuthReportMissingCodeRequest) (any, error) {
+		return r.onAuthReportMissingCode(ctx, req)
+	})
 	registerRPC[*tg.AuthResendCodeRequest](d, tlprofile.SemanticMethodAuthResendCode, func(ctx context.Context, layerRequest *tg.AuthResendCodeRequest) (any, error) {
 		return r.onAuthResendCode(ctx, layerRequest)
 	})
@@ -407,7 +410,7 @@ func (r *Router) authLoginTokenSuccess(ctx context.Context, a domain.Authorizati
 		return nil, internalErr()
 	}
 	return &tg.AuthLoginTokenSuccess{
-		Authorization: &tg.AuthAuthorization{User: r.tgSelfUser(u)},
+		Authorization: &tg.AuthAuthorization{User: r.tgSelfUserWithUsernames(ctx, u)},
 	}, nil
 }
 
@@ -475,6 +478,36 @@ func (r *Router) onAuthSendCode(ctx context.Context, req *tg.AuthSendCodeRequest
 	return r.tgSentCodeForHash(ctx, hash)
 }
 
+func (r *Router) onAuthReportMissingCode(ctx context.Context, req *tg.AuthReportMissingCodeRequest) (bool, error) {
+	if req == nil || r.deps.AuthDeliveryReports == nil {
+		return false, inputRequestInvalidErr()
+	}
+	authKeyID, authKeyOK := AuthKeyIDFrom(ctx)
+	sessionID, sessionOK := SessionIDFrom(ctx)
+	if !authKeyOK || authKeyID == ([8]byte{}) || !sessionOK || sessionID == 0 {
+		return false, internalErr()
+	}
+	clientType := string(ClientTypeFrom(ctx))
+	if _, _, err := r.deps.AuthDeliveryReports.ReportMissingCode(ctx, domain.AuthMissingCodeReportRequest{
+		AuthKeyID: authKeyID, SessionID: sessionID, ClientType: clientType,
+		Phone: req.PhoneNumber, PhoneCodeHash: req.PhoneCodeHash,
+		MNC: req.Mnc, CreatedAt: r.clock.Now(),
+	}); err != nil {
+		switch {
+		case errors.Is(err, domain.ErrPhoneCodeExpired):
+			return false, phoneCodeExpiredErr()
+		case errors.Is(err, domain.ErrPhoneCodeInvalid),
+			errors.Is(err, domain.ErrAuthDeliveryReportInvalid):
+			return false, phoneCodeInvalidErr()
+		case errors.Is(err, domain.ErrAuthDeliveryRateLimited):
+			return false, floodWaitErr(60)
+		default:
+			return false, internalErr()
+		}
+	}
+	return true, nil
+}
+
 func tgSentCode(hash string) tg.AuthSentCodeClass {
 	return tgSentCodeWithLength(hash, devCodeLength)
 }
@@ -521,19 +554,24 @@ func tgEmailSentCode(hash, emailPattern string, length int, resetAvailable bool)
 	}
 }
 
-func tgEmailSetupRequiredSentCode(hash string) tg.AuthSentCodeClass {
-	return &tg.AuthSentCode{
-		Type:          &tg.AuthSentCodeTypeSetUpEmailRequired{},
-		PhoneCodeHash: hash,
-	}
-}
-
 // loginEmailResetAvailabilityChecker lets tgSentCodeForHash ask whether
 // auth.resetLoginEmail could actually succeed right now, so the client is
 // never shown a "Can't access this email?" escape hatch it cannot use (see
 // auth.Service.LoginEmailResetAvailable / ConsumeLoginEmailReset).
 type loginEmailResetAvailabilityChecker interface {
 	LoginEmailResetAvailable() bool
+}
+
+func (r *Router) loginEmailResetAvailable() bool {
+	checker, ok := r.deps.Auth.(loginEmailResetAvailabilityChecker)
+	return ok && checker.LoginEmailResetAvailable()
+}
+
+func tgEmailSetupRequiredSentCode(hash string) tg.AuthSentCodeClass {
+	return &tg.AuthSentCode{
+		Type:          &tg.AuthSentCodeTypeSetUpEmailRequired{},
+		PhoneCodeHash: hash,
+	}
 }
 
 func (r *Router) tgSentCodeForHash(ctx context.Context, hash string) (tg.AuthSentCodeClass, error) {
@@ -551,11 +589,7 @@ func (r *Router) tgSentCodeForHash(ctx context.Context, hash string) (tg.AuthSen
 	case domain.AuthCodeDeliverySMS:
 		return tgSMSSentCode(hash, delivery.Length), nil
 	case domain.AuthCodeDeliveryEmail:
-		resetAvailable := false
-		if checker, ok := r.deps.Auth.(loginEmailResetAvailabilityChecker); ok {
-			resetAvailable = checker.LoginEmailResetAvailable()
-		}
-		return tgEmailSentCode(hash, delivery.EmailPattern, delivery.Length, resetAvailable), nil
+		return tgEmailSentCode(hash, delivery.EmailPattern, delivery.Length, r.loginEmailResetAvailable()), nil
 	case domain.AuthCodeDeliveryEmailSetupRequired:
 		return tgEmailSetupRequiredSentCode(hash), nil
 	default:
@@ -600,7 +634,7 @@ func (r *Router) finishAuthSignIn(ctx context.Context, u domain.User, needSignUp
 	}
 	r.bindSessionUser(ctx, u.ID)
 	r.pushSignInServiceNotificationToOthers(ctx, u)
-	return &tg.AuthAuthorization{User: r.tgSelfUser(u)}, nil
+	return &tg.AuthAuthorization{User: r.tgSelfUserWithUsernames(ctx, u)}, nil
 }
 
 func (r *Router) onAuthResendCode(ctx context.Context, req *tg.AuthResendCodeRequest) (tg.AuthSentCodeClass, error) {
@@ -677,7 +711,8 @@ func (r *Router) onAuthResetAuthorizations(ctx context.Context) (bool, error) {
 	for _, a := range deleted {
 		r.revokeAuthKeySessions(a.AuthKeyID)
 		_ = r.clearAuthKeyState(ctx, a.AuthKeyID)
-		// P1 修复：撤销其它会话同样销毁其 auth_key，级联 discard 该设备绑定的活跃密聊并通知对端。
+		// 撤销其它会话会删除其业务 authorization；协议 key 保留用于让客户端
+		// 重连后取得 AUTH_KEY_UNREGISTERED。密聊仍按设备授权边界 discard 并通知对端。
 		r.discardSecretChatsForAuthKey(ctx, businessAuthKeyInt64(a.AuthKeyID), userID)
 	}
 	return true, nil
@@ -708,7 +743,7 @@ func (r *Router) onAuthCheckPassword(ctx context.Context, password tg.InputCheck
 	if err != nil {
 		return nil, internalErr()
 	}
-	return &tg.AuthAuthorization{User: r.tgSelfUser(u)}, nil
+	return &tg.AuthAuthorization{User: r.tgSelfUserWithUsernames(ctx, u)}, nil
 }
 
 func (r *Router) onAuthRequestPasswordRecovery(ctx context.Context) (*tg.AuthPasswordRecovery, error) {
@@ -749,7 +784,7 @@ func (r *Router) onAuthRecoverPassword(ctx context.Context, req *tg.AuthRecoverP
 	if err != nil {
 		return nil, internalErr()
 	}
-	return &tg.AuthAuthorization{User: r.tgSelfUser(u)}, nil
+	return &tg.AuthAuthorization{User: r.tgSelfUserWithUsernames(ctx, u)}, nil
 }
 
 func (r *Router) onAuthCheckRecoveryPassword(ctx context.Context, code string) (bool, error) {
@@ -880,7 +915,7 @@ func (r *Router) onAuthFinishPasskeyLogin(ctx context.Context, req *tg.AuthFinis
 		r.setAuthUserCache(id, u.ID, true)
 	}
 	r.bindSessionUser(ctx, u.ID)
-	return &tg.AuthAuthorization{User: r.tgSelfUser(u)}, nil
+	return &tg.AuthAuthorization{User: r.tgSelfUserWithUsernames(ctx, u)}, nil
 }
 
 func emailVerificationCode(v tg.EmailVerificationClass) string {
@@ -911,7 +946,7 @@ func (r *Router) onAuthImportBotAuthorization(ctx context.Context, req *tg.AuthI
 		r.setAuthUserCache(id, u.ID, true)
 	}
 	r.bindSessionUser(ctx, u.ID)
-	return &tg.AuthAuthorization{User: r.tgSelfUser(u)}, nil
+	return &tg.AuthAuthorization{User: r.tgSelfUserWithUsernames(ctx, u)}, nil
 }
 
 // onAuthSignUp 处理 auth.signUp：创建用户并绑定授权。
@@ -925,7 +960,7 @@ func (r *Router) onAuthSignUp(ctx context.Context, req *tg.AuthSignUpRequest) (t
 	}
 	r.bindSessionUser(ctx, u.ID)
 	r.enqueueLoginMessageBootstrap(ctx, loginMessage)
-	return &tg.AuthAuthorization{User: r.tgSelfUser(u)}, nil
+	return &tg.AuthAuthorization{User: r.tgSelfUserWithUsernames(ctx, u)}, nil
 }
 
 // onAuthLogOut 处理 auth.logOut：解绑当前 auth_key 的授权。
@@ -948,8 +983,8 @@ func (r *Router) onAuthLogOut(ctx context.Context) (*tg.AuthLoggedOut, error) {
 			r.presence.clearSession(key)
 		}
 	}
-	// P1 修复：登出销毁本设备 perm auth_key 后，级联 discard 其绑定的活跃密聊并通知对端
-	//（否则对端继续往死 auth_key 投递成静默死链）。best-effort，不阻断登出。
+	// 登出撤销本设备 authorization 后，级联 discard 其绑定的活跃密聊并通知对端
+	//（否则对端继续往已退出设备投递成静默死链）。best-effort，不阻断登出。
 	if userErr == nil && userID != 0 {
 		r.discardSecretChatsForAuthKey(ctx, businessAuthKeyInt64(id), userID)
 	}

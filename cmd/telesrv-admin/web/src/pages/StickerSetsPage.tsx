@@ -4,7 +4,6 @@ import { api, errorMessage } from "../api";
 import { ActionButton } from "../components/ActionButton";
 import { StickerDocumentPreview } from "../components/StickerDocumentPreview";
 import { Alert, Badge, EmptyRow, Metric, PageFrame, QueryPanel } from "../components/ui";
-import { useI18n } from "../i18n";
 import type { StickerSetRow } from "../types";
 import { CreateStickerSetModal } from "./CreateStickerSetModal";
 import { StickerSetPreviewModal } from "./StickerSetPreviewModal";
@@ -16,7 +15,6 @@ type StickerPageSize = 10 | 20 | 50 | 100 | "all";
 // filtered out server-side and never reach this page; they aren't meant to be
 // hand-edited.
 export function StickerSetsPage({ kind }: { kind: "stickers" | "emoji" }) {
-  const { t } = useI18n();
   const [sets, setSets] = useState<StickerSetRow[]>([]);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -28,8 +26,10 @@ export function StickerSetsPage({ kind }: { kind: "stickers" | "emoji" }) {
   const [previewSet, setPreviewSet] = useState<StickerSetRow | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
-  const pageTitleKey = kind === "emoji" ? "stickers.emojiPageTitle" : "stickers.pageTitle";
-  const eyebrowKey = kind === "emoji" ? "stickers.emojiEyebrow" : "stickers.eyebrow";
+  const pageTitle = kind === "emoji" ? "Emoji" : "Stickers";
+  const eyebrow = kind === "emoji"
+    ? "Custom-emoji packs — system packs aren't shown here, they're not hand-edited"
+    : "Sticker packs — system packs (dice, animated emoji, gifts) aren't shown here, they're not hand-edited";
   const noun = kind === "emoji" ? "emoji" : "sticker";
 
   async function load() {
@@ -76,33 +76,33 @@ export function StickerSetsPage({ kind }: { kind: "stickers" | "emoji" }) {
 
   return (
     <PageFrame
-      title={t(pageTitleKey)}
-      eyebrow={t(eyebrowKey)}
+      title={pageTitle}
+      eyebrow={eyebrow}
       actions={
         <>
           <button className="btn" type="button" onClick={() => load()} disabled={busy}>
-            <RefreshCw size={15} /> {t("common.refresh")}
+            <RefreshCw size={15} /> {"Refresh"}
           </button>
           <button className="btn primary" type="button" onClick={() => setCreateOpen(true)}>
-            <Plus size={15} /> {t("stickers.create", { noun })}
+            <Plus size={15} /> {`Create ${noun} pack`}
           </button>
         </>
       }
     >
       {error && <Alert>{error}</Alert>}
       <div className="metric-row">
-        <Metric label={t("stickers.total")} value={String(counts.total)} />
-        <Metric label={t("stickers.official")} value={String(counts.official)} tone="good" />
-        <Metric label={t("stickers.archived")} value={String(counts.archived)} tone={counts.archived > 0 ? "warn" : "neutral"} />
+        <Metric label={"Total sets"} value={String(counts.total)} />
+        <Metric label={"Official"} value={String(counts.official)} tone="good" />
+        <Metric label={"Archived"} value={String(counts.archived)} tone={counts.archived > 0 ? "warn" : "neutral"} />
       </div>
       <QueryPanel>
         <div className="toolbar">
           <label className="searchbox">
             <Search size={15} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("stickers.searchPlaceholder")} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={"Search set ID, short name or title"} />
           </label>
           <label className="gift-page-size">
-            <span>{t("gifts.perPage")}</span>
+            <span>{"Per page"}</span>
             <select
               value={String(pageSize)}
               onChange={(event) => setPageSize(event.target.value === "all" ? "all" : (Number(event.target.value) as StickerPageSize))}
@@ -111,25 +111,25 @@ export function StickerSetsPage({ kind }: { kind: "stickers" | "emoji" }) {
               <option value="20">20</option>
               <option value="50">50</option>
               <option value="100">100</option>
-              <option value="all">{t("gifts.perPageAll")}</option>
+              <option value="all">{"All"}</option>
             </select>
           </label>
-          <span className="gift-list-summary">{t("stickers.listSummary", { shown: visible.length, total: sets.length })}</span>
+          <span className="gift-list-summary">{`Showing ${visible.length} of ${sets.length}`}</span>
         </div>
       </QueryPanel>
       <div className="table-wrap gift-table-wrap">
         <table className="data-table">
           <thead>
             <tr>
-              <th>{t("stickers.logo")}</th>
-              <th>{t("stickers.id")}</th>
-              <th>{t("stickers.shortName")}</th>
-              <th>{t("stickers.title")}</th>
-              <th>{t("stickers.count")}</th>
-              <th>{t("stickers.official")}</th>
-              <th>{t("common.status")}</th>
-              <th>{t("stickers.sortOrder")}</th>
-              <th>{t("common.actions")}</th>
+              <th>{"Logo"}</th>
+              <th>{"ID"}</th>
+              <th>{"Short name"}</th>
+              <th>{"Title"}</th>
+              <th>{"Documents"}</th>
+              <th>{"Official"}</th>
+              <th>{"Status"}</th>
+              <th>{"Sort order"}</th>
+              <th>{"Actions"}</th>
             </tr>
           </thead>
           <tbody>
@@ -143,7 +143,7 @@ export function StickerSetsPage({ kind }: { kind: "stickers" | "emoji" }) {
                   )}
                 </td>
                 <td className="mono">{set.ID}</td>
-                <td className="mono">{set.ShortName || <span className="muted-cell">{t("common.none")}</span>}</td>
+                <td className="mono">{set.ShortName || <span className="muted-cell">{"None"}</span>}</td>
                 <td>
                   <div className="sort-order-editor">
                     <input
@@ -154,7 +154,7 @@ export function StickerSetsPage({ kind }: { kind: "stickers" | "emoji" }) {
                     <ActionButton
                       compact
                       tone="neutral"
-                      label={t("stickers.saveTitle")}
+                      label={"Save"}
                       path="/api/actions/rename-sticker-set"
                       payload={() => ({ set_id: set.ID, title: (titleDrafts[set.ID] ?? set.Title).trim() })}
                       onDone={() => void load()}
@@ -162,8 +162,8 @@ export function StickerSetsPage({ kind }: { kind: "stickers" | "emoji" }) {
                   </div>
                 </td>
                 <td>{set.Count}</td>
-                <td>{set.Official ? <Badge tone="good">{t("common.yes")}</Badge> : <Badge>{t("common.no")}</Badge>}</td>
-                <td>{set.Archived ? <Badge tone="danger">{t("stickers.archived")}</Badge> : <Badge tone="good">{t("common.enabled")}</Badge>}</td>
+                <td>{set.Official ? <Badge tone="good">{"Yes"}</Badge> : <Badge>{"No"}</Badge>}</td>
+                <td>{set.Archived ? <Badge tone="danger">{"Archived"}</Badge> : <Badge tone="good">{"Enabled"}</Badge>}</td>
                 <td>
                   <div className="sort-order-editor">
                     <input
@@ -175,7 +175,7 @@ export function StickerSetsPage({ kind }: { kind: "stickers" | "emoji" }) {
                     <ActionButton
                       compact
                       tone="neutral"
-                      label={t("stickers.saveOrder")}
+                      label={"Save"}
                       path="/api/actions/set-sticker-set-sort-order"
                       payload={() => ({ set_id: set.ID, sort_order: Number(orderDrafts[set.ID] ?? set.SortOrder) })}
                       onDone={() => void load()}
@@ -185,12 +185,12 @@ export function StickerSetsPage({ kind }: { kind: "stickers" | "emoji" }) {
                 <td>
                   <div className="gift-table-actions">
                     <button className="btn compact-btn" type="button" onClick={() => setPreviewSet(set)}>
-                      <Eye size={13} /> {t("stickers.view")}
+                      <Eye size={13} /> {"View"}
                     </button>
                     <ActionButton
                       compact
                       tone="neutral"
-                      label={set.Archived ? t("stickers.unarchive") : t("stickers.archive")}
+                      label={set.Archived ? "Unarchive" : "Archive"}
                       path="/api/actions/set-sticker-set-archived"
                       payload={() => ({ set_id: set.ID, archived: !set.Archived })}
                       onDone={() => void load()}
@@ -198,7 +198,7 @@ export function StickerSetsPage({ kind }: { kind: "stickers" | "emoji" }) {
                     <ActionButton
                       compact
                       tone="danger"
-                      label={t("stickers.delete")}
+                      label={"Delete"}
                       path="/api/actions/delete-sticker-set"
                       payload={() => ({ set_id: set.ID })}
                       onDone={() => void load()}
@@ -213,14 +213,14 @@ export function StickerSetsPage({ kind }: { kind: "stickers" | "emoji" }) {
       </div>
       {pageSize !== "all" && visible.length > 0 && (
         <div className="gift-pager">
-          <span className="gift-pager-range">{t("gifts.pageRange", { start: rangeStart, end: rangeEnd, total: visible.length })}</span>
+          <span className="gift-pager-range">{`Showing ${rangeStart}-${rangeEnd} of ${visible.length}`}</span>
           <div className="gift-pager-controls">
             <button className="btn compact-btn" type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>
-              <ChevronLeft size={14} /> {t("gifts.pagePrev")}
+              <ChevronLeft size={14} /> {"Previous"}
             </button>
-            <span className="gift-pager-page">{t("gifts.pageOf", { page: currentPage, total: totalPages })}</span>
+            <span className="gift-pager-page">{`Page ${currentPage} of ${totalPages}`}</span>
             <button className="btn compact-btn" type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>
-              {t("gifts.pageNext")} <ChevronRight size={14} />
+              {"Next"} <ChevronRight size={14} />
             </button>
           </div>
         </div>

@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { StaticLottie } from "../components/StaticLottie";
 import { Alert, Metric, PageFrame, QueryPanel } from "../components/ui";
-import { useI18n } from "../i18n";
 import type { EmojiListResponse, EmojiRow } from "../types";
 
 function formatBytes(value: number): string {
@@ -40,7 +39,6 @@ function EmojiPreview({ row }: { row: EmojiRow }) {
 }
 
 function EmojiCard({ row }: { row: EmojiRow }) {
-  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -58,18 +56,17 @@ function EmojiCard({ row }: { row: EmojiRow }) {
       <div className="emoji-preview"><EmojiPreview row={row} /></div>
       <div className="emoji-meta">
         <span className="emoji-alt">{row.Alt || "—"}</span>
-        <button className="emoji-id" type="button" onClick={copy} title={t("emoji.copyID")}>
+        <button className="emoji-id" type="button" onClick={copy} title={"Copy document ID"}>
           <span className="mono">{row.DocumentID}</span>
           {copied ? <Check size={12} /> : <Copy size={12} />}
         </button>
-        <span className="emoji-sub">{row.SetTitle || t("emoji.noSet")} · {formatBytes(row.Size)}</span>
+        <span className="emoji-sub">{row.SetTitle || "No set"} · {formatBytes(row.Size)}</span>
       </div>
     </div>
   );
 }
 
 export function EmojiPage() {
-  const { t } = useI18n();
   const [q, setQ] = useState("");
   const [data, setData] = useState<EmojiListResponse | null>(null);
   const [cursor, setCursor] = useState(0);
@@ -104,37 +101,37 @@ export function EmojiPage() {
 
   return (
     <PageFrame
-      title={t("emoji.pageTitle")}
-      eyebrow={data?.listing === false ? t("emoji.queryResults") : t("emoji.recent")}
+      title={"Custom Emoji"}
+      eyebrow={data?.listing === false ? "Search results" : "Custom emoji catalog"}
       actions={
         <button className="btn" type="button" onClick={() => load(false)} disabled={busy}>
-          <RefreshCw size={15} /> {t("common.refresh")}
+          <RefreshCw size={15} /> {"Refresh"}
         </button>
       }
     >
       {error && <Alert>{error}</Alert>}
       <div className="metric-row">
-        <Metric label={t("emoji.currentPage")} value={String(rows.length)} />
+        <Metric label={"Emoji on page"} value={String(rows.length)} />
       </div>
       <QueryPanel>
         <form className="toolbar" onSubmit={(event) => { event.preventDefault(); void load(false); }}>
           <label className="searchbox">
             <Search size={15} />
-            <input value={q} onChange={(event) => setQ(event.target.value)} placeholder={t("emoji.searchPlaceholder")} />
+            <input value={q} onChange={(event) => setQ(event.target.value)} placeholder={"Document ID or emoji"} />
           </label>
           <button className="btn primary icon-text" type="submit" disabled={busy}>
-            {busy ? <Loader2 size={15} className="spin" /> : <Search size={15} />} {t("common.search")}
+            {busy ? <Loader2 size={15} className="spin" /> : <Search size={15} />} {"Search"}
           </button>
           {data?.listing && data.has_more && (
             <button className="btn icon-text" type="button" onClick={() => load(true)} disabled={busy}>
-              <ChevronRight size={15} /> {t("messages.nextPage")}
+              <ChevronRight size={15} /> {"Next page"}
             </button>
           )}
         </form>
       </QueryPanel>
-      <p className="about-text">{t("emoji.hint")}</p>
+      <p className="about-text">{"Document IDs here can be pasted into the Emoji status field on account, bot and channel profiles."}</p>
       {rows.length === 0 ? (
-        <div className="empty-panel">{t("common.noResults")}</div>
+        <div className="empty-panel">{"No results"}</div>
       ) : (
         <div className="emoji-grid">
           {rows.map((row) => <EmojiCard key={row.DocumentID} row={row} />)}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	compatandroid "telesrv/internal/compat/android"
 	"telesrv/internal/domain"
 	"telesrv/internal/seed/catalog"
 	"telesrv/internal/store"
@@ -56,9 +57,10 @@ const tdesktopClient = "tdesktop"
 //
 // WebK directly calls Array.some on fragment_prefixes while rendering user profiles,
 // so this compatibility key must always remain an array, even when it is empty.
-const tdesktopDefaultAppConfigBase = `{"chat_read_mark_expire_period":604800,"chat_read_mark_size_threshold":50,"pm_read_date_expire_period":604800,"quote_length_max":1024,"telegram_antispam_group_size_min":200,"telegram_antispam_user_id":"5434988373","fragment_prefixes":["888"],"forum_upgrade_participants_min":2,"reactions_default":{"_":"reactionEmoji","emoticon":"👍"},"reactions_uniq_max":11,"reactions_user_max_default":1,"reactions_user_max_premium":3,"reactions_in_chat_max":3,"boosts_channel_level_max":100,"rich_message_posting":"enabled","upload_markup_video":true,"emojies_send_dice":["🎲","🎯","🏀","⚽","⚽️","🎳","🎰"],"premium_purchase_blocked":false,"stars_purchase_blocked":false,"stargifts_blocked":false,"stargifts_pinned_to_top_limit":6,"stories_stealth_future_period":1500,"stories_stealth_past_period":300,"stories_stealth_cooldown_period":10800,"quick_replies_limit":100,"quick_reply_messages_limit":20,"business_chat_links_limit":100,"dialog_filters_enabled":true,"chatlist_update_period":3600,"chatlist_invites_limit_default":3,"chatlist_invites_limit_premium":20,"chatlists_joined_limit_default":2,"chatlists_joined_limit_premium":20,"about_length_limit_default":70,"about_length_limit_premium":140,"caption_length_limit_default":1024,"caption_length_limit_premium":4096,"channels_limit_default":500,"channels_limit_premium":1000,"channels_public_limit_default":10,"channels_public_limit_premium":20,"dialog_filters_limit_default":10,"dialog_filters_limit_premium":20,"dialog_filters_chats_limit_default":100,"dialog_filters_chats_limit_premium":200,"dialogs_pinned_limit_default":5,"dialogs_pinned_limit_premium":10,"dialogs_folder_pinned_limit_default":100,"dialogs_folder_pinned_limit_premium":200,"saved_dialogs_pinned_limit_default":5,"saved_dialogs_pinned_limit_premium":100,"saved_gifs_limit_default":200,"saved_gifs_limit_premium":400,"stickers_faved_limit_default":5,"stickers_faved_limit_premium":10,"recommended_channels_limit_default":10,"recommended_channels_limit_premium":100,"aicompose_tone_examples_num":3,"aicompose_tone_title_length_max":12,"aicompose_tone_prompt_length_max":1024,"aicompose_tone_saved_limit_default":5,"aicompose_tone_saved_limit_premium":20,"upload_max_fileparts_default":4000,"upload_max_fileparts_premium":8000`
+const tdesktopDefaultAppConfigBase = `{"chat_read_mark_expire_period":604800,"chat_read_mark_size_threshold":50,"pm_read_date_expire_period":604800,"quote_length_max":1024,"telegram_antispam_group_size_min":200,"telegram_antispam_user_id":"5434988373","fragment_prefixes":["888"],"forum_upgrade_participants_min":2,"reactions_default":{"_":"reactionEmoji","emoticon":"👍"},"reactions_uniq_max":11,"reactions_user_max_default":1,"reactions_user_max_premium":3,"reactions_in_chat_max":3,"boosts_channel_level_max":100,"rich_message_posting":"enabled","upload_markup_video":true,"emojies_send_dice":["🎲","🎯","🏀","⚽","⚽️","🎳","🎰"],"premium_purchase_blocked":false,"stars_purchase_blocked":false,"stargifts_blocked":false,"stargifts_pinned_to_top_limit":6,"giveaway_gifts_purchase_available":true,"giveaway_boosts_per_premium":4,"giveaway_countries_max":10,"giveaway_add_peers_max":10,"giveaway_period_max":604800,"stories_stealth_future_period":1500,"stories_stealth_past_period":300,"stories_stealth_cooldown_period":10800,"quick_replies_limit":100,"quick_reply_messages_limit":20,"business_chat_links_limit":100,"dialog_filters_enabled":true,"chatlist_update_period":3600,"chatlist_invites_limit_default":3,"chatlist_invites_limit_premium":20,"chatlists_joined_limit_default":2,"chatlists_joined_limit_premium":20,"about_length_limit_default":70,"about_length_limit_premium":140,"bot_verification_description_length_limit":70,"caption_length_limit_default":1024,"caption_length_limit_premium":4096,"channels_limit_default":500,"channels_limit_premium":1000,"channels_public_limit_default":10,"channels_public_limit_premium":20,"dialog_filters_limit_default":10,"dialog_filters_limit_premium":20,"dialog_filters_chats_limit_default":100,"dialog_filters_chats_limit_premium":200,"dialogs_pinned_limit_default":5,"dialogs_pinned_limit_premium":10,"dialogs_folder_pinned_limit_default":100,"dialogs_folder_pinned_limit_premium":200,"saved_dialogs_pinned_limit_default":5,"saved_dialogs_pinned_limit_premium":100,"saved_gifs_limit_default":200,"saved_gifs_limit_premium":400,"stickers_faved_limit_default":5,"stickers_faved_limit_premium":10,"recommended_channels_limit_default":10,"recommended_channels_limit_premium":100,"aicompose_tone_examples_num":3,"aicompose_tone_title_length_max":12,"aicompose_tone_prompt_length_max":1024,"aicompose_tone_saved_limit_default":5,"aicompose_tone_saved_limit_premium":20,"upload_max_fileparts_default":4000,"upload_max_fileparts_premium":8000`
+const tdesktopNoForwardsAppConfig = `,"no_forwards_request_expire_period":86400`
 
-const defaultAppConfigHash = 24 // 默认 app config 内容变更时必须递增，否则缓存端只会收到 notModified。
+const defaultAppConfigHash = 27 // 默认 app config 内容变更时必须递增，否则缓存端只会收到 notModified。
 
 // Service 提供客户端启动配置与国家区号目录。
 //
@@ -137,7 +139,8 @@ func defaultAppConfig(mapboxToken string, emailSignupEnable bool, emailSignupPho
 }
 
 func defaultAppConfigJSON(mapboxToken string, emailSignupEnable bool, emailSignupPhonePrefixes []string) []byte {
-	base := tdesktopDefaultAppConfigBase
+	androidInvoiceBilling := `,"premium_playmarket_direct_currency_list":` + compatandroid.DirectInvoiceCurrenciesJSON()
+	base := tdesktopDefaultAppConfigBase + tdesktopNoForwardsAppConfig + androidInvoiceBilling
 	if emailSignupEnable {
 		base += `,"email_signup_enabled":true`
 		if len(emailSignupPhonePrefixes) > 0 {
@@ -172,8 +175,10 @@ func defaultAppConfigHashFor(mapboxToken string, emailSignupEnable bool, emailSi
 }
 
 // GetAppConfig returns the cached global app config plus an authenticated,
-// per-account freeze overlay. The overlay owns its own deterministic hash so a
-// FROZEN_METHOD_INVALID-triggered refresh can never be answered notModified.
+// per-account freeze overlay. Only active freezes add account fields; an
+// inactive account receives the field-free base config. The overlay owns its
+// own deterministic hash so a FROZEN_METHOD_INVALID-triggered refresh and a
+// later unfreeze can never be answered notModified against the other state.
 func (s *Service) GetAppConfig(ctx context.Context, userID int64, hash int) (domain.AppConfig, bool, error) {
 	cfg := s.loadAppConfig(ctx)
 	var err error
@@ -197,15 +202,6 @@ func (s *Service) accountAppConfig(ctx context.Context, userID int64, base domai
 		}
 	}
 	if userID > 0 {
-		// DrKLO applies only keys present in the new JSON object and retains old
-		// SharedPreferences values for missing keys. Authenticated non-frozen
-		// accounts therefore need an explicit zero/empty triplet to converge after
-		// an unfreeze; merely omitting the overlay works in TDesktop but leaves
-		// Android frozen indefinitely. Unauthenticated config remains unscoped.
-		values["freeze_since_date"] = json.RawMessage("0")
-		values["freeze_until_date"] = json.RawMessage("0")
-		values["freeze_appeal_url"] = json.RawMessage(`""`)
-		changed = true
 		if s != nil && s.accountFreeze != nil {
 			freeze, found, err := s.accountFreeze.AccountFreeze(ctx, userID)
 			if err != nil {
@@ -216,6 +212,7 @@ func (s *Service) accountAppConfig(ctx context.Context, userID int64, base domai
 				values["freeze_until_date"] = json.RawMessage(strconv.FormatInt(freeze.Until.Unix(), 10))
 				appeal, _ := json.Marshal(freeze.AppealURL)
 				values["freeze_appeal_url"] = appeal
+				changed = true
 			}
 		}
 	}

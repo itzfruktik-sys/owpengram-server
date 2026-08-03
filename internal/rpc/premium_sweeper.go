@@ -49,9 +49,7 @@ func (r *Router) sweepExpiredPremium(ctx context.Context, batch int) {
 			r.log.Warn("premium sweep failed", zap.Error(err))
 			return
 		}
-		for _, u := range users {
-			r.pushPremiumStatusUpdate(ctx, u)
-		}
+		r.pushPremiumStatusUpdates(ctx, users)
 		// 不满一批说明已扫完当前积压；满批则继续，避免长停机后积压跨多个周期。
 		if len(users) < batch {
 			return
@@ -78,18 +76,125 @@ func (r *Router) NotifyUserChanged(ctx context.Context, u domain.User) error {
 	return nil
 }
 
+type moderationUserAudienceService interface {
+	ModerationFlagAudience(ctx context.Context, userID int64, limit int) ([]int64, error)
+}
+
+// NotifyUserModerationFlagsChanged sends the standard, non-PTS updateUser
+// shape to online accounts that already know the peer. Offline accounts
+// converge when their next authoritative peer/dialog read carries the updated
+// User flags; no synthetic message-box event is created.
+func (r *Router) NotifyUserModerationFlagsChanged(ctx context.Context, u domain.User) error {
+	if r == nil || u.ID == 0 {
+		return nil
+	}
+	r.invalidateRPCProjectionForUser(u.ID)
+	if r.deps.Users == nil {
+		return nil
+	}
+	audience := []int64{u.ID}
+	if service, ok := r.deps.Users.(moderationUserAudienceService); ok {
+		viewers, err := service.ModerationFlagAudience(ctx, u.ID, 4096)
+		if err != nil {
+			r.log.Warn("list moderation user update audience",
+				zap.Int64("target_user_id", u.ID),
+				zap.Error(err))
+		} else if len(viewers) != 0 {
+			audience = viewers
+		}
+	}
+
+	pushCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	botVerificationIcon := r.peerBotVerificationIcon(pushCtx, domain.Peer{Type: domain.PeerTypeUser, ID: u.ID})
+	usernames := r.usernameRegistryMap(pushCtx, []domain.Peer{{Type: domain.PeerTypeUser, ID: u.ID}})
+	seen := make(map[int64]struct{}, len(audience))
+	for _, viewerUserID := range audience {
+		if viewerUserID == 0 {
+			continue
+		}
+		if _, ok := seen[viewerUserID]; ok {
+			continue
+		}
+		seen[viewerUserID] = struct{}{}
+		if online, ok := r.deps.Sessions.(OnlineUserProvider); ok && !online.IsUserOnline(viewerUserID) {
+			continue
+		}
+		users, err := r.deps.Users.ByIDs(pushCtx, viewerUserID, []int64{u.ID})
+		if err != nil || len(users) == 0 {
+			r.log.Warn("project moderation user update",
+				zap.Int64("viewer_user_id", viewerUserID),
+				zap.Int64("target_user_id", u.ID),
+				zap.Error(err))
+			continue
+		}
+		projected := tgUsersForViewer(viewerUserID, users)
+		// The pushed peer object has to match what users.getUsers would answer, or the
+		// client refreshes the peer straight back into the stale shape. The third-party
+		// verification icon (user#b1b8cc83 bot_verification_icon:flags2.14) lives in a
+		// read model rather than on domain.User, so it is stamped on here -- from the
+		// single read taken before the loop, since it is the same peer for every
+		// recipient. Zero leaves flags2.14 unset, which is the pre-feature shape.
+		applyBotVerificationIconToUsers(projected, u.ID, botVerificationIcon)
+		applyUsernamesFromRegistry(projected, nil, usernames)
+		r.pushUserUpdates(pushCtx, viewerUserID, &tg.Updates{
+			Updates: []tg.UpdateClass{&tg.UpdateUser{UserID: u.ID}},
+			Users:   projected,
+			Date:    int(r.clock.Now().Unix()),
+			Seq:     0,
+		})
+	}
+	return nil
+}
+
 // pushPremiumStatusUpdate 向用户本人的全部在线 session 推送会员状态变化。
 // 授予、到期与 admin 认证变更共用：updateUser 触发客户端用随附的 self user
 // 对象刷新 premium/verified 等基础 flag（TDesktop processUser 按 flag 翻转）。
 func (r *Router) pushPremiumStatusUpdate(ctx context.Context, u domain.User) {
-	if u.ID == 0 {
+	r.pushPremiumStatusUpdates(ctx, []domain.User{u})
+}
+
+// pushPremiumStatusUpdates projects one username-registry snapshot over the
+// whole online subset. Premium expiry is swept in batches of up to 500 users;
+// reading each peer separately here would turn one maintenance batch into a
+// serial registry N+1 even though offline users need no immediate push.
+func (r *Router) pushPremiumStatusUpdates(ctx context.Context, candidates []domain.User) {
+	if len(candidates) == 0 || r.deps.Sessions == nil {
+		return
+	}
+	online, hasOnlineIndex := r.deps.Sessions.(OnlineUserProvider)
+	users := make([]domain.User, 0, len(candidates))
+	peers := make([]domain.Peer, 0, len(candidates))
+	seen := make(map[int64]struct{}, len(candidates))
+	for _, u := range candidates {
+		if u.ID == 0 {
+			continue
+		}
+		if _, ok := seen[u.ID]; ok {
+			continue
+		}
+		seen[u.ID] = struct{}{}
+		if hasOnlineIndex && !online.IsUserOnline(u.ID) {
+			continue
+		}
+		users = append(users, u)
+		peers = append(peers, domain.Peer{Type: domain.PeerTypeUser, ID: u.ID})
+	}
+	if len(users) == 0 {
 		return
 	}
 	pushCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	r.pushUserUpdates(pushCtx, u.ID, &tg.Updates{
-		Updates: []tg.UpdateClass{&tg.UpdateUser{UserID: u.ID}},
-		Users:   []tg.UserClass{r.tgSelfUser(u)},
-		Date:    int(r.clock.Now().Unix()),
-	})
+	usernames := r.usernameRegistryMap(pushCtx, peers)
+	date := int(r.clock.Now().Unix())
+	for _, u := range users {
+		projected := r.tgSelfUser(u)
+		projectedUsers := []tg.UserClass{projected}
+		applyUsernamesFromRegistry(projectedUsers, nil, usernames)
+		r.pushUserUpdates(pushCtx, u.ID, &tg.Updates{
+			Updates: []tg.UpdateClass{&tg.UpdateUser{UserID: u.ID}},
+			Users:   projectedUsers,
+			Date:    date,
+		})
+	}
 }

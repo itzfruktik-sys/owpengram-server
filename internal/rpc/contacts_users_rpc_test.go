@@ -13,6 +13,7 @@ import (
 	appprivacy "telesrv/internal/app/privacy"
 	appstories "telesrv/internal/app/stories"
 	appupdates "telesrv/internal/app/updates"
+	usernamesapp "telesrv/internal/app/usernames"
 	"telesrv/internal/app/userprojection"
 	appusers "telesrv/internal/app/users"
 	"telesrv/internal/domain"
@@ -24,6 +25,8 @@ import (
 func TestContactsSearchFindsUsers(t *testing.T) {
 	ctx := context.Background()
 	users := memory.NewUserStore()
+	registry := memory.NewCollectibleUsernameStore()
+	users.AttachUsernameRegistry(registry)
 	owner, err := users.Create(ctx, domain.User{AccessHash: 1, Phone: "15550000001", FirstName: "Owner"})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -32,12 +35,29 @@ func TestContactsSearchFindsUsers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create friend: %v", err)
 	}
+	friendPeer := domain.Peer{Type: domain.PeerTypeUser, ID: friend.ID}
+	if _, err := registry.SetEditableUsername(ctx, friendPeer, friend.Username); err != nil {
+		t.Fatalf("seed editable username: %v", err)
+	}
+	if _, created, err := registry.MintCollectibleUsername(ctx, domain.MintCollectibleUsernameRequest{
+		Username: "nft4",
+		Owner:    friendPeer,
+		Currency: domain.CollectibleCurrencyStars,
+		Amount:   1,
+		Actor:    "test",
+	}); err != nil || !created {
+		t.Fatalf("mint collectible: created=%v err=%v", created, err)
+	}
 	r := New(Config{}, Deps{
 		Contacts: appcontacts.NewService(memory.NewContactStore(), users),
+		Usernames: usernamesapp.NewService(
+			usernamesapp.WithRegistryStore(registry),
+			usernamesapp.WithCollectibleStore(registry),
+		),
 	}, zaptest.NewLogger(t), clock.System)
 
 	var in bin.Buffer
-	if err := (&tg.ContactsSearchRequest{Q: "@search", Limit: 20}).Encode(&in); err != nil {
+	if err := (&tg.ContactsSearchRequest{Q: "@NFT4", Limit: 20}).Encode(&in); err != nil {
 		t.Fatalf("encode request: %v", err)
 	}
 	enc, err := r.Dispatch(WithUserID(ctx, owner.ID), [8]byte{}, 0, &in)
@@ -54,6 +74,11 @@ func TestContactsSearchFindsUsers(t *testing.T) {
 	peer, ok := box.Results[0].(*tg.PeerUser)
 	if !ok || peer.UserID != friend.ID {
 		t.Fatalf("peer = %T %+v, want friend", box.Results[0], box.Results[0])
+	}
+	user := box.Users[0].(*tg.User)
+	vector := assertVectorOnlyUsernames(t, "contacts.search result", user, []string{"search_friend", "nft4"})
+	if !vector[1].Active {
+		t.Fatalf("search result username vector = %+v, want active nft4 alias", vector)
 	}
 }
 
@@ -672,8 +697,8 @@ func TestUsernameRPCLifecycle(t *testing.T) {
 		t.Fatalf("update username: %v", err)
 	}
 	self, ok := user.(*tg.User)
-	if !ok || self.Username != "owner_name" || len(self.Usernames) != 1 || !self.Usernames[0].Active {
-		t.Fatalf("updated user = %T %+v, want self with active username", user, user)
+	if !ok || self.Username != "owner_name" || len(self.Usernames) != 0 {
+		t.Fatalf("updated user = %T %+v, want self with scalar username only", user, user)
 	}
 
 	resolved, err := r.onContactsResolveUsername(reqCtx, &tg.ContactsResolveUsernameRequest{Username: "@OWNER_NAME"})
@@ -1276,7 +1301,7 @@ func TestContactsAddContactPhonePrivacyExceptionUpdatesPeerSettings(t *testing.T
 
 	withoutException, err := r.onContactsAddContact(WithUserID(ctx, alice.ID), &tg.ContactsAddContactRequest{
 		ID:        &tg.InputUser{UserID: bob.ID, AccessHash: bob.AccessHash},
-		Phone:     bob.Phone,
+		Phone:     "",
 		FirstName: "Bobby",
 	})
 	if err != nil {
@@ -1290,6 +1315,19 @@ func TestContactsAddContactPhonePrivacyExceptionUpdatesPeerSettings(t *testing.T
 		t.Fatalf("bob can see alice phone: %v", err)
 	} else if allowed {
 		t.Fatalf("bob can see alice phone = true, want false before exception")
+	}
+	withoutExceptionUpdates := withoutException.(*tg.Updates)
+	for _, item := range withoutExceptionUpdates.Users {
+		if user, ok := item.(*tg.User); ok && user.ID == bob.ID && user.Phone != "" {
+			t.Fatalf("contacts.addContact(phone=\"\") leaked bob phone %q in updates", user.Phone)
+		}
+	}
+	storedBob, found, err := contactsStore.Get(ctx, alice.ID, bob.ID)
+	if err != nil || !found {
+		t.Fatalf("stored bob contact found=%v err=%v", found, err)
+	}
+	if storedBob.Phone != "" || storedBob.User.Phone != "" {
+		t.Fatalf("stored bob contact phone = local %q user %q, want empty", storedBob.Phone, storedBob.User.Phone)
 	}
 
 	withException, err := r.onContactsAddContact(WithUserID(ctx, alice.ID), &tg.ContactsAddContactRequest{
@@ -1538,8 +1576,8 @@ func TestContactsBlockGetBlockedAndUnblockRPC(t *testing.T) {
 	if peer, ok := full.Blocked[0].PeerID.(*tg.PeerUser); !ok || peer.UserID != alice.ID {
 		t.Fatalf("blocked peer = %#v, want alice", full.Blocked[0].PeerID)
 	}
-	if user, ok := full.Users[0].(*tg.User); !ok || user.ID != alice.ID {
-		t.Fatalf("blocked user = %#v, want alice", full.Users[0])
+	if user, ok := full.Users[0].(*tg.User); !ok || user.ID != alice.ID || user.Phone != "" {
+		t.Fatalf("blocked user = %#v, want alice with hidden phone", full.Users[0])
 	}
 
 	ok, err = r.onContactsUnblock(WithUserID(ctx, bob.ID), &tg.ContactsUnblockRequest{

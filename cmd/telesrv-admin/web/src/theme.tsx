@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Moon, Sun } from "lucide-react";
-import { useI18n } from "./i18n";
 
 export type Theme = "light" | "dark";
 
@@ -70,9 +69,8 @@ export function useTheme(): ThemeContextValue {
 
 export function ThemeSwitch() {
   const { theme, toggleTheme } = useTheme();
-  const { t } = useI18n();
   const nextIsDark = theme === "light";
-  const label = t(nextIsDark ? "theme.switchToDark" : "theme.switchToLight");
+  const label = nextIsDark ? "Switch to dark theme" : "Switch to light theme";
   return (
     <button
       className="theme-toggle"

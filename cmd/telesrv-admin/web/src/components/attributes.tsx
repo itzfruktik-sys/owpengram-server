@@ -1,7 +1,6 @@
 import { AtSign, LifeBuoy, Palette, Settings2, Smile } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ActionButton } from "./ActionButton";
-import { useI18n } from "../i18n";
 import { toInt } from "../lib/format";
 import type { ChannelRow } from "../types";
 
@@ -9,10 +8,9 @@ type IDKey = "user_id" | "channel_id";
 
 // SupportAction toggles the official-support flag (users/bots only).
 export function SupportAction({ id, support, onDone }: { id: number; support: boolean; onDone: () => void }) {
-  const { t } = useI18n();
   return (
     <ActionButton
-      label={support ? t("attr.clearSupport") : t("attr.setSupport")}
+      label={support ? "Clear support" : "Mark as support"}
       icon={<LifeBuoy size={15} />}
       tone="neutral"
       path="/api/actions/set-support"
@@ -30,16 +28,15 @@ export function UsernameAction({ idKey, id, path, current, onDone }: {
   current: string;
   onDone: () => void;
 }) {
-  const { t } = useI18n();
   const [username, setUsername] = useState(current.replace(/^@/, ""));
   return (
     <div className="attr-block">
       <label className="duration-field">
-        <span>{t("attr.username")}</span>
+        <span>{"Username"}</span>
         <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" />
       </label>
       <ActionButton
-        label={t("attr.setUsername")}
+        label={"Set username"}
         icon={<AtSign size={15} />}
         tone="neutral"
         path={path}
@@ -57,25 +54,24 @@ export function ColorAction({ idKey, id, path, onDone }: {
   path: string;
   onDone: () => void;
 }) {
-  const { t } = useI18n();
   const [forProfile, setForProfile] = useState(false);
   const [hasColor, setHasColor] = useState(true);
   const [color, setColor] = useState("0");
   const [bgEmoji, setBgEmoji] = useState("");
   return (
     <div className="attr-block">
-      <label className="checkline"><input type="checkbox" checked={forProfile} onChange={(e) => setForProfile(e.target.checked)} /> {t("attr.forProfile")}</label>
-      <label className="checkline"><input type="checkbox" checked={hasColor} onChange={(e) => setHasColor(e.target.checked)} /> {t("attr.hasColor")}</label>
+      <label className="checkline"><input type="checkbox" checked={forProfile} onChange={(e) => setForProfile(e.target.checked)} /> {"Profile color"}</label>
+      <label className="checkline"><input type="checkbox" checked={hasColor} onChange={(e) => setHasColor(e.target.checked)} /> {"Enable color"}</label>
       <label className="duration-field">
-        <span>{t("attr.colorIndex")}</span>
+        <span>{"Color index"}</span>
         <input type="number" min="0" max="20" value={color} onChange={(e) => setColor(e.target.value)} />
       </label>
       <label className="duration-field">
-        <span>{t("attr.bgEmojiID")}</span>
+        <span>{"Background emoji ID"}</span>
         <input value={bgEmoji} onChange={(e) => setBgEmoji(e.target.value)} placeholder="0" />
       </label>
       <ActionButton
-        label={t("attr.setColor")}
+        label={"Set color"}
         icon={<Palette size={15} />}
         tone="neutral"
         path={path}
@@ -99,21 +95,20 @@ export function EmojiStatusAction({ idKey, id, path, onDone }: {
   path: string;
   onDone: () => void;
 }) {
-  const { t } = useI18n();
   const [documentID, setDocumentID] = useState("");
   const [until, setUntil] = useState("0");
   return (
     <div className="attr-block">
       <label className="duration-field">
-        <span>{t("attr.emojiDocID")}</span>
+        <span>{"Emoji document ID"}</span>
         <input value={documentID} onChange={(e) => setDocumentID(e.target.value)} placeholder="0 = clear" />
       </label>
       <label className="duration-field">
-        <span>{t("attr.emojiUntil")}</span>
+        <span>{"Until (unix, 0 = permanent)"}</span>
         <input type="number" min="0" value={until} onChange={(e) => setUntil(e.target.value)} />
       </label>
       <ActionButton
-        label={t("attr.setEmojiStatus")}
+        label={"Set emoji status"}
         icon={<Smile size={15} />}
         tone="neutral"
         path={path}
@@ -126,7 +121,6 @@ export function EmojiStatusAction({ idKey, id, path, onDone }: {
 
 // ChannelSettingsAction force-applies moderation settings to a channel/supergroup.
 export function ChannelSettingsAction({ channel, onDone }: { channel: ChannelRow; onDone: () => void }) {
-  const { t } = useI18n();
   const [gigagroup, setGigagroup] = useState(channel.Gigagroup);
   const [antispam, setAntispam] = useState(channel.AntiSpam);
   const [hidden, setHidden] = useState(channel.ParticipantsHidden);
@@ -163,18 +157,18 @@ export function ChannelSettingsAction({ channel, onDone }: { channel: ChannelRow
   }
   return (
     <div className="attr-block">
-      <label className="checkline"><input type="checkbox" checked={gigagroup} onChange={(e) => setGigagroup(e.target.checked)} /> {t("attr.gigagroup")}</label>
-      <label className="checkline"><input type="checkbox" checked={antispam} onChange={(e) => setAntispam(e.target.checked)} /> {t("attr.antispam")}</label>
-      <label className="checkline"><input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} /> {t("attr.participantsHidden")}</label>
-      <label className="checkline"><input type="checkbox" checked={noforwards} onChange={(e) => setNoforwards(e.target.checked)} /> {t("attr.noforwards")}</label>
-      <label className="checkline"><input type="checkbox" checked={joinToSend} onChange={(e) => setJoinToSend(e.target.checked)} /> {t("attr.joinToSend")}</label>
-      <label className="checkline"><input type="checkbox" checked={joinRequest} onChange={(e) => setJoinRequest(e.target.checked)} /> {t("attr.joinRequest")}</label>
+      <label className="checkline"><input type="checkbox" checked={gigagroup} onChange={(e) => setGigagroup(e.target.checked)} /> {"Gigagroup"}</label>
+      <label className="checkline"><input type="checkbox" checked={antispam} onChange={(e) => setAntispam(e.target.checked)} /> {"Aggressive anti-spam"}</label>
+      <label className="checkline"><input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} /> {"Hide members"}</label>
+      <label className="checkline"><input type="checkbox" checked={noforwards} onChange={(e) => setNoforwards(e.target.checked)} /> {"Restrict forwarding"}</label>
+      <label className="checkline"><input type="checkbox" checked={joinToSend} onChange={(e) => setJoinToSend(e.target.checked)} /> {"Join to send messages"}</label>
+      <label className="checkline"><input type="checkbox" checked={joinRequest} onChange={(e) => setJoinRequest(e.target.checked)} /> {"Join by request"}</label>
       <label className="duration-field">
-        <span>{t("attr.slowmode")}</span>
+        <span>{"Slowmode (seconds)"}</span>
         <input type="number" min="0" max="86400" value={slowmode} onChange={(e) => setSlowmode(e.target.value)} />
       </label>
       <ActionButton
-        label={t("attr.applySettings")}
+        label={"Apply settings"}
         icon={<Settings2 size={15} />}
         tone="warn"
         path="/api/actions/set-channel-settings"

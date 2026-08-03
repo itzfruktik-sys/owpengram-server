@@ -3,16 +3,14 @@ import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { ActionButton } from "../components/ActionButton";
 import { AuthorizationTable } from "../components/AuthorizationTable";
-import { Alert, AuditTable, Badge, LoadingSurface, PageFrame, SectionHead, SplitLayout, Summary } from "../components/ui";
+import { Alert, AuditTable, Badge, LoadingSurface, PageFrame, SectionHead, SplitLayout, Summary, UsernameCell } from "../components/ui";
 import { ScamFakeActions, ScamFakeBadges } from "../components/flags";
 import { ColorAction, EmojiStatusAction, SupportAction, UsernameAction } from "../components/attributes";
-import { useI18n } from "../i18n";
 import { displayName, displayPhone, displayUsername, formatDate, formatUnix, toInt } from "../lib/format";
 import type { Navigate } from "../routing";
 import type { AccountDetail } from "../types";
 
 export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navigate }) {
-  const { t } = useI18n();
   const [detail, setDetail] = useState<AccountDetail | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -48,15 +46,15 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
     return <Alert>{error}</Alert>;
   }
   if (!detail) {
-    return <LoadingSurface label={busy ? t("account.loadingDetail") : t("account.waitingData")} />;
+    return <LoadingSurface label={busy ? "Loading account detail" : "Waiting for data"} />;
   }
 
   const account = detail.Account;
   return (
     <PageFrame
-      title={t("account.detailTitle", { id: account.ID })}
-      eyebrow={t("account.profile")}
-      actions={<button className="btn icon-text" onClick={() => navigate("/accounts")}><ArrowLeft size={15} /> {t("common.backToList")}</button>}
+      title={`Account #${account.ID}`}
+      eyebrow={"Account Profile"}
+      actions={<button className="btn icon-text" onClick={() => navigate("/accounts")}><ArrowLeft size={15} /> {"Back to list"}</button>}
     >
       <SplitLayout
         main={
@@ -64,56 +62,61 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
             <section className="entity-head">
               <div>
                 <div className="entity-title">{displayName(account)}</div>
-                <div className="entity-subtitle">{displayUsername(account.Username) || t("account.noUsername")} · {displayPhone(account.Phone) || t("account.noPhone")}</div>
+                <div className="entity-subtitle">{displayUsername(account.Username) || "No username"} · {displayPhone(account.Phone) || "No phone"}</div>
+                {account.Collectibles?.length > 0 && (
+                  <div className="entity-subtitle">
+                    <UsernameCell username="" collectibles={account.Collectibles} />
+                  </div>
+                )}
               </div>
               <div className="entity-badges">
-                {account.PremiumUntil > 0 ? <Badge tone="good">{t("account.premium")}</Badge> : <Badge>{t("account.notPremium")}</Badge>}
-                {detail.Verified ? <Badge tone="good">{t("common.verified")}</Badge> : <Badge>{t("account.notVerified")}</Badge>}
+                {account.PremiumUntil > 0 ? <Badge tone="good">{"Premium"}</Badge> : <Badge>{"Not premium"}</Badge>}
+                {detail.Verified ? <Badge tone="good">{"Verified"}</Badge> : <Badge>{"Not verified"}</Badge>}
                 <ScamFakeBadges scam={detail.Scam} fake={detail.Fake} />
-                {account.Frozen ? <Badge tone="danger">{t("account.accountFrozen")}</Badge> : <Badge>{t("account.accountActive")}</Badge>}
+                {account.Frozen ? <Badge tone="danger">{"Account frozen"}</Badge> : <Badge>{"Account active"}</Badge>}
               </div>
             </section>
             <div className="summary-grid">
-              <Summary label={t("account.userID")} value={String(account.ID)} mono />
-              <Summary label={t("account.lastActive")} value={formatUnix(detail.LastSeenAt) || "-"} />
-              <Summary label={t("account.premiumUntil")} value={account.PremiumUntil > 0 ? formatUnix(account.PremiumUntil) : t("common.none")} />
-              <Summary label={t("account.starsBalance")} value={`${detail.StarsBalance} / ${detail.StarsGranted ? t("account.startingGrantApplied") : t("account.startingGrantPending")}`} />
-              <Summary label={t("common.updatedAt")} value={formatDate(account.UpdatedAt) || "-"} />
-              <Summary label={t("account.activeSessions")} value={String(detail.Authorizations.length)} />
-              <Summary label={t("account.accountFlags")} value={`support=${detail.Support} bot=${detail.Bot}`} />
-              <Summary label={t("account.restriction")} value={detail.HasRestriction ? detail.Restriction.Reason || t("account.restricted") : t("common.none")} />
-              <Summary label={t("account.freezeSince")} value={detail.Restriction.Since ? formatDate(detail.Restriction.Since) : t("common.none")} />
-              <Summary label={t("account.freezeUntil")} value={detail.Restriction.Until ? formatDate(detail.Restriction.Until) : t("common.none")} />
-              <Summary label={t("account.freezeAppealURL")} value={detail.Restriction.AppealURL || t("common.none")} />
-              <Summary label={t("account.createdAt")} value={formatDate(account.CreatedAt) || "-"} />
+              <Summary label={"User ID"} value={String(account.ID)} mono />
+              <Summary label={"Last active"} value={formatUnix(detail.LastSeenAt) || "-"} />
+              <Summary label={"Premium expires"} value={account.PremiumUntil > 0 ? formatUnix(account.PremiumUntil) : "None"} />
+              <Summary label={"Stars balance"} value={`${detail.StarsBalance} / ${detail.StarsGranted ? "initial grant applied" : "initial grant pending"}`} />
+              <Summary label={"Updated"} value={formatDate(account.UpdatedAt) || "-"} />
+              <Summary label={"Authorized devices"} value={String(detail.Authorizations.length)} />
+              <Summary label={"Account flags"} value={`support=${detail.Support} bot=${detail.Bot}`} />
+              <Summary label={"Restriction"} value={detail.HasRestriction ? detail.Restriction.Reason || "Restricted" : "None"} />
+              <Summary label={"Frozen since"} value={detail.Restriction.Since ? formatDate(detail.Restriction.Since) : "None"} />
+              <Summary label={"Appeal deadline"} value={detail.Restriction.Until ? formatDate(detail.Restriction.Until) : "None"} />
+              <Summary label={"Appeal URL"} value={detail.Restriction.AppealURL || "None"} />
+              <Summary label={"Created"} value={formatDate(account.CreatedAt) || "-"} />
             </div>
             {detail.About && <p className="about-text">{detail.About}</p>}
             <section className="section-block">
-              <SectionHead title={t("account.authorizationsTitle")} text={t("account.authorizationsCount", { count: detail.Authorizations.length })} />
+              <SectionHead title={"Authorized Devices"} text={`${detail.Authorizations.length} authorizations`} />
               <AuthorizationTable rows={detail.Authorizations} userID={account.ID} onDone={load} />
             </section>
             <section className="section-block">
-              <SectionHead title={t("account.recentAdminOps")} text={t("account.recent30Audit")} />
+              <SectionHead title={"Recent Admin Actions"} text={"Last 30 audit rows"} />
               <AuditTable rows={detail.AuditLogs} />
             </section>
           </div>
         }
         side={
           <section className="action-dock">
-            <div className="dock-title">{t("account.actionDock")}</div>
+            <div className="dock-title">{"Account Actions"}</div>
             <label className="duration-field">
-              <span>{t("account.freezeUntil")}</span>
+              <span>{"Appeal deadline"}</span>
               <input
-                aria-label={t("account.freezeUntilAria")}
+                aria-label={"Freeze appeal deadline"}
                 value={freezeUntil}
                 onChange={(event) => setFreezeUntil(event.target.value)}
                 type="datetime-local"
               />
             </label>
             <label className="duration-field">
-              <span>{t("account.freezeAppealURL")}</span>
+              <span>{"Appeal URL"}</span>
               <input
-                aria-label={t("account.freezeAppealURLAria")}
+                aria-label={"Freeze appeal URL"}
                 value={freezeAppealURL}
                 onChange={(event) => setFreezeAppealURL(event.target.value)}
                 type="url"
@@ -121,7 +124,7 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
               />
             </label>
             <ActionButton
-              label={account.Frozen ? t("account.updateFreeze") : t("account.freezeAccount")}
+              label={account.Frozen ? "Update freeze" : "Freeze account"}
               icon={<CircleAlert size={15} />}
               path="/api/actions/set-frozen"
               payload={() => ({
@@ -134,7 +137,7 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
             />
             {account.Frozen && (
               <ActionButton
-                label={t("account.unfreezeAccount")}
+                label={"Unfreeze account"}
                 icon={<CircleAlert size={15} />}
                 path="/api/actions/set-frozen"
                 payload={() => ({ user_id: account.ID, frozen: false })}
@@ -142,9 +145,9 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
               />
             )}
             <label className="duration-field">
-              <span>{t("account.premiumMonths")}</span>
+              <span>{"Premium duration (months)"}</span>
               <input
-                aria-label={t("account.premiumMonthsAria")}
+                aria-label={"Set premium duration in months"}
                 value={months}
                 onChange={(event) => setMonths(event.target.value)}
                 type="number"
@@ -154,7 +157,7 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
             </label>
             <div className="action-stack">
               <ActionButton
-                label={t("account.setPremium")}
+                label={"Set premium"}
                 icon={<Sparkles size={15} />}
                 tone="warn"
                 path="/api/actions/grant-premium"
@@ -162,7 +165,7 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
                 onDone={load}
               />
               <ActionButton
-                label={t("account.clearPremium")}
+                label={"Clear premium"}
                 icon={<Sparkles size={15} />}
                 tone="warn"
                 path="/api/actions/grant-premium"
@@ -170,9 +173,9 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
                 onDone={load}
               />
               <label className="duration-field">
-                <span>{t("account.starsAmount")}</span>
+                <span>{"Stars to grant"}</span>
                 <input
-                  aria-label={t("account.starsAmountAria")}
+                  aria-label={"Set Stars amount to grant"}
                   value={starsAmount}
                   onChange={(event) => setStarsAmount(event.target.value)}
                   type="number"
@@ -181,7 +184,7 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
                 />
               </label>
               <ActionButton
-                label={t("account.grantStars")}
+                label={"Grant Stars"}
                 icon={<Star size={15} />}
                 tone="warn"
                 path="/api/actions/grant-stars"
@@ -189,7 +192,7 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
                 onDone={load}
               />
               <ActionButton
-                label={detail.Verified ? t("account.clearVerified") : t("account.setVerified")}
+                label={detail.Verified ? "Clear verified" : "Set verified"}
                 icon={<BadgeCheck size={15} />}
                 tone="warn"
                 path="/api/actions/set-verified"
@@ -198,7 +201,7 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
               />
             </div>
             <ScamFakeActions idKey="user_id" id={account.ID} path="/api/actions/set-account-flags" scam={detail.Scam} fake={detail.Fake} onDone={load} />
-            <div className="dock-title">{t("attr.attributes")}</div>
+            <div className="dock-title">{"Attributes"}</div>
             <SupportAction id={account.ID} support={detail.Support} onDone={load} />
             <UsernameAction idKey="user_id" id={account.ID} path="/api/actions/set-account-username" current={account.Username} onDone={load} />
             <ColorAction idKey="user_id" id={account.ID} path="/api/actions/set-account-color" onDone={load} />

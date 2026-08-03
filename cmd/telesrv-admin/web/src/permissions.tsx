@@ -1,0 +1,72 @@
+import { ShieldOff } from "lucide-react";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { Alert, PageFrame } from "./components/ui";
+// Permission names exactly as the backend spells them
+// (cmd/telesrv-admin/security.go). "*" is the wildcard an operator configures for
+// a full-access session.
+export const permissionAll = "*";
+export const permissionVerificationReview = "verification.review";
+export const permissionVerificationRevoke = "verification.revoke";
+// Third-party verification is a separate mechanism and therefore a separate pair of
+// rights: review reads the section and decides applications, manage owns the
+// verifier roster, the icon catalogue and taking a granted mark away.
+export const permissionBotVerificationReview = "botverification.review";
+export const permissionBotVerificationManage = "botverification.manage";
+
+// GET /api/session is read once at boot; the panel keeps the answer here so a
+// section the session may not use is hidden instead of rendered into a 403. This
+// is a convenience for the operator, not a security boundary: every route is
+// checked again server-side.
+const PermissionsContext = createContext<readonly string[]>([]);
+
+export function PermissionsProvider({
+  permissions,
+  children
+}: {
+  permissions: readonly string[];
+  children: ReactNode;
+}) {
+  return <PermissionsContext.Provider value={permissions}>{children}</PermissionsContext.Provider>;
+}
+
+export function usePermissions(): { permissions: readonly string[]; can: (permission: string) => boolean } {
+  const permissions = useContext(PermissionsContext);
+  return useMemo(
+    () => ({
+      permissions,
+      can: (permission: string) => permissions.includes(permissionAll) || permissions.includes(permission)
+    }),
+    [permissions]
+  );
+}
+
+export function useCan(permission: string): boolean {
+  return usePermissions().can(permission);
+}
+
+// PermissionGate is what a direct URL hits: without the right the operator gets
+// an explanation naming the missing permission, not an empty table that looks
+// like "no data".
+export function PermissionGate({ permission, children }: { permission: string; children: ReactNode }) {
+  const { can } = usePermissions();
+  if (can(permission)) {
+    return <>{children}</>;
+  }
+  return <PermissionDenied permission={permission} />;
+}
+
+export function PermissionDenied({ permission }: { permission: string }) {
+  return (
+    <PageFrame title={"Not enough rights"} eyebrow={"Console / Access"}>
+      <Alert>{`This session was not granted the ${permission} permission, so the section stays closed.`}</Alert>
+      <section className="section-block">
+        <div className="entity-head">
+          <div>
+            <div className="entity-title"><ShieldOff size={16} /> {"Section unavailable"}</div>
+            <div className="entity-subtitle">{"Ask an operator to add the permission to TELESRV_ADMIN_UI_PERMISSIONS and sign in again."}</div>
+          </div>
+        </div>
+      </section>
+    </PageFrame>
+  );
+}

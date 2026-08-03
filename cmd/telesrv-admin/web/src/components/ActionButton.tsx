@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, errorMessage } from "../api";
-import { useI18n } from "../i18n";
 import type { CommandResult } from "../types";
 import { Alert, JsonBlock } from "./ui";
 
@@ -16,7 +15,9 @@ export function ActionButton({
   icon,
   compact = false,
   tone = "danger",
-  onDone
+  disabled = false,
+  onDone,
+  onError
 }: {
   label: string;
   path: string;
@@ -24,9 +25,16 @@ export function ActionButton({
   icon?: ReactNode;
   compact?: boolean;
   tone?: ActionTone;
+  // disabled keeps a form from opening the confirm flow at all while its own
+  // validation is unhappy, so the operator fixes the field instead of reading a
+  // backend rejection.
+  disabled?: boolean;
   onDone?: () => void;
+  // onError lets a page react to a failure the operator cannot fix by editing the
+  // form — an optimistic-locking 409, say — and replace the raw backend text with
+  // an explanation by returning it.
+  onError?: (error: unknown) => string | undefined;
 }) {
-  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [result, setResult] = useState<CommandResult | null>(null);
@@ -41,7 +49,7 @@ export function ActionButton({
 
   async function run(confirm: boolean) {
     if (!reason.trim()) {
-      setError(t("action.reasonRequired"));
+      setError("Please enter an operation reason");
       return;
     }
     setBusy(true);
@@ -54,7 +62,7 @@ export function ActionButton({
         onDone?.();
       }
     } catch (err) {
-      setError(errorMessage(err));
+      setError(onError?.(err) || errorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -75,6 +83,7 @@ export function ActionButton({
       <button
         className={triggerClass}
         type="button"
+        disabled={disabled}
         onClick={() => {
           reset();
           setOpen(true);
@@ -88,29 +97,29 @@ export function ActionButton({
           <section className="modal command-modal" role="dialog" aria-modal="true" aria-label={label}>
             <div className="modal-head">
               <div>
-                <div className="eyebrow">{t("action.flow")}</div>
+                <div className="eyebrow">{"Action Flow"}</div>
                 <h2>{label}</h2>
               </div>
-              <button className="icon-btn" type="button" onClick={() => setOpen(false)} aria-label={t("action.close")}><X size={15} /></button>
+              <button className="icon-btn" type="button" onClick={() => setOpen(false)} aria-label={"Close"}><X size={15} /></button>
             </div>
             <div className="command-body">
               <div className="command-steps">
                 <div className={`command-step ${reason.trim() ? "done" : "active"}`}>
-                  <span>1</span><strong>{t("action.stepReason")}</strong>
+                  <span>1</span><strong>{"Enter reason"}</strong>
                 </div>
                 <div className={`command-step ${result?.dry_run ? "done" : reason.trim() ? "active" : ""}`}>
-                  <span>2</span><strong>{t("action.stepDryRun")}</strong>
+                  <span>2</span><strong>{"Dry-run check"}</strong>
                 </div>
                 <div className={`command-step ${result && !result.dry_run && !result.error ? "done" : canConfirm ? "active" : ""}`}>
-                  <span>3</span><strong>{t("action.stepConfirm")}</strong>
+                  <span>3</span><strong>{"Confirm execution"}</strong>
                 </div>
               </div>
               <label className="form-field">
-                <span>{t("action.reason")}</span>
-                <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={3} placeholder={t("action.reasonPlaceholder")} />
+                <span>{"Operation reason"}</span>
+                <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={3} placeholder={"Describe why this operation is being performed"} />
               </label>
               <div className="command-preview">
-                <div className="preview-head"><FileJson size={14} /> {t("action.requestPreview")}</div>
+                <div className="preview-head"><FileJson size={14} /> {"Request preview"}</div>
                 <JsonBlock value={JSON.stringify(previewPayload, null, 2)} />
               </div>
               {error && <Alert>{error}</Alert>}
@@ -118,25 +127,25 @@ export function ActionButton({
                 <div className="result-box">
                 <div className="result-title">
                     {result.error ? <CircleAlert size={16} /> : <CheckCircle2 size={16} />}
-                  <strong>{result.message || result.error || t("action.result")}</strong>
+                  <strong>{result.message || result.error || "Action result"}</strong>
                 </div>
-                <div className="result-line"><span>{t("action.commandID")}</span><strong>{result.command_id}</strong></div>
-                <div className="result-line"><span>{t("action.status")}</span><strong>{result.status}</strong></div>
-                <div className="result-line"><span>{t("action.dryRun")}</span><strong>{result.dry_run ? t("common.yes") : t("common.no")}</strong></div>
+                <div className="result-line"><span>{"Command ID"}</span><strong>{result.command_id}</strong></div>
+                <div className="result-line"><span>{"Status"}</span><strong>{result.status}</strong></div>
+                <div className="result-line"><span>{"Dry-run"}</span><strong>{result.dry_run ? "Yes" : "No"}</strong></div>
                   <div className="result-message">{result.message || result.error}</div>
                   {result.details && <JsonBlock value={JSON.stringify(result.details, null, 2)} />}
                 </div>
               )}
             </div>
             <div className="modal-actions">
-              <button className="btn" type="button" onClick={() => setOpen(false)}>{t("common.close")}</button>
+              <button className="btn" type="button" onClick={() => setOpen(false)}>{"Close"}</button>
               <button className="btn icon-text" type="button" onClick={() => run(false)} disabled={busy}>
                 {busy ? <Loader2 size={15} className="spin" /> : <Play size={15} />}
-                {result ? t("action.runAgain") : t("action.runDry")}
+                {result ? "Run dry-run again" : "Run dry-run first"}
               </button>
               <button className="btn danger icon-text" type="button" onClick={() => run(true)} disabled={busy || !canConfirm}>
                 <CheckCircle2 size={15} />
-                {t("action.confirm")}
+                {"Confirm execution"}
               </button>
             </div>
           </section>

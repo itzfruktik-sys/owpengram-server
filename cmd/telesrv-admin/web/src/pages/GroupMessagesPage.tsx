@@ -3,13 +3,11 @@ import { useState } from "react";
 import { api, errorMessage } from "../api";
 import { ChannelPicker } from "../components/EntityPicker";
 import { Alert, Badge, EmptyRow, Metric, PageFrame, QueryPanel } from "../components/ui";
-import { useI18n } from "../i18n";
 import { channelKind, formatUnix } from "../lib/format";
 import type { Navigate } from "../routing";
 import type { ChannelRow, GroupMessageListResponse } from "../types";
 
 export function GroupMessagesPage({ navigate }: { navigate: Navigate }) {
-  const { t } = useI18n();
   const [channel, setChannel] = useState<ChannelRow | null>(null);
   const [beforeDate, setBeforeDate] = useState("");
   const [beforeID, setBeforeID] = useState("");
@@ -20,7 +18,7 @@ export function GroupMessagesPage({ navigate }: { navigate: Navigate }) {
   async function load(next = false) {
     setError("");
     if (!channel) {
-      setError(t("messages.selectChannel"));
+      setError("Search and select a supergroup or channel first");
       return;
     }
     const params = new URLSearchParams({
@@ -54,38 +52,38 @@ export function GroupMessagesPage({ navigate }: { navigate: Navigate }) {
   const rows = data?.rows ?? [];
 
   return (
-    <PageFrame title={t("messages.groupTitle")} eyebrow={t("messages.groupEyebrow")}>
+    <PageFrame title={"Group Messages"} eyebrow={"Supergroup / channel messages"}>
       {error && <Alert>{error}</Alert>}
       <QueryPanel>
         <div className="message-selector-grid single">
-          <ChannelPicker label={t("messages.channelGroup")} value={channel} onChange={changeChannel} />
+          <ChannelPicker label={"Channel / Group"} value={channel} onChange={changeChannel} />
         </div>
         <form className="toolbar message-query" onSubmit={(event) => { event.preventDefault(); void load(false); }}>
-          <input value={beforeDate} onChange={(event) => setBeforeDate(event.target.value)} placeholder={t("messages.beforeDatePlaceholder")} />
-          <input value={beforeID} onChange={(event) => setBeforeID(event.target.value)} placeholder={t("messages.beforeIDPlaceholder")} />
-          <input className="small-input" value={limit} onChange={(event) => setLimit(event.target.value)} placeholder={t("messages.limitPlaceholder")} />
-          <button className="btn primary icon-text" type="submit"><Search size={15} /> {t("messages.searchMessages")}</button>
-          {rows.length ? <button className="btn icon-text" type="button" onClick={() => load(true)}><ChevronRight size={15} /> {t("messages.nextPage")}</button> : null}
+          <input value={beforeDate} onChange={(event) => setBeforeDate(event.target.value)} placeholder={"before_date cursor"} />
+          <input value={beforeID} onChange={(event) => setBeforeID(event.target.value)} placeholder={"before_msg_id cursor"} />
+          <input className="small-input" value={limit} onChange={(event) => setLimit(event.target.value)} placeholder={"limit <= 100"} />
+          <button className="btn primary icon-text" type="submit"><Search size={15} /> {"Search messages"}</button>
+          {rows.length ? <button className="btn icon-text" type="button" onClick={() => load(true)}><ChevronRight size={15} /> {"Next page"}</button> : null}
         </form>
       </QueryPanel>
       <div className="metric-row">
-        <Metric label={t("messages.currentPage")} value={String(rows.length)} />
-        <Metric label={t("messages.mediaCount")} value={String(rows.filter((row) => row.Media && row.Media !== "{}").length)} />
-        <Metric label={t("messages.channelPosts")} value={String(rows.filter((row) => row.Post).length)} />
-        <Metric label={t("messages.channelGroup")} value={channel ? `${channel.Title || channelKind(channel, t)} (${channel.ID})` : "-"} />
+        <Metric label={"Messages on page"} value={String(rows.length)} />
+        <Metric label={"With media"} value={String(rows.filter((row) => row.Media && row.Media !== "{}").length)} />
+        <Metric label={"Channel posts"} value={String(rows.filter((row) => row.Post).length)} />
+        <Metric label={"Channel / Group"} value={channel ? `${channel.Title || channelKind(channel)} (${channel.ID})` : "-"} />
       </div>
       <div className="table-wrap">
         <table className="data-table">
           <thead>
             <tr>
-              <th>{t("common.messageId")}</th>
-              <th>{t("common.time")}</th>
-              <th>{t("common.sender")}</th>
+              <th>{"Message ID"}</th>
+              <th>{"Time"}</th>
+              <th>{"Sender"}</th>
               <th>From Peer</th>
               <th>PTS</th>
-              <th>{t("common.views")}</th>
-              <th>{t("common.status")}</th>
-              <th>{t("messages.body")}</th>
+              <th>{"Views"}</th>
+              <th>{"Status"}</th>
+              <th>{"Body"}</th>
               <th></th>
             </tr>
           </thead>
@@ -99,7 +97,7 @@ export function GroupMessagesPage({ navigate }: { navigate: Navigate }) {
                 <td>{row.PTS}</td>
                 <td>{row.ViewsCount}</td>
                 <td>
-                  {row.Deleted ? <Badge tone="danger">{t("common.deleted")}</Badge> : row.Pinned ? <Badge tone="warn">{t("messages.pinned")}</Badge> : <Badge>{t("common.survived")}</Badge>}
+                  {row.Deleted ? <Badge tone="danger">{"Deleted"}</Badge> : row.Pinned ? <Badge tone="warn">{"Pinned"}</Badge> : <Badge>{"Live"}</Badge>}
                 </td>
                 <td className="truncate">{row.Body}</td>
                 <td>
@@ -107,7 +105,7 @@ export function GroupMessagesPage({ navigate }: { navigate: Navigate }) {
                     className="row-link"
                     onClick={() => navigate(`/messages/groups/detail?channel_id=${row.ChannelID}&msg_id=${row.ID}`)}
                   >
-                    {t("common.detail")} <ChevronRight size={14} />
+                    {"Details"} <ChevronRight size={14} />
                   </button>
                 </td>
               </tr>

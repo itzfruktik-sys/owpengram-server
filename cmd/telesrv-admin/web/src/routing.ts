@@ -1,5 +1,3 @@
-import type { TFunction } from "./i18n";
-
 export type Navigate = (href: string) => void;
 
 export type RouteState = {
@@ -16,28 +14,40 @@ export function currentRoute(): RouteState {
   };
 }
 
-export function routeTitle(pathname: string, t: TFunction): string {
-  if (pathname.startsWith("/accounts")) return t("route.accounts");
-  if (pathname.startsWith("/channels")) return t("route.channels");
-  if (pathname.startsWith("/bots")) return t("route.bots");
-  if (pathname.startsWith("/emoji")) return t("route.emoji");
-  if (pathname.startsWith("/messages")) return t("route.messages");
-	if (pathname.startsWith("/give-gifts")) return t("route.giveGifts");
-	if (pathname.startsWith("/gifts")) return t("route.gifts");
-	if (pathname.startsWith("/stickers")) return t("route.stickers");
-	if (pathname.startsWith("/emoji")) return t("route.emoji");
-  return t("route.dashboard");
+export function routeTitle(pathname: string): string {
+  // Third-party verification is tested before the official section and before
+  // "/bots": three different prefixes that all read as "verification of a bot".
+  if (pathname.startsWith("/bot-verification")) return "Third-party verification";
+  if (pathname.startsWith("/verification")) return "Official Verification";
+  if (pathname.startsWith("/collectible-usernames")) return "Collectible Usernames";
+  if (pathname.startsWith("/account-ratings")) return "Account Rating";
+  if (pathname.startsWith("/accounts")) return "Accounts";
+  if (pathname.startsWith("/channels")) return "Supergroups and Channels";
+  if (pathname.startsWith("/bots")) return "Bots";
+  if (pathname.startsWith("/moderation")) return "Reports and Moderation";
+  if (pathname.startsWith("/emoji")) return "Emoji";
+  if (pathname.startsWith("/messages")) return "Message Audit";
+	if (pathname.startsWith("/give-gifts")) return "Give Gifts";
+	if (pathname.startsWith("/gifts")) return "Star Gifts";
+	if (pathname.startsWith("/stickers")) return "Stickers";
+	if (pathname.startsWith("/emoji")) return "Emoji";
+  return "Operations Console";
 }
 
-export function routeSubtitle(pathname: string, t: TFunction): string {
-  if (pathname.startsWith("/accounts")) return t("route.accountsSubtitle");
-  if (pathname.startsWith("/channels")) return t("route.channelsSubtitle");
-  if (pathname.startsWith("/bots")) return t("route.botsSubtitle");
-  if (pathname.startsWith("/emoji")) return t("route.emojiSubtitle");
-  if (pathname.startsWith("/messages")) return t("route.messagesSubtitle");
-	if (pathname.startsWith("/give-gifts")) return t("route.giveGiftsSubtitle");
-	if (pathname.startsWith("/gifts")) return t("route.giftsSubtitle");
-	if (pathname.startsWith("/stickers")) return t("route.stickersSubtitle");
-	if (pathname.startsWith("/emoji")) return t("route.emojiSubtitle");
-  return t("route.dashboardSubtitle");
+export function routeSubtitle(pathname: string): string {
+  if (pathname.startsWith("/bot-verification")) return "Console / Third-party verification";
+  if (pathname.startsWith("/verification")) return "Console / Verification";
+  if (pathname.startsWith("/collectible-usernames")) return "Console / Collectible usernames";
+  if (pathname.startsWith("/account-ratings")) return "Console / Account rating";
+  if (pathname.startsWith("/accounts")) return "Console / Accounts";
+  if (pathname.startsWith("/channels")) return "Console / Channels";
+  if (pathname.startsWith("/bots")) return "Console / Bots";
+  if (pathname.startsWith("/moderation")) return "Console / Moderation";
+  if (pathname.startsWith("/emoji")) return "Console / Emoji";
+  if (pathname.startsWith("/messages")) return "Console / Messages";
+	if (pathname.startsWith("/give-gifts")) return "Console / Give Gifts";
+	if (pathname.startsWith("/gifts")) return "Console / Star Gifts";
+	if (pathname.startsWith("/stickers")) return "Console / Stickers";
+	if (pathname.startsWith("/emoji")) return "Console / Emoji";
+  return "Console / Overview";
 }

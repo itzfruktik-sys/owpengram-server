@@ -1,4 +1,6 @@
 import {
+  AtSign,
+  BadgeCheck,
   Bot,
   ChevronDown,
   Database,
@@ -7,8 +9,11 @@ import {
   MessageSquareText,
   Server,
   Shield,
+  ShieldAlert,
   ShieldCheck,
   Smile,
+  Stamp,
+  Trophy,
   Users,
 	Gift,
 	Sticker,
@@ -16,20 +21,19 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
-import { useI18n } from "../i18n";
+import { permissionBotVerificationReview, permissionVerificationReview, useCan } from "../permissions";
 import { type Navigate, type RouteState, routeSubtitle, routeTitle } from "../routing";
 import { ThemeSwitch } from "../theme";
 import { AppLink } from "./AppLink";
 
 export function BootScreen() {
-  const { t } = useI18n();
   return (
     <div className="boot-screen">
       <div className="brand compact brand-elevated">
         <span className="brand-mark"><img src="/logo.png" alt="OwpenGram" /></span>
         <span>
           <strong>OwpenGram</strong>
-          <small>{t("app.adminConsole")}</small>
+          <small>{"Admin Console"}</small>
         </span>
       </div>
       <div className="loader-bar" />
@@ -50,7 +54,12 @@ export function Shell({
   onLogout: () => void;
   children: ReactNode;
 }) {
-  const { t } = useI18n();
+  // The verification queue is hidden for a session without verification.review:
+  // the entry would only lead to a 403 (and the route itself is gated as well).
+  const canReviewVerification = useCan(permissionVerificationReview);
+  // Same reasoning for the third-party queue, which has its own right: the two
+  // sections are granted independently, so one entry can be visible without the other.
+  const canReviewBotVerification = useCan(permissionBotVerificationReview);
   const messagesActive = route.path.startsWith("/messages");
   const [messagesOpen, setMessagesOpen] = useState(messagesActive);
 
@@ -72,19 +81,28 @@ export function Shell({
           <span className="brand-mark"><img src="/logo.png" alt="OwpenGram" /></span>
           <span>
             <strong>OwpenGram</strong>
-            <small>{t("app.adminConsole")}</small>
+            <small>{"Admin Console"}</small>
           </span>
         </AppLink>
-        <div className="sidebar-label">{t("layout.navigation")}</div>
-        <nav className="nav-list" aria-label={t("layout.primaryNav")}>
-          <NavLink icon={<LayoutDashboard size={16} />} href="/" route={route} navigate={navigate}>{t("layout.dashboard")}</NavLink>
-          <NavLink icon={<Users size={16} />} href="/accounts" route={route} navigate={navigate}>{t("layout.accounts")}</NavLink>
-          <NavLink icon={<ShieldCheck size={16} />} href="/channels" route={route} navigate={navigate}>{t("layout.channels")}</NavLink>
-          <NavLink icon={<Bot size={16} />} href="/bots" route={route} navigate={navigate}>{t("layout.bots")}</NavLink>
-			<NavLink icon={<Gift size={16} />} href="/gifts" route={route} navigate={navigate}>{t("layout.gifts")}</NavLink>
-			<NavLink icon={<Send size={16} />} href="/give-gifts" route={route} navigate={navigate}>{t("layout.giveGifts")}</NavLink>
-			<NavLink icon={<Sticker size={16} />} href="/stickers" route={route} navigate={navigate}>{t("layout.stickers")}</NavLink>
-			<NavLink icon={<Smile size={16} />} href="/emoji" route={route} navigate={navigate}>{t("layout.emoji")}</NavLink>
+        <div className="sidebar-label">{"Navigation"}</div>
+        <nav className="nav-list" aria-label={"Primary navigation"}>
+          <NavLink icon={<LayoutDashboard size={16} />} href="/" route={route} navigate={navigate}>{"Overview"}</NavLink>
+          <NavLink icon={<Users size={16} />} href="/accounts" route={route} navigate={navigate}>{"Accounts"}</NavLink>
+          <NavLink icon={<ShieldCheck size={16} />} href="/channels" route={route} navigate={navigate}>{"Supergroups / Channels"}</NavLink>
+          <NavLink icon={<Bot size={16} />} href="/bots" route={route} navigate={navigate}>{"Bots"}</NavLink>
+          <NavLink icon={<ShieldAlert size={16} />} href="/moderation" route={route} navigate={navigate}>{"Reports / Moderation"}</NavLink>
+          {canReviewVerification && (
+            <NavLink icon={<BadgeCheck size={16} />} href="/verification" route={route} navigate={navigate}>{"Verification"}</NavLink>
+          )}
+          {canReviewBotVerification && (
+            <NavLink icon={<Stamp size={16} />} href="/bot-verification" route={route} navigate={navigate}>{"Third-party marks"}</NavLink>
+          )}
+          <NavLink icon={<AtSign size={16} />} href="/collectible-usernames" route={route} navigate={navigate}>{"NFT Usernames"}</NavLink>
+          <NavLink icon={<Trophy size={16} />} href="/account-ratings" route={route} navigate={navigate}>{"Account Rating"}</NavLink>
+			<NavLink icon={<Gift size={16} />} href="/gifts" route={route} navigate={navigate}>{"Star Gifts"}</NavLink>
+			<NavLink icon={<Send size={16} />} href="/give-gifts" route={route} navigate={navigate}>{"Give Gifts"}</NavLink>
+			<NavLink icon={<Sticker size={16} />} href="/stickers" route={route} navigate={navigate}>{"Stickers"}</NavLink>
+			<NavLink icon={<Smile size={16} />} href="/emoji" route={route} navigate={navigate}>{"Emoji"}</NavLink>
           <div className={`nav-section ${messagesActive ? "active" : ""} ${messagesOpen ? "open" : ""}`}>
             <button
               className="nav-section-toggle"
@@ -93,7 +111,7 @@ export function Shell({
               onClick={() => setMessagesOpen((open) => !open)}
             >
               <MessageSquareText size={16} />
-              <span>{t("layout.messages")}</span>
+              <span>{"Messages"}</span>
               <ChevronDown className="nav-section-chevron" size={15} />
             </button>
             {messagesOpen && (
@@ -104,7 +122,7 @@ export function Shell({
                   navigate={navigate}
                   activeWhen={(path) => path === "/messages" || path === "/messages/detail" || path.startsWith("/messages/private")}
                 >
-                  {t("layout.privateMessages")}
+                  {"Private"}
                 </NavLink>
                 <NavLink
                   href="/messages/groups"
@@ -112,30 +130,30 @@ export function Shell({
                   navigate={navigate}
                   activeWhen={(path) => path.startsWith("/messages/groups")}
                 >
-                  {t("layout.groupMessages")}
+                  {"Groups"}
                 </NavLink>
               </div>
             )}
           </div>
         </nav>
         <div className="sidebar-status">
-          <div className="sidebar-label">{t("layout.runtime")}</div>
-          <div className="runtime-row"><Server size={14} /><span>{t("layout.adminBackend")}</span><strong>{t("layout.ready")}</strong></div>
-          <div className="runtime-row"><Database size={14} /><span>{t("layout.pgRead")}</span><strong>{t("layout.readOnly")}</strong></div>
-          <div className="runtime-row"><Shield size={14} /><span>{t("layout.writeOps")}</span><strong>{t("layout.dryRun")}</strong></div>
+          <div className="sidebar-label">{"Runtime"}</div>
+          <div className="runtime-row"><Server size={14} /><span>{"Admin backend"}</span><strong>{"Ready"}</strong></div>
+          <div className="runtime-row"><Database size={14} /><span>{"PG read"}</span><strong>{"Read-only"}</strong></div>
+          <div className="runtime-row"><Shield size={14} /><span>{"Write operations"}</span><strong>{"Dry-run"}</strong></div>
         </div>
       </aside>
       <div className="workspace">
         <header className="topbar">
           <div>
-            <div className="eyebrow">{routeSubtitle(route.path, t)}</div>
-            <h1>{routeTitle(route.path, t)}</h1>
+            <div className="eyebrow">{routeSubtitle(route.path)}</div>
+            <h1>{routeTitle(route.path)}</h1>
           </div>
           <div className="topbar-actions">
             <ThemeSwitch />
-            <span className="actor-pill">{t("layout.actor", { actor })}</span>
-            <button className="btn ghost icon-text" type="button" onClick={logout} title={t("layout.logout")}>
-              <LogOut size={16} /> {t("layout.logout")}
+            <span className="actor-pill">{`Actor: ${actor}`}</span>
+            <button className="btn ghost icon-text" type="button" onClick={logout} title={"Log out"}>
+              <LogOut size={16} /> {"Log out"}
             </button>
           </div>
         </header>

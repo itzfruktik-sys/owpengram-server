@@ -36,7 +36,7 @@ func TestRetentionWorkerUsesIndependentOutboxPoisonPolicyAndSignalsRelease(t *te
 	if outbox.calls != 1 || outbox.olderThan != 2*time.Minute || outbox.limit != 73 {
 		t.Fatalf("outbox poison calls/args = %d/%v/%d, want 1/2m/73", outbox.calls, outbox.olderThan, outbox.limit)
 	}
-	entries := logs.FilterMessage("terminal failed dispatch_outbox 已结束隔离并释放用户 lane").All()
+	entries := logs.FilterMessage("terminal-failed dispatch_outbox rows released from quarantine and unfroze their user lane").All()
 	if len(entries) != 1 {
 		t.Fatalf("poison release error signals = %d, want 1", len(entries))
 	}
@@ -128,6 +128,86 @@ func TestRetentionWorkerReclaimsExpiredLoginCodeDeliveryReceipts(t *testing.T) {
 	}
 	if loginCodes.expiredBefore.Before(before) || loginCodes.expiredBefore.After(after) {
 		t.Fatalf("login-code expiry boundary = %v, want within [%v,%v]", loginCodes.expiredBefore, before, after)
+	}
+}
+
+type fakeReportRetention struct {
+	telemetryBefore time.Time
+	authBefore      time.Time
+	sponsoredBefore time.Time
+	appealBefore    time.Time
+	telemetryCalls  int
+	authCalls       int
+	sponsoredCalls  int
+	appealCalls     int
+	limit           int
+}
+
+func (f *fakeReportRetention) DeleteExpiredClientTelemetry(_ context.Context, before time.Time, limit int) (int, error) {
+	f.telemetryCalls++
+	f.telemetryBefore = before
+	f.limit = limit
+	return 1, nil
+}
+
+func (f *fakeReportRetention) DeleteExpiredAuthDeliveryReports(_ context.Context, before time.Time, limit int) (int, error) {
+	f.authCalls++
+	f.authBefore = before
+	f.limit = limit
+	return 1, nil
+}
+
+func (f *fakeReportRetention) DeleteExpiredSponsoredMessageImpressions(_ context.Context, before time.Time, limit int) (int, error) {
+	f.sponsoredCalls++
+	f.sponsoredBefore = before
+	f.limit = limit
+	return 1, nil
+}
+
+func (f *fakeReportRetention) DeleteExpiredModerationAppealLinks(_ context.Context, before time.Time, limit int) (int, error) {
+	f.appealCalls++
+	f.appealBefore = before
+	f.limit = limit
+	return 1, nil
+}
+
+func TestRetentionWorkerSeparatesTelemetryDiagnosticsAndModerationCapabilities(t *testing.T) {
+	const (
+		telemetryTTL = 7 * 24 * time.Hour
+		authTTL      = 14 * 24 * time.Hour
+		batch        = 47
+	)
+	store := &fakeReportRetention{}
+	w := NewRetentionWorker(
+		&fakeOutboxRetention{}, nil, zap.NewNop(),
+		168*time.Hour, time.Hour, batch,
+	).WithClientTelemetryRetention(store, telemetryTTL).
+		WithAuthDeliveryReportRetention(store, authTTL).
+		WithModerationRetention(store)
+	before := time.Now()
+	w.runRetentionOnce(context.Background())
+	after := time.Now()
+	if store.telemetryCalls != 1 || store.authCalls != 1 ||
+		store.sponsoredCalls != 1 || store.appealCalls != 1 ||
+		store.limit != batch {
+		t.Fatalf("calls telemetry/auth/sponsored/appeal=%d/%d/%d/%d limit=%d",
+			store.telemetryCalls, store.authCalls,
+			store.sponsoredCalls, store.appealCalls, store.limit)
+	}
+	if store.telemetryBefore.Before(before.Add(-telemetryTTL)) ||
+		store.telemetryBefore.After(after.Add(-telemetryTTL)) {
+		t.Fatalf("telemetry boundary=%v", store.telemetryBefore)
+	}
+	if store.authBefore.Before(before.Add(-authTTL)) ||
+		store.authBefore.After(after.Add(-authTTL)) {
+		t.Fatalf("auth boundary=%v", store.authBefore)
+	}
+	if store.sponsoredBefore.Before(before) ||
+		store.sponsoredBefore.After(after) ||
+		store.appealBefore.Before(before) ||
+		store.appealBefore.After(after) {
+		t.Fatalf("moderation capability boundaries sponsored=%v appeal=%v",
+			store.sponsoredBefore, store.appealBefore)
 	}
 }
 
@@ -308,7 +388,7 @@ func TestRetentionWorkerSkipsOrphanDeleteWhenHeartbeatFails(t *testing.T) {
 	if store.heartbeatCalls != 1 || store.calls != 0 {
 		t.Fatalf("heartbeat/delete calls = %d/%d, want 1/0", store.heartbeatCalls, store.calls)
 	}
-	entries := logs.FilterMessage("刷新 active raw auth key heartbeat 失败，本轮跳过 orphan GC").All()
+	entries := logs.FilterMessage("refreshing active raw auth key heartbeat failed, skipping orphan GC this round").All()
 	if len(entries) != 1 || entries[0].ContextMap()["signal"] != "auth_key_heartbeat_failed" {
 		t.Fatalf("heartbeat failure signals = %+v", entries)
 	}

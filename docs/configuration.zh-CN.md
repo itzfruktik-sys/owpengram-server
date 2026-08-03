@@ -21,7 +21,9 @@
 | `TELESRV_LISTEN` | string / `0.0.0.0:2398` | MTProto TCP 监听地址，必须与 patched 客户端可达地址/端口一致。 |
 | `TELESRV_ADVERTISE_IP` | string / `127.0.0.1` | 媒体、通话等回退路径使用的客户端可达 IP；当前 TDesktop 静态 DC patch 不从这里获取 MTProto 地址。 |
 | `TELESRV_RSA_KEY` | path / `data/server_rsa.pem` | MTProto RSA 私钥；缺失时自动生成。属于敏感文件，重启和升级间必须稳定保存。 |
-| `TELESRV_DC` | int / `2` | 服务端 DC ID，必须与客户端 patch 及媒体/DC 元数据一致。 |
+| `TELESRV_DC` | int / `2` | 服务端输出配置及媒体/DC 元数据使用的规范 DC ID；当前单后端不会按它分区密钥交换状态。 |
+| `TELESRV_DEFAULT_COUNTRY_CODE` | ISO alpha-2 / `CN` | `help.getNearestDc` 返回的登录页默认国家。客户端把 `CN` 映射为国际区号 `+86`、`US` 映射为 `+1`。输入会 trim、转大写并校验为国家或自治地区；格式错误或未知值会让启动失败。 |
+| `TELESRV_STRICT_DC_CHECK` | bool / `false` | 默认 `false`，永久与临时密钥交换接受任意 wire int32 DC 标签。设为 `true` 时永久标签必须等于 `TELESRV_DC`、临时标签绝对值必须等于 `TELESRV_DC`；它仅是诊断开关，不提供多 DC 隔离。 |
 | `TELESRV_WEBSOCKET_ENABLE` | bool / `true` | 在 MTProto 监听端口启用 MTProto-over-WebSocket 分流。 |
 | `TELESRV_WEBSOCKET_ALLOWED_ORIGINS` | list / `http://localhost:1234,http://127.0.0.1:1234` | 浏览器 WebSocket origin 白名单；`*` 只用于临时调试。 |
 | `TELESRV_MTPROTO_MAX_CONNECTIONS` | int / `200000` | 全局物理连接 admission 上限；负数关闭该门禁。 |
@@ -32,19 +34,22 @@
 | `TELESRV_MTPROTO_RPC_TIMEOUT` | duration / `30s` | 调度后 RPC handler 的端到端超时。 |
 | `TELESRV_MTPROTO_RPC_GLOBAL_WORKERS` | int / `256` | 共享公平调度器 worker 数。 |
 | `TELESRV_MTPROTO_RPC_GLOBAL_MAX_TASKS` | int / `8192` | 进程级排队与执行中的 RPC task 上限。 |
-| `TELESRV_MTPROTO_RPC_GLOBAL_MAX_BYTES` | int64 charge bytes / `536870912` | 进程级已预留/排队/执行中 RPC 内存 charge 预算；legacy 等于 copied body，exact 是 typed decode 前按 wire 与生成对象放大计算的保守 materialization charge，不代表可并发接收同等大小的 wire body。 |
-| `TELESRV_MTPROTO_RPC_RESULT_CACHE_MAX_ENTRIES` | int / `262144` | 331 秒进程内重放窗口中，pending owner、completed `rpc_result` 与容量 tombstone 的全局 ownership 条目上限。owner 执行前先占 1 条，转 completed 时不重复计数。 |
-| `TELESRV_MTPROTO_RPC_RESULT_CACHE_MAX_BYTES` | int64 bytes / `67108864` | 上述 ownership 的全局 retained-byte 上限；owner 先占 1 byte，Put 转移为真实 body 或 1-byte identity tombstone。不得低于 `16775168`（单条合法 outbound body 上限）。 |
-| `TELESRV_MTPROTO_RPC_RESULT_CACHE_AUTH_MAX_ENTRIES` | int / `32768` | 单 raw auth key 的 ownership 条目上限；与全局、session 层同时计费，防一个 auth key 吃满进程缓存。必须 `global >= auth >= session`。 |
-| `TELESRV_MTPROTO_RPC_RESULT_CACHE_AUTH_MAX_BYTES` | int64 bytes / `33554432` | 单 raw auth key retained-byte 上限；必须不低于单条合法 outbound body，且满足 byte 层级关系。 |
-| `TELESRV_MTPROTO_RPC_RESULT_CACHE_SESSION_MAX_ENTRIES` | int / `16384` | 单 `raw auth key + session_id` ownership 条目上限；不同 session 不共享该局部额度。 |
-| `TELESRV_MTPROTO_RPC_RESULT_CACHE_SESSION_MAX_BYTES` | int64 bytes / `16777216` | 单 `raw auth key + session_id` retained-byte 上限；默认略高于单条合法 outbound body，确保空预算时任一合法结果可完整进入。 |
-| `TELESRV_MTPROTO_RPC_RESULT_PENDING_PER_AUTH` | int / `2048` | 单 raw auth key 的 active pending owner 附加上限；必须不大于 `RPC_GLOBAL_MAX_TASKS` 和 auth entry 上限。Put/Abort 都立即归还此 active 额度。 |
-| `TELESRV_MTPROTO_INBOUND_FRAME_GLOBAL_MAX_BYTES` | int64 bytes / `536870912` | transport wire 与最大解密明文的进程级在途预算，在分配 payload 前预留。 |
+| `TELESRV_MTPROTO_RPC_GLOBAL_MAX_BYTES` | int64 charge bytes / `536870912` | 进程级已预留/排队/执行中 RPC 内存 charge 预算；legacy 等于 copied body，exact 是 typed decode 前按 wire 与生成对象放大计算的保守 materialization charge。nested gzip 展开后会在 decoder 分配 typed graph 前原子增长该 charge，grow 失败原子拒绝整批候选 RPC；该值不代表可并发接收同等大小的 wire body。 |
+| `TELESRV_MTPROTO_RPC_EXECUTION_MAX_ENTRIES` | int / `262144` | pending owner 与未 ACK execution receipt 的全局上限。receipt 只存请求身份、执行结果和 Layer admission 元数据，不存 TL body；收到 `msgs_ack` 立即删除，331 秒仅是无 ACK 时的安全上限。 |
+| `TELESRV_MTPROTO_RPC_EXECUTION_AUTH_MAX_ENTRIES` | int / `32768` | 单 raw auth key 的 owner/receipt 条目上限；必须满足 `global >= auth >= session`。 |
+| `TELESRV_MTPROTO_RPC_EXECUTION_SESSION_MAX_ENTRIES` | int / `16384` | 单 `raw auth key + session_id` 的 owner/receipt 条目上限。 |
+| `TELESRV_MTPROTO_RPC_EXECUTION_PENDING_PER_AUTH` | int / `2048` | 单 raw auth key 的 active pending owner 附加上限；必须不大于 `RPC_GLOBAL_MAX_TASKS` 和 auth entry 上限。 |
+| `TELESRV_MTPROTO_INBOUND_FRAME_GLOBAL_MAX_BYTES` | int64 bytes / `536870912` | transport wire、最大解密明文以及每个 live outer/nested gzip 输出的进程级在途预算，均在对应 payload 分配前预留。 |
 | `TELESRV_MTPROTO_OUTBOUND_QUEUE_SIZE` | int / `128` | 单连接普通 outbound mailbox 容量。 |
 | `TELESRV_MTPROTO_OUTBOUND_CONTROL_QUEUE_SIZE` | int / `32` | 单连接控制消息 mailbox 容量。 |
-| `TELESRV_MTPROTO_OUTBOUND_TRACKED_GLOBAL_MAX_BYTES` | int64 bytes / `536870912` | resend pending message body 的全局预算。 |
+| `TELESRV_MTPROTO_OUTBOUND_TRACKED_GLOBAL_MAX_BYTES` | int64 bytes / `536870912` | 所有逻辑 session 未 ACK 出站 body 的唯一全局预算。物理连接重连复用同一份 `msg_id/seq_no/body`；ACK、destroy 或离线 6 分钟回收时释放，不再另建 RPC cache/spool 副本。 |
 | `TELESRV_MTPROTO_OUTBOUND_WRITE_GLOBAL_MAX_BYTES` | int64 bytes / `536870912` | 并发加密 wire/codec/obfuscation scratch 的全局预算。 |
+
+nested gzip admission 不新增环境变量。代码硬限制为：每个
+`gzip_packed` envelope 输出最多 10 MiB；同一 transport frame 内 outer、nested、
+sibling、失败尝试和 authoritative-profile re-decode 的累计解压工作最多 32 MiB。
+live expanded buffer 释放后会归还进程内存，但不会返还该 frame 的 CPU/work counter；
+保留的 typed graph 继续计入上面的 RPC scheduler 预算。
 
 ## 3. HTTP 端点、公开链接与管理后台
 
@@ -61,7 +66,7 @@
 | `TELESRV_PUBLIC_BASE_URL` | HTTP(S) URL / `https://telesrv.net` | 客户端可见的公开链接根地址；允许 path，禁止 credentials、query、fragment。本地例：`http://127.0.0.1:2401`。 |
 | `TELESRV_PUBLIC_APP_SCHEME` | URL scheme / `telesrv` | 落地页自动唤起客户端的 scheme，必须与 patched 客户端注册值一致；禁止 `tg`、`http`、`https`。 |
 | `TELESRV_PUBLIC_APP_LINK_BASE` | nullable custom URL base / 空 | 多服务客户端可选的 host-based 根，例如 `owpg://example.com`。配置后生成 `owpg://example.com/oauth`、`owpg://example.com/<username>` 等；只允许精确 `<custom-scheme>://<host>`，禁止端口、path、query、fragment。`TELESRV_PUBLIC_APP_SCHEME` 仍作为旧链接输入兼容。 |
-| `TELESRV_PUBLIC_WEB_BASE_URL` | HTTP(S) URL / `https://web.telesrv.net` | username 页面 Web 客户端入口，校验规则同 `TELESRV_PUBLIC_BASE_URL`。 |
+| `TELESRV_PUBLIC_WEB_BASE_URL` | HTTP(S) URL / `https://weba.telesrv.net` | username 页面 Web 客户端入口，校验规则同 `TELESRV_PUBLIC_BASE_URL`。 |
 | `TELESRV_PUBLIC_APP_NAME` | string / `telesrv` | 公开落地页产品名；trim 后非空、无控制字符、最多 64 个 Unicode 字符。 |
 | `TELESRV_PUBLIC_LINK_WEB_ADDR` | nullable address / 空 | 只读 username/avatar/sticker/emoji/chatlist/collectible gift 落地页监听；空值关闭。生产应 loopback + nginx 精确反代；`.env.example` 为开发启用 `127.0.0.1:2401`。 |
 | `TELESRV_TELEGRAM_LOGIN_ENABLE` | bool / `false` | 在 `TELESRV_PUBLIC_LINK_WEB_ADDR` 上挂载自建 Telegram Login/OIDC Provider；启用时必须同时配置该 listener 与下列全部密钥文件。 |
@@ -372,6 +377,7 @@ active key。不要手工编辑 manifest 或 PEM，不要在各实例上分别�
 | `TELESRV_BLOB_DIR` | path / `data/blobs` | 本地开发 blob backend 的媒体字节根目录。 |
 | `TELESRV_STICKER_SEED_DIR` | path / `data/sticker-seed` | 导入 documents、sticker sets、blob 的贴纸/reaction seed 目录。 |
 | `TELESRV_STICKER_SEED_MAX_SETS` | int / `300` | 启动时导入的常规贴纸集上限；`<=0` 表示不限。 |
+| `TELESRV_PREMIUM_PROMO_SEED_DIR` | path / `data/premium-promo` | `help.getPremiumPromo` 导出的 manifest、MP4 视频与 JPEG 缩略图目录。目录缺失时保留无视频兼容响应；目录存在但内容非法或不完整时启动失败。 |
 
 语言包 seed 以文件 manifest 为事实源。新增语言时放入 `data/langpack/<pack>/<pack>_<lang>_v<version>.strings` 并重启 `telesrv`；`pack` 必须与所在一级目录一致，允许 Telegram 已使用的字母、数字、`-` 与 `_`（例如 `android_x`），`lang` 会统一为小写、连字符形式（例如 `pt_BR` 归一为 `pt-br`）。同一语言存在多个文件时只读取最高版本。修改已有语言的有效内容必须提高版本；同版本有效内容变化或版本倒退会阻止启动。删除语言文件或整个 pack 子目录后，下次重启会原子移除对应数据库目录和字符串。启动先流式计算源文件 SHA-256；未变化文件复用上次原子 manifest，不解析字符串也不写库，只有新增或变化文件才解析并通过 PostgreSQL `COPY` 整包替换。
 
@@ -514,6 +520,58 @@ active key。不要手工编辑 manifest 或 PEM，不要在各实例上分别�
 | `TELESRV_STARGIFT_CRAFT_DELAY` | duration / `0s` | 签发时固化到 `can_craft_at` 的等待期；可 Craft 礼物即使为 `0s` 也写升级时间这一正数能力边界，0 只表示不具备 Craft 能力或已终结。 |
 | `TELESRV_STARGIFT_CRAFT_CHANCE_PERMILLE` | int / `250` | 每份输入礼物贡献的本地合成成功概率，累计上限 1000‰。 |
 
+### 本地账号评分与 collectible username
+
+账号评分是 gramsrv 自己的本地风控/信誉复合分，组合 Stars 收支、账号活跃和管理处罚；它不承诺 1:1 复刻 Telegram 的私有评分算法。已计算的本地等级会投影到 `userFull.stars_rating`，本人还会收到 `stars_my_pending_rating` 与生效时间，让官方客户端直接显示；他人的 pending 永不下发。资料页只读取后台 worker 已持久化的评分并复用现有 30 分钟 `userFull` 投影缓存，不会同步重算或写库。Collectible username 由管理员签发，本功能不访问外部市场、钱包或区块链节点。
+
+| 参数 | 类型 / 代码默认值 | 说明与约束 |
+|---|---|---|
+| `TELESRV_RATING_ENABLED` | bool / `true` | 启用本地复合评分及客户端等级投影；关闭时拒绝评分写入且客户端 rating flags 保持未设置。 |
+| `TELESRV_RATING_PENDING_DELAY` | duration / `24h` | 本地评分上涨进入可见后台等级前的等待期；下降立即生效。允许 `0..720h`，`0` 表示立即应用。 |
+| `TELESRV_RATING_RECOMPUTE_INTERVAL` | duration / `15m` | 后台重算周期，必须为正数。 |
+| `TELESRV_RATING_RECOMPUTE_BATCH` | int / `500` | 每轮重算的 stale projection 数，必须为 `1..10000`。 |
+| `TELESRV_RATING_STALE_AFTER` | duration / `6h` | 超过该年龄的评分进入重算，必须为正数。 |
+| `TELESRV_RATING_WEIGHT_STARS_RECEIVED_PERMILLE` | int64 / `1000` | Stars 收入权重（千分比）。 |
+| `TELESRV_RATING_WEIGHT_STARS_SPENT_PERMILLE` | int64 / `250` | Stars 支出权重（千分比）。 |
+| `TELESRV_RATING_WEIGHT_MESSAGE_SENT` | int64 / `1` | 每条已发送消息贡献分。 |
+| `TELESRV_RATING_WEIGHT_ACCOUNT_AGE_DAY` | int64 / `2` | 每个账号存续日贡献分。 |
+| `TELESRV_RATING_WEIGHT_GIFT_RECEIVED` | int64 / `25` | 每份持有 collectible gift 贡献分。 |
+| `TELESRV_RATING_WEIGHT_MODERATION_CASE` | int64 / `150` | 每个成立管理案件的扣分幅度。 |
+| `TELESRV_RATING_WEIGHT_SCAM_PENALTY` | int64 / `5000` | scam 标记固定扣分。 |
+| `TELESRV_RATING_WEIGHT_FAKE_PENALTY` | int64 / `5000` | fake 标记固定扣分。 |
+| `TELESRV_RATING_ACTIVITY_CAP` | int64 / `5000` | 活跃分上限；`0` 表示不封顶。 |
+| `TELESRV_COLLECTIBLE_USERNAME_URL_TEMPLATE` | URL template / 空 | 管理员未显式给 URL 时写入资产的落地页模板；空值派生 `<TELESRV_PUBLIC_BASE_URL>/nft/username/<username>`。配置值须为无 userinfo 的绝对 http(s) URL，可含 `{username}`；无占位符时把 username 追加为最后路径段。 |
+
+`fragment.collectibleInfo.amount` 与 `crypto_amount` 使用币种最小单位：例如 USD 1000 表示 10 美元，TON 900 表示 900 nanotons，XTR 无子单位。后台 UI 负责整币单位与最小单位转换；直接调用 Admin API 的集成必须自行传最小单位。
+
+### 官方平台认证
+
+官方认证对应 `user.verified` / `channel.verified`。申请由内置 `@verifybot` 收集、管理后台审核；提交和批准时都会重新校验目标存在、公开 username、申请者控制权、账号状态与系统账号禁入，badge 写入和决定状态在同一事务提交。申请 URL 只做 public http(s) 形状校验，服务端不会抓取，避免 SSRF。
+
+| 参数 | 类型 / 代码默认值 | 说明与约束 |
+|---|---|---|
+| `TELESRV_VERIFICATION_ENABLED` | bool / `true` | 启用官方认证；关闭时拒绝新操作，既有 badge 保留。 |
+| `TELESRV_VERIFICATION_ALLOW_USER_TARGETS` | bool / `false` | 是否允许普通用户账号成为认证目标。 |
+| `TELESRV_VERIFICATION_REJECT_COOLDOWN` | duration / `720h` | 同申请者/目标被拒后的等待期；允许 `0..8760h`。 |
+| `TELESRV_VERIFICATION_APPLY_RATE_LIMIT` | int / `3` | 每个申请者在窗口内可新建的申请数；`0` 关闭。 |
+| `TELESRV_VERIFICATION_APPLY_RATE_WINDOW` | duration / `24h` | 申请预算窗口；limit>0 时必须为正数。 |
+| `TELESRV_VERIFICATION_BOT_RATE_LIMIT` | int / `30` | `@verifybot` 每个申请者的对话限流；`0` 关闭。 |
+| `TELESRV_VERIFICATION_BOT_RATE_WINDOW` | duration / `1m` | bot 对话限流窗口；limit>0 时必须为正数。 |
+| `TELESRV_VERIFICATION_NOTIFY_INTERVAL` | duration / `15s` | durable 通知 outbox worker 周期，必须为正数。 |
+| `TELESRV_VERIFICATION_NOTIFY_BATCH` | int / `50` | 每轮投递通知数，必须为 `1..500`。 |
+| `TELESRV_VERIFICATION_MAX_ACTIVE_PER_USER` | int / `3` | 每个申请者可保持的 active 申请数；允许 `0..50`。 |
+
+### 第三方 bot 认证
+
+第三方认证对应 `botVerification`，由管理员授权的 verifier bot 使用自己的 custom emoji document 与描述标记 user/channel，不会授予官方 checkmark。Icon 必须是客户端可通过 `messages.getCustomEmojiDocuments` 读取的真实 document。每个 peer 只保留一个 wire-visible mark；新的 verifier 替换旧 mark，禁止旧 badge 在撤销或 kill switch 后意外复活。客户端自定义描述上限通过 appConfig `bot_verification_description_length_limit=70` 发布。
+
+| 参数 | 类型 / 代码默认值 | 说明与约束 |
+|---|---|---|
+| `TELESRV_BOT_VERIFICATION_ENABLED` | bool / `true` | 启用第三方认证；关闭时拒绝新 mutation，既有 mark 仍投影。 |
+| `TELESRV_BOT_VERIFICATION_MAX_PER_VERIFIER` | int / `10000` | 单 verifier 可标记的 peer 数；`0` 仅关闭 service cap，storage 硬上限仍为 10000。 |
+| `TELESRV_BOT_VERIFICATION_REQUEST_RATE_LIMIT` | int / `5` | 每个申请者跨 verifier 的申请预算；`0` 关闭。 |
+| `TELESRV_BOT_VERIFICATION_REQUEST_RATE_WINDOW` | duration / `24h` | 第三方认证申请预算窗口；limit>0 时必须为正数。 |
+
 ## 11. 私聊通话、群通话、TURN、SFU 与直播
 
 | 参数 | 类型 / 代码默认值 | 说明与约束 |
@@ -521,6 +579,7 @@ active key。不要手工编辑 manifest 或 PEM，不要在各实例上分别�
 | `TELESRV_CALL_RING_TIMEOUT` | duration / `90s` | 私聊通话 ringing/accepted 服务端兜底超时，应与客户端 `callRingTimeoutMs` 保持一致。 |
 | `TELESRV_CALL_TOMBSTONE_TTL` | duration / `60s` | 终态通话 tombstone 的幂等/晚到 RPC 吸收窗口。 |
 | `TELESRV_CALL_MAX_ACTIVE_PER_USER` | int / `4` | 单用户非终态私聊通话上限；非正值由 phone service 归一。 |
+| `TELESRV_CALL_REGISTRY_MAX_ENTRIES` | int / `10000` | 进程级私聊通话 registry 硬上限；满载返回 `CALL_OCCUPY_FAILED`，不按年龄驱逐已建立通话。 |
 | `TELESRV_CALL_SIGNALING_MAX_BYTES` | int bytes / `65536` | 单条 `phone.sendSignalingData` 载荷上限。 |
 | `TELESRV_CALL_SIGNALING_RATE` | int / `50` | 单通话每秒信令转发上限，超限静默丢弃。 |
 | `TELESRV_CALL_EXPIRY_INTERVAL` | duration / `1s` | 通话 expiry dispatcher 轮询间隔。 |

@@ -2,11 +2,10 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 import { api, errorMessage } from "../api";
 import { Alert } from "../components/ui";
-import { useI18n } from "../i18n";
 import { ThemeSwitch } from "../theme";
+import type { AdminSession } from "../types";
 
-export function LoginPage({ onLogin }: { onLogin: (actor: string) => void }) {
-  const { t } = useI18n();
+export function LoginPage({ onLogin }: { onLogin: (session: AdminSession) => void }) {
   const [secret, setSecret] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -16,8 +15,10 @@ export function LoginPage({ onLogin }: { onLogin: (actor: string) => void }) {
     setBusy(true);
     setError("");
     try {
+      // The login answer carries the permission set and the CSRF token; api.login
+      // remembers the token, the session state keeps the rights.
       const result = await api.login(secret);
-      onLogin(result.actor);
+      onLogin({ actor: result.actor, permissions: result.permissions ?? [] });
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -38,22 +39,22 @@ export function LoginPage({ onLogin }: { onLogin: (actor: string) => void }) {
             <span className="brand-mark"><img src="/logo.png" alt="OwpenGram" /></span>
             <span>
               <strong>OwpenGram</strong>
-              <small>{t("app.adminConsole")}</small>
+              <small>{"Admin Console"}</small>
             </span>
           </div>
           <div className="login-head-actions">
             <ThemeSwitch />
-            <span className="login-chip">{t("app.localAccess")}</span>
+            <span className="login-chip">{"Local access"}</span>
           </div>
         </div>
         <div className="login-copy">
-          <h1>{t("login.heading")}</h1>
-          <p>{t("login.body")}</p>
+          <h1>{"Operations Admin"}</h1>
+          <p>{"Enter credentials to open the console."}</p>
         </div>
         {error && <Alert>{error}</Alert>}
         <form className="form-stack" onSubmit={submit}>
           <label>
-            <span>{t("login.secret")}</span>
+            <span>{"Admin password or token"}</span>
             <input
               autoFocus
               type="password"
@@ -63,7 +64,7 @@ export function LoginPage({ onLogin }: { onLogin: (actor: string) => void }) {
             />
           </label>
           <button className="btn primary full" type="submit" disabled={busy}>
-            {busy ? t("login.submitting") : t("login.submit")}
+            {busy ? "Logging in" : "Log in"}
           </button>
         </form>
       </section>

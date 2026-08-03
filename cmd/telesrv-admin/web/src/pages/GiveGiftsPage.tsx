@@ -3,12 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api";
 import { StaticLottie } from "../components/StaticLottie";
 import { Alert, Badge, PageFrame } from "../components/ui";
-import { useI18n } from "../i18n";
 import type { StarGiftRow } from "../types";
 import { GiveGiftForm } from "./GiveGiftForm";
 
 export function GiveGiftsPage() {
-  const { t } = useI18n();
   const [gifts, setGifts] = useState<StarGiftRow[]>([]);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<StarGiftRow | null>(null);
@@ -40,18 +38,18 @@ export function GiveGiftsPage() {
   }, [gifts, query]);
 
   return (
-    <PageFrame title={t("giveGifts.pageTitle")} eyebrow={t("giveGifts.eyebrow")} actions={
-      <button className="btn" type="button" onClick={() => load()} disabled={busy}><RefreshCw size={15} /> {t("common.refresh")}</button>
+    <PageFrame title={"Give Gifts"} eyebrow={"Grant catalog gifts to any user or channel"} actions={
+      <button className="btn" type="button" onClick={() => load()} disabled={busy}><RefreshCw size={15} /> {"Refresh"}</button>
     }>
       {error && <Alert>{error}</Alert>}
-      <p className="give-gift-upgrade-note">{t("giveGifts.hint")}</p>
+      <p className="give-gift-upgrade-note">{"Pick a gift to grant. Delivery is free of charge and sent from the system account 777000 (Telesrv) by default."}</p>
       <div className="give-gift-layout">
         <section className="give-gift-picker">
           <div className="give-gift-picker-head">
-            <label className="searchbox"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("giveGifts.searchPlaceholder")} /></label>
-            <span className="gift-list-summary">{t("gifts.listSummary", { shown: visible.length, total: gifts.length })}</span>
+            <label className="searchbox"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={"Search by title or gift ID"} /></label>
+            <span className="gift-list-summary">{`Showing ${visible.length} of ${gifts.length}`}</span>
           </div>
-          <div className="give-gift-picker-list" role="listbox" aria-label={t("giveGifts.pickGift")}>
+          <div className="give-gift-picker-list" role="listbox" aria-label={"Select a gift"}>
             {visible.map((gift) => {
               const active = selected?.GiftID === gift.GiftID;
               return (
@@ -64,18 +62,18 @@ export function GiveGiftsPage() {
                     <span className="mono">#{gift.GiftID}</span>
                   </span>
                   <span className="give-gift-option-price">
-                    {gift.Enabled ? <Badge>⭐ {gift.Stars}</Badge> : <Badge tone="neutral">{t("common.disabled")}</Badge>}
+                    {gift.Enabled ? <Badge>⭐ {gift.Stars}</Badge> : <Badge tone="neutral">{"Disabled"}</Badge>}
                   </span>
                 </button>
               );
             })}
-            {visible.length === 0 && !busy && <div className="official-gift-empty">{t("common.noResults")}</div>}
+            {visible.length === 0 && !busy && <div className="official-gift-empty">{"No results"}</div>}
           </div>
         </section>
         <section className="give-gift-panel">
           {selected
             ? <GiveGiftForm key={selected.GiftID} gift={selected} onDone={() => void load()} />
-            : <div className="give-gift-empty-panel"><Gift size={26} /><p>{t("giveGifts.selectPrompt")}</p></div>}
+            : <div className="give-gift-empty-panel"><Gift size={26} /><p>{"Select a gift from the list to start."}</p></div>}
         </section>
       </div>
     </PageFrame>

@@ -3,13 +3,11 @@ import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { ActionButton } from "../components/ActionButton";
 import { Alert, Badge, EmptyRow, JsonBlock, LoadingSurface, PageFrame, SectionHead, SplitLayout, Summary } from "../components/ui";
-import { useI18n } from "../i18n";
 import { formatDate, formatUnix } from "../lib/format";
 import type { Navigate } from "../routing";
 import type { MessageDetail } from "../types";
 
 export function MessageDetailPage({ ownerUserID, msgID, navigate }: { ownerUserID: number; msgID: number; navigate: Navigate }) {
-  const { t } = useI18n();
   const [detail, setDetail] = useState<MessageDetail | null>(null);
   const [error, setError] = useState("");
 
@@ -30,55 +28,55 @@ export function MessageDetailPage({ ownerUserID, msgID, navigate }: { ownerUserI
     return <Alert>{error}</Alert>;
   }
   if (!detail) {
-    return <LoadingSurface label={t("common.loading")} />;
+    return <LoadingSurface label={"Loading"} />;
   }
 
   const msg = detail.Message;
   return (
     <PageFrame
-      title={t("messages.privateDetailTitle", { id: msg.BoxID })}
-      eyebrow={t("messages.detailEyebrow")}
-      actions={<button className="btn icon-text" onClick={() => navigate("/messages/private")}><ArrowLeft size={15} /> {t("messages.backPrivate")}</button>}
+      title={`Message #${msg.BoxID}`}
+      eyebrow={"Message Detail"}
+      actions={<button className="btn icon-text" onClick={() => navigate("/messages/private")}><ArrowLeft size={15} /> {"Back to private messages"}</button>}
     >
       <SplitLayout
         main={
           <div className="stacked-sections">
             <section className="entity-head">
               <div>
-                <div className="entity-title">{t("messages.ownerPeerTitle", { owner: msg.OwnerUserID, peer: msg.PeerID })}</div>
-                <div className="entity-subtitle">{t("messages.senderSubtitle", { sender: msg.FromUserID, date: formatUnix(msg.Date) })}</div>
+                <div className="entity-title">{`Owner ${msg.OwnerUserID} · Peer ${msg.PeerID}`}</div>
+                <div className="entity-subtitle">{`Sender ${msg.FromUserID} · ${formatUnix(msg.Date)}`}</div>
               </div>
               <div className="entity-badges">
-                {msg.Deleted ? <Badge tone="danger">{t("common.deleted")}</Badge> : <Badge>{t("common.survived")}</Badge>}
+                {msg.Deleted ? <Badge tone="danger">{"Deleted"}</Badge> : <Badge>{"Live"}</Badge>}
                 <Badge>pts {msg.PTS}</Badge>
-                <Badge>{msg.Outgoing ? t("messages.outgoing") : t("messages.incoming")}</Badge>
+                <Badge>{msg.Outgoing ? "Outgoing" : "Incoming"}</Badge>
               </div>
             </section>
             <div className="summary-grid">
-              <Summary label={t("messages.boxID")} value={String(msg.BoxID)} mono />
-              <Summary label={t("messages.privateMessageID")} value={String(msg.PrivateMessageID)} mono />
-              <Summary label={t("messages.messageSender")} value={String(msg.MessageSenderID)} mono />
-              <Summary label={t("common.time")} value={formatUnix(msg.Date)} />
+              <Summary label={"Message box ID"} value={String(msg.BoxID)} mono />
+              <Summary label={"Private message ID"} value={String(msg.PrivateMessageID)} mono />
+              <Summary label={"Message sender"} value={String(msg.MessageSenderID)} mono />
+              <Summary label={"Time"} value={formatUnix(msg.Date)} />
             </div>
             <section className="section-block">
-              <SectionHead title={t("messages.messageBox")} text={t("messages.messageBoxesSnapshot")} />
+              <SectionHead title={"Message Box"} text={"message_boxes read-only snapshot"} />
               <JsonBlock value={detail.MessageJSON} />
             </section>
             <div className="raw-grid">
               <section className="section-block">
-                <SectionHead title={t("messages.dialogRow")} text={t("messages.dialogSnapshot")} />
+                <SectionHead title={"Dialog Row"} text={"dialogs read-only snapshot"} />
                 <JsonBlock value={detail.DialogJSON} />
               </section>
               <section className="section-block">
-                <SectionHead title={t("messages.privateRow")} text={t("messages.privateSnapshot")} />
+                <SectionHead title={"Private Message Row"} text={"private_messages read-only snapshot"} />
                 <JsonBlock value={detail.PrivateJSON} />
               </section>
             </div>
             <section className="section-block">
-              <SectionHead title={t("messages.userUpdateEvents")} text={t("messages.userEventsSource")} />
+              <SectionHead title={"Update Events"} text={"durable user_update_events"} />
               <div className="table-wrap">
                 <table className="data-table">
-                  <thead><tr><th>PTS</th><th>{t("common.count")}</th><th>{t("common.type")}</th><th>{t("common.time")}</th></tr></thead>
+                  <thead><tr><th>PTS</th><th>{"Count"}</th><th>{"Type"}</th><th>{"Time"}</th></tr></thead>
                   <tbody>
                     {detail.UpdateEvents.map((row) => <tr key={`${row.PTS}-${row.Type}`}><td>{row.PTS}</td><td>{row.PTSCount}</td><td>{row.Type}</td><td>{formatUnix(row.Date)}</td></tr>)}
                     {detail.UpdateEvents.length === 0 && <EmptyRow colSpan={4} />}
@@ -87,10 +85,10 @@ export function MessageDetailPage({ ownerUserID, msgID, navigate }: { ownerUserI
               </div>
             </section>
             <section className="section-block">
-              <SectionHead title={t("messages.dispatchOutbox")} text={t("messages.outboxSource")} />
+              <SectionHead title={"Dispatch Queue"} text={"online/offline dispatch_outbox"} />
               <div className="table-wrap">
                 <table className="data-table">
-                  <thead><tr><th>ID</th><th>{t("account.userID")}</th><th>PTS</th><th>{t("common.type")}</th><th>{t("common.status")}</th><th>{t("messages.attempts")}</th><th>{t("common.updatedAt")}</th></tr></thead>
+                  <thead><tr><th>ID</th><th>{"User ID"}</th><th>PTS</th><th>{"Type"}</th><th>{"Status"}</th><th>{"Attempts"}</th><th>{"Updated"}</th></tr></thead>
                   <tbody>
                     {detail.Outbox.map((row) => <tr key={row.ID}><td>{row.ID}</td><td>{row.TargetUserID}</td><td>{row.PTS}</td><td>{row.EventType}</td><td>{row.Status}</td><td>{row.Attempts}</td><td>{formatDate(row.UpdatedAt)}</td></tr>)}
                     {detail.Outbox.length === 0 && <EmptyRow colSpan={7} />}
@@ -102,9 +100,9 @@ export function MessageDetailPage({ ownerUserID, msgID, navigate }: { ownerUserI
         }
         side={
           <section className="action-dock">
-            <div className="dock-title">{t("common.operations")}</div>
+            <div className="dock-title">{"Operations"}</div>
             <ActionButton
-              label={t("messages.deleteThis")}
+              label={"Delete this message"}
               icon={<Trash2 size={15} />}
               path="/api/actions/delete-messages"
               payload={() => ({ owner_user_id: msg.OwnerUserID, peer_id: msg.PeerID, ids: [msg.BoxID], revoke: true })}
