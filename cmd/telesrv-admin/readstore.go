@@ -2609,7 +2609,7 @@ SELECT count(DISTINCT owner_user_id)::bigint FROM (`+perOwnerMediaSizeSQL+`) x W
 	}
 	stats.BackendKind = strings.ToLower(strings.TrimSpace(os.Getenv("TELESRV_BLOB_BACKEND")))
 	if stats.BackendKind == "" {
-		stats.BackendKind = "localfs"
+		stats.BackendKind = "s3"
 	}
 	return stats, nil
 }

@@ -34,7 +34,11 @@ func (s *Service) DocumentAnimationJSON(ctx context.Context, documentID int64) (
 	if !found || blob.Size <= 0 || blob.Size > maxEmojiAnimationBytes {
 		return nil, false, nil
 	}
-	data, total, err := s.blobs.GetRange(ctx, blob.ObjectKey, 0, blob.Size)
+	backend, err := s.backendFor(blob.Backend)
+	if err != nil {
+		return nil, false, err
+	}
+	data, total, err := backend.GetRange(ctx, blob.ObjectKey, 0, blob.Size)
 	if err != nil {
 		return nil, false, err
 	}

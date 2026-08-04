@@ -121,7 +121,14 @@ func (s *Service) warmBlobBytes(ctx context.Context, blob domain.FileBlob) (bool
 	if blob.Size <= 0 || blob.Size > blobBytesCacheMaxEntryBytes || s.byteCache.has(blob.ObjectKey) {
 		return false, nil
 	}
-	data, total, err := s.blobs.GetRange(ctx, blob.ObjectKey, 0, blobBytesCacheMaxEntryBytes+1)
+	backend, err := s.backendFor(blob.Backend)
+	if err != nil {
+		// Warmup is a pure optimization; a blob left on a backend that's no
+		// longer configured just stays uncached here -- GetFile's own
+		// backendFor call surfaces the real error if it's ever requested.
+		return false, nil
+	}
+	data, total, err := backend.GetRange(ctx, blob.ObjectKey, 0, blobBytesCacheMaxEntryBytes+1)
 	if err != nil {
 		return false, fmt.Errorf("read blob %q: %w", blob.LocationKey, err)
 	}

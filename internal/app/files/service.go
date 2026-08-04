@@ -48,7 +48,14 @@ const (
 type Service struct {
 	media       store.MediaStore
 	blobs       BlobBackend
-	uploadParts UploadPartBackend
+	// otherBackends holds additional, non-active BlobBackend instances keyed
+	// by Name() (e.g. "localfs" while s3 is active, or vice versa). Only
+	// used for reading/deleting rows written before the deployment switched
+	// TELESRV_BLOB_BACKEND -- new writes always go through blobs. Without
+	// this, a backend switch would make every pre-switch file unreadable
+	// (the row/bytes still exist, but nothing would know how to reach them).
+	otherBackends map[string]BlobBackend
+	uploadParts   UploadPartBackend
 	dc          int
 	log         *zap.Logger
 	thumbs      VideoThumbnailer
@@ -127,6 +134,23 @@ func WithSpaceGuard(guard SpaceGuard) Option {
 	}
 }
 
+// WithAdditionalBlobBackend registers a non-active blob backend purely for
+// reading/deleting rows written while it used to be active. Register the
+// previous backend here whenever TELESRV_BLOB_BACKEND changes and the old
+// backend's storage/credentials are still reachable -- otherwise every file
+// written before the switch becomes unreadable (see Service.otherBackends).
+func WithAdditionalBlobBackend(backend BlobBackend) Option {
+	return func(s *Service) {
+		if backend == nil {
+			return
+		}
+		if s.otherBackends == nil {
+			s.otherBackends = make(map[string]BlobBackend, 1)
+		}
+		s.otherBackends[backend.Name()] = backend
+	}
+}
+
 // WithUploadPartBackend overrides where transient upload-part chunks are
 // staged before assembly, independent of the permanent blob backend passed
 // to NewService. Needed when the permanent backend is s3 (S3FS doesn't
@@ -188,6 +212,22 @@ func NewService(media store.MediaStore, blobs BlobBackend, dc int, opts ...Optio
 		}
 	}
 	return s
+}
+
+// backendFor resolves the BlobBackend that actually holds a given blob row,
+// which is not necessarily the currently active s.blobs -- a row written
+// before a TELESRV_BLOB_BACKEND switch stays on whichever backend wrote it.
+// Falls back to the active backend for an empty/unset name (older rows
+// predating this field) rather than failing a previously-working read.
+func (s *Service) backendFor(backend domain.MediaBackend) (BlobBackend, error) {
+	name := string(backend)
+	if name == "" || name == s.blobs.Name() {
+		return s.blobs, nil
+	}
+	if b, ok := s.otherBackends[name]; ok {
+		return b, nil
+	}
+	return nil, fmt.Errorf("blob backend %q is not configured (was TELESRV_BLOB_BACKEND changed without keeping the old backend reachable?)", name)
 }
 
 // SaveFilePart 累积一个 small file 分片。
@@ -390,6 +430,10 @@ func (s *Service) GetFile(ctx context.Context, req domain.FileDownloadRequest) (
 		}
 		blob = res.blob
 	}
+	backend, err := s.backendFor(blob.Backend)
+	if err != nil {
+		return domain.FileChunk{}, false, err
+	}
 	if blob.Size > 0 && blob.Size <= blobBytesCacheMaxEntryBytes {
 		cacheLog.byteCacheEligible = true
 		if data, ok := s.byteCache.get(blob.ObjectKey); ok {
@@ -406,7 +450,7 @@ func (s *Service) GetFile(ctx context.Context, req domain.FileDownloadRequest) (
 			if cached, ok := s.byteCache.get(blob.ObjectKey); ok {
 				return blobBytesResult{data: cached, total: int64(len(cached)), cacheable: true, cacheHit: true}, nil
 			}
-			data, total, err := s.blobs.GetRange(ctx, blob.ObjectKey, 0, blobBytesCacheMaxEntryBytes+1)
+			data, total, err := backend.GetRange(ctx, blob.ObjectKey, 0, blobBytesCacheMaxEntryBytes+1)
 			if err != nil {
 				return blobBytesResult{}, err
 			}
@@ -443,7 +487,7 @@ func (s *Service) GetFile(ctx context.Context, req domain.FileDownloadRequest) (
 	if cacheLog.source == "unknown" {
 		cacheLog.source = "backend_range"
 	}
-	data, total, err := s.blobs.GetRange(ctx, blob.ObjectKey, req.Offset, int64(req.Limit))
+	data, total, err := backend.GetRange(ctx, blob.ObjectKey, req.Offset, int64(req.Limit))
 	if err != nil {
 		return domain.FileChunk{}, false, fmt.Errorf("read blob %q: %w", blob.LocationKey, err)
 	}

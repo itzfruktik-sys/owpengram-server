@@ -67,11 +67,13 @@ func (s *Service) DeleteOrphanedOlderThan(ctx context.Context, cutoff time.Time,
 
 // deleteOrphanedBlobs removes each blob from its backend once confirming
 // (via CountFileBlobRefs) no other file_blobs row still references
-// (backend, object_key). Only blobs on the currently active backend are
-// physically removed -- a blob left over from a previously active backend
-// (deployment switched TELESRV_BLOB_BACKEND at some point; switching back
-// isn't supported) is logged and skipped rather than silently dropped,
-// since there's no configured client to reach it right now anyway.
+// (backend, object_key). Resolves the correct backend per blob via
+// backendFor (not just the currently active one) -- a blob written before a
+// TELESRV_BLOB_BACKEND switch still needs deleting from wherever it
+// actually lives. If that backend is no longer configured (its credentials
+// were removed after switching away from it), the blob is logged and
+// skipped rather than silently dropped, since there's nothing reachable to
+// delete it from.
 func (s *Service) deleteOrphanedBlobs(ctx context.Context, store mediaRetentionStore, blobs []domain.FileBlob) {
 	for _, b := range blobs {
 		refs, err := store.CountFileBlobRefs(ctx, string(b.Backend), b.ObjectKey)
@@ -82,12 +84,13 @@ func (s *Service) deleteOrphanedBlobs(ctx context.Context, store mediaRetentionS
 		if refs > 0 {
 			continue
 		}
-		if string(b.Backend) != s.blobs.Name() {
-			s.log.Warn("orphaned blob is on an inactive backend, skipping physical delete",
-				zap.String("backend", string(b.Backend)), zap.String("object_key", b.ObjectKey))
+		backend, err := s.backendFor(b.Backend)
+		if err != nil {
+			s.log.Warn("orphaned blob's backend is not configured, skipping physical delete",
+				zap.String("backend", string(b.Backend)), zap.String("object_key", b.ObjectKey), zap.Error(err))
 			continue
 		}
-		if err := s.blobs.Delete(ctx, b.ObjectKey); err != nil {
+		if err := backend.Delete(ctx, b.ObjectKey); err != nil {
 			s.log.Warn("delete orphaned blob failed", zap.String("object_key", b.ObjectKey), zap.Error(err))
 		}
 	}

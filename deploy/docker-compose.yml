@@ -66,8 +66,32 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # S3 兼容对象存储，默认 blob backend（见 .env.example 的 TELESRV_BLOB_BACKEND=s3）。
+  # 桶由 telesrv 自己在启动时按需创建（internal/app/files/blobs3.go 的 NewS3FS），
+  # 这里不需要额外的 mc 初始化容器。控制台（9001）仅用于本地调试查看已存对象。
+  minio:
+    image: minio/minio:latest
+    container_name: ${TELESRV_DOCKER_PREFIX:-owpengram}-minio
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: owpengram
+      MINIO_ROOT_PASSWORD: owpengram123
+    ports:
+      - "9000:9000"   # S3 API（对应 .env.example 的 TELESRV_S3_ENDPOINT=localhost:9000）
+      - "9001:9001"   # Web 控制台，浏览器打开 http://localhost:9001 查看存储内容
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
 volumes:
   pgdata:
     name: ${TELESRV_DOCKER_PREFIX:-owpengram}_pgdata
   redisdata:
     name: ${TELESRV_DOCKER_PREFIX:-owpengram}_redisdata
+  miniodata:
+    name: ${TELESRV_DOCKER_PREFIX:-owpengram}_miniodata

@@ -718,14 +718,33 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("init local blob dir: %w", err)
 	}
+	// Construct the s3 backend whenever it's configured, even if it isn't
+	// the active one right now: this is what keeps files readable/deletable
+	// after switching TELESRV_BLOB_BACKEND away from s3, as long as the old
+	// bucket/credentials are still reachable. Only a genuinely active s3
+	// backend failing to initialize is fatal to boot.
+	var s3Backend *filesapp.S3FS
+	if cfg.S3Endpoint != "" && cfg.S3Bucket != "" {
+		b, err := filesapp.NewS3FS(ctx, cfg.S3Endpoint, cfg.S3AccessKeyID, cfg.S3SecretAccessKey, cfg.S3Bucket, cfg.S3Region, cfg.S3UseSSL, cfg.S3PathStyle)
+		switch {
+		case err != nil && cfg.BlobBackendKind == "s3":
+			return fmt.Errorf("init s3 blob backend: %w", err)
+		case err != nil:
+			logger.Warn("s3 blob backend configured but failed to initialize; files previously written to s3 will be unreadable until this is fixed",
+				zap.String("endpoint", cfg.S3Endpoint), zap.String("bucket", cfg.S3Bucket), zap.Error(err))
+		default:
+			s3Backend = b
+		}
+	}
 	var blobBackend filesapp.BlobBackend = localBlobFS
+	var additionalBlobBackend filesapp.BlobBackend
 	var spaceGuard filesapp.SpaceGuard = filesapp.NoopSpaceGuard{}
 	if cfg.BlobBackendKind == "s3" {
-		s3Backend, err := filesapp.NewS3FS(ctx, cfg.S3Endpoint, cfg.S3AccessKeyID, cfg.S3SecretAccessKey, cfg.S3Bucket, cfg.S3Region, cfg.S3UseSSL, cfg.S3PathStyle)
-		if err != nil {
-			return fmt.Errorf("init s3 blob backend: %w", err)
+		if s3Backend == nil {
+			return fmt.Errorf("s3 blob backend not initialized (check TELESRV_S3_* config)")
 		}
 		blobBackend = s3Backend
+		additionalBlobBackend = localBlobFS
 		logger.Info("blob backend ready", zap.String("backend", "s3"), zap.String("bucket", cfg.S3Bucket), zap.String("endpoint", cfg.S3Endpoint))
 		if cfg.StorageLowSpaceGuardEnable && cfg.StorageMaxTotalBytes > 0 {
 			s3Guard := filesapp.NewS3BudgetSpaceGuard(cfg.StorageMaxTotalBytes)
@@ -734,6 +753,11 @@ func run(logger *zap.Logger) error {
 		}
 	} else {
 		logger.Info("blob backend ready", zap.String("backend", "localfs"), zap.String("dir", cfg.BlobDir))
+		if s3Backend != nil {
+			additionalBlobBackend = s3Backend
+			logger.Info("s3 blob backend also configured; kept reachable for files written while it was the active backend",
+				zap.String("bucket", cfg.S3Bucket))
+		}
 		if cfg.StorageLowSpaceGuardEnable && cfg.StorageMinFreeBytes > 0 {
 			localGuard := filesapp.NewLocalDiskSpaceGuard(cfg.StorageMinFreeBytes)
 			spaceGuard = localGuard
@@ -748,6 +772,7 @@ func run(logger *zap.Logger) error {
 			MaxFiles: cfg.UploadInFlightMaxFiles,
 		}),
 		filesapp.WithUploadPartBackend(localBlobFS),
+		filesapp.WithAdditionalBlobBackend(additionalBlobBackend),
 		filesapp.WithSpaceGuard(spaceGuard),
 		filesapp.WithMapboxMapTiles(cfg.MapboxToken, cfg.MapTileCacheDir),
 		externalMediaOption(cfg),

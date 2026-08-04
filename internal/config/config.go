@@ -795,14 +795,17 @@ func Load() (Config, error) {
 		OfficialGiftsDir:              envOr("TELESRV_OFFICIAL_GIFTS_DIR", "data/official-gifts"),
 		StarGiftTONStartingGrant:      envInt64Or("TELESRV_STARGIFT_TON_STARTING_GRANT", 10_000_000_000),
 		BlobDir:                       envOr("TELESRV_BLOB_DIR", "data/blobs"),
-		BlobBackendKind:               strings.ToLower(strings.TrimSpace(envOr("TELESRV_BLOB_BACKEND", "localfs"))),
-		S3Endpoint:                    envOr("TELESRV_S3_ENDPOINT", ""),
+		// s3 (MinIO by default, see deploy/docker-compose.yml's minio service) is
+		// the default blob backend; localfs remains fully supported as an
+		// explicit opt-in (TELESRV_BLOB_BACKEND=localfs).
+		BlobBackendKind:               strings.ToLower(strings.TrimSpace(envOr("TELESRV_BLOB_BACKEND", "s3"))),
+		S3Endpoint:                    envOr("TELESRV_S3_ENDPOINT", "127.0.0.1:9000"), // 同理避开 localhost→IPv6 回退延迟
 		S3Region:                      envOr("TELESRV_S3_REGION", "us-east-1"),
-		S3Bucket:                      envOr("TELESRV_S3_BUCKET", ""),
-		S3AccessKeyID:                 envOr("TELESRV_S3_ACCESS_KEY_ID", ""),
-		S3SecretAccessKey:             envOr("TELESRV_S3_SECRET_ACCESS_KEY", ""),
-		S3UseSSL:                      envBoolOr("TELESRV_S3_USE_SSL", true),
-		S3PathStyle:                   envBoolOr("TELESRV_S3_PATH_STYLE", false),
+		S3Bucket:                      envOr("TELESRV_S3_BUCKET", "owpengram-media"),
+		S3AccessKeyID:                 envOr("TELESRV_S3_ACCESS_KEY_ID", "owpengram"),
+		S3SecretAccessKey:             envOr("TELESRV_S3_SECRET_ACCESS_KEY", "owpengram123"),
+		S3UseSSL:                      envBoolOr("TELESRV_S3_USE_SSL", false),
+		S3PathStyle:                   envBoolOr("TELESRV_S3_PATH_STYLE", true),
 		StorageLowSpaceGuardEnable:    envBoolOr("TELESRV_STORAGE_LOW_SPACE_GUARD_ENABLE", true),
 		StorageMinFreeBytes:           envInt64Or("TELESRV_STORAGE_MIN_FREE_BYTES", 1<<30),
 		StorageMaxTotalBytes:          envInt64Or("TELESRV_STORAGE_MAX_TOTAL_BYTES", 0),

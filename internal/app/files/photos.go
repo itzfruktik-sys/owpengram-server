@@ -1096,7 +1096,12 @@ func (s *Service) readSmallBlob(ctx context.Context, locationKey string, expecte
 	if !found || blob.Size <= 0 || blob.Size > avatarMarkupMaxSourceBytes {
 		return nil, false
 	}
-	data, total, err := s.blobs.GetRange(ctx, blob.ObjectKey, 0, blob.Size)
+	backend, err := s.backendFor(blob.Backend)
+	if err != nil {
+		s.log.Warn("resolve avatar markup blob backend failed", zap.String("location_key", locationKey), zap.Error(err))
+		return nil, false
+	}
+	data, total, err := backend.GetRange(ctx, blob.ObjectKey, 0, blob.Size)
 	if err != nil {
 		s.log.Warn("read avatar markup blob failed",
 			zap.String("location_key", locationKey),

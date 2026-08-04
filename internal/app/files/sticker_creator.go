@@ -404,7 +404,11 @@ func (s *Service) readStickerMaterialBlob(ctx context.Context, doc domain.Docume
 	if err != nil || !found || blob.Size <= 0 || blob.Size > domain.MaxStickerMaterialDocumentSize {
 		return nil, false
 	}
-	data, total, err := s.blobs.GetRange(ctx, blob.ObjectKey, 0, blob.Size)
+	backend, err := s.backendFor(blob.Backend)
+	if err != nil {
+		return nil, false
+	}
+	data, total, err := backend.GetRange(ctx, blob.ObjectKey, 0, blob.Size)
 	if err != nil || int64(len(data)) != total || total != blob.Size {
 		return nil, false
 	}
