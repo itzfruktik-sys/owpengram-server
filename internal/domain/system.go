@@ -48,18 +48,29 @@ const (
 	// migration 0153; the two must never drift.
 	VerifyBotAccessHash int64 = 7802113947355620887
 
-	// VerifierBotUserID is the built-in @verifierbot: the first THIRD-PARTY
+	// VerifierBotUserID is the built-in @marksbot: the first THIRD-PARTY
 	// verifier of a deployment (core.telegram.org/api/bots/verification). It
 	// collects applications for its own icon+description mark and reports the
 	// operator's decision back to the applicant. The id is reserved and stable, so
 	// a restart never re-creates the account under a different identity.
 	//
 	// It is not a second route to the platform checkmark: that badge is granted by
-	// the operator alone and collected by VerifyBotUserID above.
+	// the operator alone and collected by VerifyBotUserID above. Named "Marks Bot"
+	// rather than anything containing "Verif*" specifically so it can never be
+	// misread as a second copy of @verifybot -- the two front doors must stay
+	// visually distinct at a glance, not just distinct in the underlying mechanism.
 	VerifierBotUserID int64 = 1250000013
 	// VerifierBotAccessHash is fixed and double-written with the seed row in
 	// migration 0156; the two must never drift.
 	VerifierBotAccessHash int64 = 6913402578811563729
+	// VerifierBotDefaultIconDocumentID is the custom-emoji document (a ✅ from the
+	// default "Topics" emoji set, data/sticker-seed/telegram_emoji_export) reused
+	// as @marksbot's out-of-the-box icon, so the reference verifier has something
+	// to grant immediately after first boot instead of an empty catalogue. It is
+	// bundled media that the ordinary sticker-seed import already writes on every
+	// startup -- not a document minted specifically for this feature -- so it
+	// resolves the same way any other seeded custom emoji does.
+	VerifierBotDefaultIconDocumentID int64 = 5237699328843200968
 )
 
 // officialSystemUserPhotoDCID/Stripped 由 files.Service.SeedOfficialSystemAvatar
@@ -209,19 +220,24 @@ func VerifyBotUser() User {
 	}
 }
 
-// VerifierBotUser returns the built-in @verifierbot account.
+// VerifierBotUser returns the built-in @marksbot account.
 //
-// Verified is false on purpose: the official checkmark is the platform's own
-// mechanism, and a third-party verifier wearing it would blur exactly the
-// distinction this bot has to explain to every applicant. What makes the account a
-// verifier is the operator-granted BotVerifierSettings row, not this seed.
+// Verified is true: this deployment carries the platform checkmark on its own
+// service bots (see e.g. VerifyBotUser, BotFatherUser), and @marksbot is one of
+// them -- a legitimate first-party account, just one that happens to also grant
+// a *different*, third-party mark to other peers. The checkmark here says
+// "this account is who it claims to be", not "this account's grants are
+// official"; that distinction is what @marksbot's own messages explain to every
+// applicant, and it does not depend on this bot's own badge being off. What
+// makes the account a verifier at all is the operator-granted
+// BotVerifierSettings row, not this seed -- the two remain fully independent.
 func VerifierBotUser() User {
 	return User{
 		ID:             VerifierBotUserID,
 		AccessHash:     VerifierBotAccessHash,
-		FirstName:      "Verifier Bot",
-		Username:       "verifierbot",
-		Verified:       false,
+		FirstName:      "Marks Bot",
+		Username:       "marksbot",
+		Verified:       true,
 		Bot:            true,
 		BotInfoVersion: 1,
 	}

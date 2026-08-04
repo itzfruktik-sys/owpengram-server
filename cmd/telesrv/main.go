@@ -1223,9 +1223,14 @@ func run(logger *zap.Logger) error {
 		botverificationapp.WithMaxPerVerifier(cfg.BotVerificationMaxPerVerifier),
 		botverificationapp.WithLogger(logger.Named("app").Named("botverification")),
 	)
-	// @verifierbot files applications with the operator and reports decisions back.
+	// @marksbot files applications with the operator and reports decisions back.
 	botsService.SetCustomVerification(botVerificationService)
 	botVerificationService.SetApplicantNotifier(botsService)
+	if granted, err := botVerificationService.SeedDefaultVerifier(ctx); err != nil {
+		return fmt.Errorf("seed default verifier: %w", err)
+	} else if granted {
+		logger.Info("default verifier seed complete", zap.Int64("bot_id", domain.VerifierBotUserID))
+	}
 	updatesService := updates.NewService(updateStateStore, updateEventStore, updates.WithLogger(logger.Named("app").Named("updates")))
 	router := rpc.New(rpc.Config{
 		DC:                       cfg.DC,

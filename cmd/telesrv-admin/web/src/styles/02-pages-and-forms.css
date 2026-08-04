@@ -317,6 +317,26 @@
   text-align: center;
 }
 
+.emoji-picker-row {
+  grid-template-columns: 36px minmax(140px, 1fr) minmax(100px, 1fr);
+}
+
+.emoji-picker-glyph {
+  font-size: 22px;
+  line-height: 1;
+  text-align: center;
+}
+
+.emoji-picker-anim {
+  width: 28px;
+  height: 28px;
+}
+
+.emoji-picker-anim canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
 .picker-error {
   color: var(--danger);
   background: var(--danger-tint);

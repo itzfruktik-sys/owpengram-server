@@ -11,9 +11,8 @@ import { StickerSetPreviewModal } from "./StickerSetPreviewModal";
 type StickerPageSize = 10 | 20 | 50 | 100 | "all";
 
 // Shared list/manage view for one non-system sticker-set kind ("stickers" or
-// "emoji") — system packs (dice, animated emoji, premium/TON gifts, etc.) are
-// filtered out server-side and never reach this page; they aren't meant to be
-// hand-edited.
+// "emoji") — system packs (dice, animated emoji, gifts) aren't shown here,
+// they're not hand-edited.
 export function StickerSetsPage({ kind }: { kind: "stickers" | "emoji" }) {
   const [sets, setSets] = useState<StickerSetRow[]>([]);
   const [query, setQuery] = useState("");

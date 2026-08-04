@@ -18,6 +18,7 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 import { api, APIError, errorMessage } from "../api";
 import { ActionButton } from "../components/ActionButton";
+import { EmojiPicker } from "../components/EmojiPicker";
 import { BotPicker } from "../components/EntityPicker";
 import { Alert, Badge, EmptyRow, Metric, PageFrame, QueryPanel, SectionHead } from "../components/ui";
 import { displayUsername, formatDate } from "../lib/format";
@@ -623,17 +624,9 @@ function IconsBlock({
     <>
       {canManage && (
         <section className="section-block">
-          <SectionHead title={"Add or rename an icon"} text={"The document id has to name a real custom emoji document on this deployment; the Emoji section lists them with their ids. Adding an id that already exists renames it instead of duplicating it."} />
+          <SectionHead title={"Add or rename an icon"} text={"Search and pick any custom-emoji document already on this deployment (including bundled/system ones). Adding an id that already exists renames it instead of duplicating it."} />
+          <EmojiPicker label={"Document"} value={documentID} onChange={setDocumentID} />
           <div className="bot-create-fields">
-            <label className="duration-field">
-              <span>{"Document ID"}</span>
-              <input
-                value={documentID}
-                onChange={(event) => setDocumentID(event.target.value)}
-                inputMode="numeric"
-                placeholder="5361371319611781774"
-              />
-            </label>
             <label className="duration-field">
               <span>{"Name"}</span>
               <input
