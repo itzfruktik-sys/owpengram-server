@@ -168,6 +168,16 @@ func (f *fakeMediaStore) GetFileBlobs(_ context.Context, keys []string) (map[str
 	return out, nil
 }
 
+func (f *fakeMediaStore) SumFileBlobBytes(_ context.Context) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var total int64
+	for _, b := range f.blobs {
+		total += b.Size
+	}
+	return total, nil
+}
+
 func (f *fakeMediaStore) GetSeedState(_ context.Context, key string) (string, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

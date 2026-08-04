@@ -63,7 +63,7 @@ func (s *Service) CreatePhotoFromUpload(ctx context.Context, file domain.Uploade
 	if len(data) == 0 {
 		return domain.Photo{}, domain.ErrPhotoInvalid
 	}
-	photo, err := s.createPhoto(ctx, data, photoSizeSpecsForMessage(data))
+	photo, err := s.createPhoto(ctx, data, photoSizeSpecsForMessage(data), file.OwnerUserID)
 	if err != nil {
 		return domain.Photo{}, err
 	}
@@ -86,11 +86,13 @@ func (s *Service) CreatePhotoFromUpload(ctx context.Context, file domain.Uploade
 }
 
 // CreatePhotoFromBytes stores already-fetched image bytes as a message Photo.
+// There is no uploader (e.g. a server-fetched webpage preview image), so the
+// photo is attributed to the system (owner_user_id 0) for storage accounting.
 func (s *Service) CreatePhotoFromBytes(ctx context.Context, data []byte) (domain.Photo, error) {
 	if len(data) == 0 {
 		return domain.Photo{}, domain.ErrPhotoInvalid
 	}
-	return s.createPhoto(ctx, data, photoSizeSpecsForMessage(data))
+	return s.createPhoto(ctx, data, photoSizeSpecsForMessage(data), 0)
 }
 
 // GetPhoto 按 id 返回已存储照片。
@@ -148,7 +150,7 @@ func (s *Service) CreateAvatarFromUpload(ctx context.Context, file domain.Upload
 	if len(data) == 0 {
 		return domain.Photo{}, domain.ErrPhotoInvalid
 	}
-	return s.createAvatarPhoto(ctx, data)
+	return s.createAvatarPhoto(ctx, data, file.OwnerUserID)
 }
 
 // CreateAvatarVideoFromUpload stores an animated profile video as photo.video_sizes.
@@ -206,6 +208,7 @@ func (s *Service) createAvatarVideoFromUpload(ctx context.Context, file domain.U
 		Date:          int(time.Now().Unix()),
 		DCID:          s.dc,
 		Sizes:         sizes,
+		OwnerUserID:   file.OwnerUserID,
 	}
 	if err := s.media.PutPhoto(ctx, photo); err != nil {
 		return domain.Photo{}, err
@@ -306,6 +309,7 @@ func (s *Service) CreateDocumentFromUpload(ctx context.Context, file domain.Uplo
 		Size:          body.Size,
 		DCID:          s.dc,
 		Attributes:    spec.Attributes,
+		OwnerUserID:   file.OwnerUserID,
 	}
 	thumbMaterialized := false
 	if spec.Thumb != nil {
@@ -620,7 +624,7 @@ func (s *Service) DeleteProfilePhotosKind(ctx context.Context, ownerType domain.
 }
 
 // createPhoto 把字节落 blob（每个尺寸一个 location_key，指向同一内容）并写 photos 表。
-func (s *Service) createPhoto(ctx context.Context, data []byte, specs []photoSizeSpec) (domain.Photo, error) {
+func (s *Service) createPhoto(ctx context.Context, data []byte, specs []photoSizeSpec, ownerUserID int64) (domain.Photo, error) {
 	photoID := randomID()
 	sizes, err := s.putPhotoStaticSizes(ctx, photoID, data, specs)
 	if err != nil {
@@ -633,6 +637,7 @@ func (s *Service) createPhoto(ctx context.Context, data []byte, specs []photoSiz
 		Date:          int(time.Now().Unix()),
 		DCID:          s.dc,
 		Sizes:         sizes,
+		OwnerUserID:   ownerUserID,
 	}
 	if err := s.media.PutPhoto(ctx, photo); err != nil {
 		return domain.Photo{}, err
@@ -640,7 +645,7 @@ func (s *Service) createPhoto(ctx context.Context, data []byte, specs []photoSiz
 	return photo, nil
 }
 
-func (s *Service) createAvatarPhoto(ctx context.Context, data []byte) (domain.Photo, error) {
+func (s *Service) createAvatarPhoto(ctx context.Context, data []byte, ownerUserID int64) (domain.Photo, error) {
 	photoID := randomID()
 	sizes, err := s.putAvatarStaticSizes(ctx, photoID, data, photoSizeSpecsForAvatar(data))
 	if err != nil {
@@ -653,6 +658,7 @@ func (s *Service) createAvatarPhoto(ctx context.Context, data []byte) (domain.Ph
 		Date:          int(time.Now().Unix()),
 		DCID:          s.dc,
 		Sizes:         sizes,
+		OwnerUserID:   ownerUserID,
 	}
 	if err := s.media.PutPhoto(ctx, photo); err != nil {
 		return domain.Photo{}, err

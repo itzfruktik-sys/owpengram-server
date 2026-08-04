@@ -19,6 +19,7 @@ import { StickerSetsPage } from "./StickerSetsPage";
 import { GiveGiftsPage } from "./GiveGiftsPage";
 import { ModerationCaseDetailPage } from "./ModerationCaseDetailPage";
 import { ModerationCasesPage } from "./ModerationCasesPage";
+import { StoragePage } from "./StoragePage";
 import { BotVerificationPage } from "./BotVerificationPage";
 import { BotVerificationRequestPage } from "./BotVerificationRequestPage";
 import { VerificationDetailPage } from "./VerificationDetailPage";
@@ -83,6 +84,9 @@ export function Routes({ route, navigate }: { route: RouteState; navigate: Navig
   }
   if (route.path === "/account-ratings") {
     return <AccountRatingsPage navigate={navigate} />;
+  }
+  if (route.path === "/storage") {
+    return <StoragePage navigate={navigate} />;
   }
   if (accountID) {
     return <AccountDetailPage id={Number(accountID)} navigate={navigate} />;

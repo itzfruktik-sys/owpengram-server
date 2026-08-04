@@ -18,6 +18,8 @@ type MediaBackend string
 const (
 	// MediaBackendLocalFS 表示 blob 字节存在本地磁盘（object_key 为相对路径）。
 	MediaBackendLocalFS MediaBackend = "localfs"
+	// MediaBackendS3 表示 blob 字节存在 S3 兼容对象存储（MinIO 或 AWS S3）。
+	MediaBackendS3 MediaBackend = "s3"
 )
 
 // FileBlob 是一个可下载的二进制对象的索引项：location_key → 后端/对象键/大小/mime。
@@ -233,6 +235,10 @@ type Document struct {
 	DCID          int                 `json:"dc_id,omitempty"`
 	Attributes    []DocumentAttribute `json:"attributes,omitempty"`
 	Thumbs        []PhotoSize         `json:"thumbs,omitempty"`
+	// OwnerUserID is who uploaded this document; 0 for rows predating storage
+	// accounting or for system-originated documents. Used for per-account
+	// storage usage reporting, not part of the tg wire protocol.
+	OwnerUserID int64 `json:"owner_user_id,omitempty"`
 }
 
 // StickerSetRef 返回该文档归属的贴纸集引用（若有 sticker/custom_emoji 属性）。
@@ -384,6 +390,9 @@ type Photo struct {
 	DCID          int         `json:"dc_id,omitempty"`
 	HasStickers   bool        `json:"has_stickers,omitempty"`
 	Sizes         []PhotoSize `json:"sizes,omitempty"`
+	// OwnerUserID is who uploaded this photo; 0 for rows predating storage
+	// accounting or for system-originated photos (e.g. webpage previews).
+	OwnerUserID int64 `json:"owner_user_id,omitempty"`
 }
 
 func ClonePhotoPtr(photo *Photo) *Photo {

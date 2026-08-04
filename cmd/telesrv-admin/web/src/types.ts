@@ -789,6 +789,30 @@ export type AccountStatsResponse = {
   online: number;
 };
 
+export type StorageStatsResponse = {
+  PhysicalBytes: string;
+  LogicalBytes: string;
+  UnattributedBytes: string;
+  DocumentCount: string;
+  PhotoCount: string;
+  AccountCount: string;
+  BackendKind: string;
+};
+
+export type AccountStorageRow = {
+  UserID: string;
+  Username: string;
+  FirstName: string;
+  Bytes: string;
+  FileCount: string;
+};
+
+export type AccountStorageListResponse = {
+  rows: AccountStorageRow[] | null;
+  has_more: boolean;
+  next_offset: number;
+};
+
 export type ChannelListResponse = {
   query: string;
   limit: number;

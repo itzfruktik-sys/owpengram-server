@@ -118,6 +118,7 @@ type RetentionWorker struct {
 	orphanAuthKeys              OrphanAuthKeyRetentionStore
 	activeAuthKeys              ActiveRawAuthKeyProvider
 	activeAuthKeyHeartbeat      ActiveAuthKeyHeartbeatStore
+	orphanedMedia               OrphanedMediaRetentionStore
 	logger                      *zap.Logger
 	retention                   time.Duration
 	botAPIRetention             time.Duration
@@ -126,6 +127,7 @@ type RetentionWorker struct {
 	authDeliveryReportRetention time.Duration
 	outboxPoisonRetention       time.Duration
 	outboxPoisonInterval        time.Duration
+	orphanedMediaMaxAge         time.Duration
 	interval                    time.Duration
 	batch                       int
 }
@@ -410,6 +412,17 @@ func (w *RetentionWorker) runRetentionOnce(ctx context.Context) {
 			)
 		} else if channelDeleted > 0 {
 			w.logger.Info("expired channel_update_events contiguous-prefix cleanup complete", zap.Int("deleted", channelDeleted))
+		}
+	}
+	if w.orphanedMedia != nil && w.orphanedMediaMaxAge > 0 {
+		// Only ever touches documents/photos already marked orphaned (no live
+		// message/profile-photo/sticker-set reference remains) -- media still
+		// visible in a conversation is never a candidate, regardless of age.
+		mediaDeleted, err := w.orphanedMedia.DeleteOrphanedOlderThan(ctx, time.Now().Add(-w.orphanedMediaMaxAge), w.batch)
+		if err != nil {
+			w.logger.Warn("orphaned media storage retention sweep failed", zap.Error(err))
+		} else if mediaDeleted > 0 {
+			w.logger.Info("orphaned media storage retention sweep complete", zap.Int("deleted", mediaDeleted))
 		}
 	}
 }

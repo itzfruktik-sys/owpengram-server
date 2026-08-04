@@ -11,4 +11,8 @@ var (
 	ErrUploadQuotaExceeded = errors.New("upload quota exceeded")
 	ErrPhotoInvalid        = errors.New("photo invalid")
 	ErrDocumentInvalid     = errors.New("document invalid")
+	// ErrStorageFull is returned when the configured low-space guard rejects a
+	// write: local disk free bytes (or, on the s3 backend, the configured
+	// total-bytes budget) has fallen below the configured threshold.
+	ErrStorageFull = errors.New("storage full")
 )

@@ -30,6 +30,10 @@ type MediaStore interface {
 	// GetFileBlobs 批量按 location_key 取 FileBlob 元数据（缺失的 key 不出现在返回 map 中）。
 	// 供启动预热等需一次性加载大量 blob 的路径，替代逐个 GetFileBlob 的 N+1 往返。
 	GetFileBlobs(ctx context.Context, locationKeys []string) (map[string]domain.FileBlob, error)
+	// SumFileBlobBytes 返回全部 blob 的物理字节总量（去重后，同内容只算一次）。
+	// 供低磁盘空间守卫的周期性用量刷新使用（尤其是 s3 backend 的预算模式，没有
+	// 操作系统级"剩余空间"概念，只能靠这个累计值和配置的预算比较）。
+	SumFileBlobBytes(ctx context.Context) (int64, error)
 
 	// seed 状态。只记录静态资源 catalog 的内容 hash，用于启动时跳过未变化的重复导入；
 	// 真实可服务性仍由 documents/file_blobs 校验保证，不能只相信这里的 hash。

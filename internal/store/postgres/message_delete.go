@@ -174,6 +174,11 @@ func (s *MessageStore) finishDeleteMessagesTx(ctx context.Context, db sqlcgen.DB
 		if row.ownerUserID == 0 || row.boxID == 0 {
 			continue
 		}
+		// Drop this box's media_references (storage GC); orphans the
+		// document/photo if this was its last live reference anywhere.
+		if err := removeMediaReferencesByKeyTx(ctx, db, domain.MediaRefKindMessageBox, messageBoxRefKey(row.ownerUserID, row.boxID)); err != nil {
+			return res, fmt.Errorf("remove deleted message media references: %w", err)
+		}
 		idsByOwner[row.ownerUserID] = append(idsByOwner[row.ownerUserID], row.boxID)
 		if row.peer.ID != 0 {
 			if peersByOwner[row.ownerUserID] == nil {

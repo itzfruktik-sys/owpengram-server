@@ -48,6 +48,26 @@ func (q *Queries) AddProfilePhoto(ctx context.Context, arg AddProfilePhotoParams
 	return err
 }
 
+const clearDocumentOrphan = `-- name: ClearDocumentOrphan :exec
+UPDATE documents SET orphaned_at = NULL
+WHERE id = $1::bigint AND orphaned_at IS NOT NULL
+`
+
+func (q *Queries) ClearDocumentOrphan(ctx context.Context, mediaID int64) error {
+	_, err := q.db.Exec(ctx, clearDocumentOrphan, mediaID)
+	return err
+}
+
+const clearPhotoOrphan = `-- name: ClearPhotoOrphan :exec
+UPDATE photos SET orphaned_at = NULL
+WHERE id = $1::bigint AND orphaned_at IS NOT NULL
+`
+
+func (q *Queries) ClearPhotoOrphan(ctx context.Context, mediaID int64) error {
+	_, err := q.db.Exec(ctx, clearPhotoOrphan, mediaID)
+	return err
+}
+
 const countAvailableReactions = `-- name: CountAvailableReactions :one
 SELECT count(*)::int AS total FROM available_reactions
 `
@@ -57,6 +77,22 @@ func (q *Queries) CountAvailableReactions(ctx context.Context) (int32, error) {
 	var total int32
 	err := row.Scan(&total)
 	return total, err
+}
+
+const countFileBlobRefs = `-- name: CountFileBlobRefs :one
+SELECT COUNT(*)::int FROM file_blobs WHERE backend = $1::text AND object_key = $2::text
+`
+
+type CountFileBlobRefsParams struct {
+	Backend   string
+	ObjectKey string
+}
+
+func (q *Queries) CountFileBlobRefs(ctx context.Context, arg CountFileBlobRefsParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countFileBlobRefs, arg.Backend, arg.ObjectKey)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const countProfilePhotos = `-- name: CountProfilePhotos :one
@@ -199,6 +235,15 @@ func (q *Queries) DeactivateProfilePhotos(ctx context.Context, arg DeactivatePro
 	return items, nil
 }
 
+const deleteDocumentRow = `-- name: DeleteDocumentRow :exec
+DELETE FROM documents WHERE id = $1::bigint
+`
+
+func (q *Queries) DeleteDocumentRow(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteDocumentRow, id)
+	return err
+}
+
 const deleteExpiredUploadParts = `-- name: DeleteExpiredUploadParts :many
 WITH doomed AS (
   SELECT owner_user_id, file_id, part
@@ -240,6 +285,24 @@ func (q *Queries) DeleteExpiredUploadParts(ctx context.Context, arg DeleteExpire
 	return items, nil
 }
 
+const deleteFileBlobRow = `-- name: DeleteFileBlobRow :exec
+DELETE FROM file_blobs WHERE location_key = $1::text
+`
+
+func (q *Queries) DeleteFileBlobRow(ctx context.Context, locationKey string) error {
+	_, err := q.db.Exec(ctx, deleteFileBlobRow, locationKey)
+	return err
+}
+
+const deletePhotoRow = `-- name: DeletePhotoRow :exec
+DELETE FROM photos WHERE id = $1::bigint
+`
+
+func (q *Queries) DeletePhotoRow(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deletePhotoRow, id)
+	return err
+}
+
 const deleteUploadParts = `-- name: DeleteUploadParts :many
 DELETE FROM upload_parts
 WHERE owner_user_id = $1::bigint
@@ -275,7 +338,8 @@ func (q *Queries) DeleteUploadParts(ctx context.Context, arg DeleteUploadPartsPa
 const getDocument = `-- name: GetDocument :one
 SELECT id, access_hash, file_reference, date, mime_type, size, dc_id,
   attributes::text AS attributes_json,
-  thumbs::text AS thumbs_json
+  thumbs::text AS thumbs_json,
+  owner_user_id
 FROM documents
 WHERE id = $1::bigint
 `
@@ -290,6 +354,7 @@ type GetDocumentRow struct {
 	DcID           int32
 	AttributesJson string
 	ThumbsJson     string
+	OwnerUserID    int64
 }
 
 func (q *Queries) GetDocument(ctx context.Context, id int64) (GetDocumentRow, error) {
@@ -305,6 +370,7 @@ func (q *Queries) GetDocument(ctx context.Context, id int64) (GetDocumentRow, er
 		&i.DcID,
 		&i.AttributesJson,
 		&i.ThumbsJson,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -312,7 +378,8 @@ func (q *Queries) GetDocument(ctx context.Context, id int64) (GetDocumentRow, er
 const getDocuments = `-- name: GetDocuments :many
 SELECT id, access_hash, file_reference, date, mime_type, size, dc_id,
   attributes::text AS attributes_json,
-  thumbs::text AS thumbs_json
+  thumbs::text AS thumbs_json,
+  owner_user_id
 FROM documents
 WHERE id = ANY($1::bigint[])
 `
@@ -327,6 +394,7 @@ type GetDocumentsRow struct {
 	DcID           int32
 	AttributesJson string
 	ThumbsJson     string
+	OwnerUserID    int64
 }
 
 func (q *Queries) GetDocuments(ctx context.Context, ids []int64) ([]GetDocumentsRow, error) {
@@ -348,6 +416,7 @@ func (q *Queries) GetDocuments(ctx context.Context, ids []int64) ([]GetDocuments
 			&i.DcID,
 			&i.AttributesJson,
 			&i.ThumbsJson,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -390,7 +459,8 @@ func (q *Queries) GetFileBlob(ctx context.Context, locationKey string) (GetFileB
 
 const getPhoto = `-- name: GetPhoto :one
 SELECT id, access_hash, file_reference, date, dc_id, has_stickers,
-  sizes::text AS sizes_json
+  sizes::text AS sizes_json,
+  owner_user_id
 FROM photos
 WHERE id = $1::bigint
 `
@@ -403,6 +473,7 @@ type GetPhotoRow struct {
 	DcID          int32
 	HasStickers   bool
 	SizesJson     string
+	OwnerUserID   int64
 }
 
 func (q *Queries) GetPhoto(ctx context.Context, id int64) (GetPhotoRow, error) {
@@ -416,6 +487,7 @@ func (q *Queries) GetPhoto(ctx context.Context, id int64) (GetPhotoRow, error) {
 		&i.DcID,
 		&i.HasStickers,
 		&i.SizesJson,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -686,6 +758,31 @@ func (q *Queries) GetUploadPartUsage(ctx context.Context, ownerUserID int64) (Ge
 	return i, err
 }
 
+const insertMediaReference = `-- name: InsertMediaReference :exec
+
+INSERT INTO media_references (media_kind, media_id, ref_kind, ref_key)
+VALUES ($1::text, $2::bigint, $3::text, $4::text)
+ON CONFLICT DO NOTHING
+`
+
+type InsertMediaReferenceParams struct {
+	MediaKind string
+	MediaID   int64
+	RefKind   string
+	RefKey    string
+}
+
+// media_references / storage retention -----------------------------------------
+func (q *Queries) InsertMediaReference(ctx context.Context, arg InsertMediaReferenceParams) error {
+	_, err := q.db.Exec(ctx, insertMediaReference,
+		arg.MediaKind,
+		arg.MediaID,
+		arg.RefKind,
+		arg.RefKey,
+	)
+	return err
+}
+
 const listAvailableReactions = `-- name: ListAvailableReactions :many
 SELECT
   reaction, title, inactive, premium,
@@ -721,6 +818,118 @@ func (q *Queries) ListAvailableReactions(ctx context.Context) ([]AvailableReacti
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFileBlobsByLocationPrefix = `-- name: ListFileBlobsByLocationPrefix :many
+SELECT location_key, backend, object_key, size
+FROM file_blobs
+WHERE location_key = $1::text
+   OR location_key LIKE $2::text
+`
+
+type ListFileBlobsByLocationPrefixParams struct {
+	ExactKey      string
+	PrefixPattern string
+}
+
+type ListFileBlobsByLocationPrefixRow struct {
+	LocationKey string
+	Backend     string
+	ObjectKey   string
+	Size        int64
+}
+
+// Matches a media's main blob (exact_key, e.g. "doc:123") plus every
+// variant keyed off it (prefix_pattern, e.g. "doc:123:%" for thumbnails /
+// "photo:456:%" for each rendition size) -- a document/photo can own
+// multiple file_blobs rows.
+func (q *Queries) ListFileBlobsByLocationPrefix(ctx context.Context, arg ListFileBlobsByLocationPrefixParams) ([]ListFileBlobsByLocationPrefixRow, error) {
+	rows, err := q.db.Query(ctx, listFileBlobsByLocationPrefix, arg.ExactKey, arg.PrefixPattern)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFileBlobsByLocationPrefixRow
+	for rows.Next() {
+		var i ListFileBlobsByLocationPrefixRow
+		if err := rows.Scan(
+			&i.LocationKey,
+			&i.Backend,
+			&i.ObjectKey,
+			&i.Size,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrphanedDocumentIDsOlderThan = `-- name: ListOrphanedDocumentIDsOlderThan :many
+SELECT id FROM documents
+WHERE orphaned_at IS NOT NULL AND orphaned_at < $1::timestamptz
+ORDER BY orphaned_at ASC
+LIMIT $2::int
+`
+
+type ListOrphanedDocumentIDsOlderThanParams struct {
+	Cutoff     pgtype.Timestamptz
+	BatchLimit int32
+}
+
+func (q *Queries) ListOrphanedDocumentIDsOlderThan(ctx context.Context, arg ListOrphanedDocumentIDsOlderThanParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listOrphanedDocumentIDsOlderThan, arg.Cutoff, arg.BatchLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrphanedPhotoIDsOlderThan = `-- name: ListOrphanedPhotoIDsOlderThan :many
+SELECT id FROM photos
+WHERE orphaned_at IS NOT NULL AND orphaned_at < $1::timestamptz
+ORDER BY orphaned_at ASC
+LIMIT $2::int
+`
+
+type ListOrphanedPhotoIDsOlderThanParams struct {
+	Cutoff     pgtype.Timestamptz
+	BatchLimit int32
+}
+
+func (q *Queries) ListOrphanedPhotoIDsOlderThan(ctx context.Context, arg ListOrphanedPhotoIDsOlderThanParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listOrphanedPhotoIDsOlderThan, arg.Cutoff, arg.BatchLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -925,6 +1134,34 @@ func (q *Queries) NextProfilePhotoOrder(ctx context.Context, arg NextProfilePhot
 	return max_order, err
 }
 
+const orphanDocumentIfUnreferenced = `-- name: OrphanDocumentIfUnreferenced :exec
+UPDATE documents SET orphaned_at = now()
+WHERE id = $1::bigint
+  AND orphaned_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM media_references WHERE media_kind = 'document' AND media_id = $1::bigint
+  )
+`
+
+func (q *Queries) OrphanDocumentIfUnreferenced(ctx context.Context, mediaID int64) error {
+	_, err := q.db.Exec(ctx, orphanDocumentIfUnreferenced, mediaID)
+	return err
+}
+
+const orphanPhotoIfUnreferenced = `-- name: OrphanPhotoIfUnreferenced :exec
+UPDATE photos SET orphaned_at = now()
+WHERE id = $1::bigint
+  AND orphaned_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM media_references WHERE media_kind = 'photo' AND media_id = $1::bigint
+  )
+`
+
+func (q *Queries) OrphanPhotoIfUnreferenced(ctx context.Context, mediaID int64) error {
+	_, err := q.db.Exec(ctx, orphanPhotoIfUnreferenced, mediaID)
+	return err
+}
+
 const putAvailableReaction = `-- name: PutAvailableReaction :exec
 
 INSERT INTO available_reactions (
@@ -995,7 +1232,7 @@ func (q *Queries) PutAvailableReaction(ctx context.Context, arg PutAvailableReac
 
 const putDocument = `-- name: PutDocument :exec
 
-INSERT INTO documents (id, access_hash, file_reference, date, mime_type, size, dc_id, attributes, thumbs)
+INSERT INTO documents (id, access_hash, file_reference, date, mime_type, size, dc_id, attributes, thumbs, owner_user_id)
 VALUES (
   $1::bigint,
   $2::bigint,
@@ -1005,7 +1242,8 @@ VALUES (
   $6::bigint,
   $7::int,
   $8::jsonb,
-  $9::jsonb
+  $9::jsonb,
+  $10::bigint
 )
 ON CONFLICT (id) DO UPDATE SET
   access_hash = EXCLUDED.access_hash,
@@ -1028,9 +1266,14 @@ type PutDocumentParams struct {
 	DcID           int32
 	AttributesJson []byte
 	ThumbsJson     []byte
+	OwnerUserID    int64
 }
 
 // documents -------------------------------------------------------------------
+// owner_user_id is intentionally NOT in the UPDATE SET list: a document id is
+// only ever (re-)upserted by its original uploader's own request replay, and
+// keeping the first-write owner sticky avoids any risk of a later call
+// (e.g. a forward re-touching the row) reassigning ownership.
 func (q *Queries) PutDocument(ctx context.Context, arg PutDocumentParams) error {
 	_, err := q.db.Exec(ctx, putDocument,
 		arg.ID,
@@ -1042,6 +1285,7 @@ func (q *Queries) PutDocument(ctx context.Context, arg PutDocumentParams) error 
 		arg.DcID,
 		arg.AttributesJson,
 		arg.ThumbsJson,
+		arg.OwnerUserID,
 	)
 	return err
 }
@@ -1089,7 +1333,7 @@ func (q *Queries) PutFileBlob(ctx context.Context, arg PutFileBlobParams) error 
 
 const putPhoto = `-- name: PutPhoto :exec
 
-INSERT INTO photos (id, access_hash, file_reference, date, dc_id, has_stickers, sizes)
+INSERT INTO photos (id, access_hash, file_reference, date, dc_id, has_stickers, sizes, owner_user_id)
 VALUES (
   $1::bigint,
   $2::bigint,
@@ -1097,7 +1341,8 @@ VALUES (
   $4::int,
   $5::int,
   $6::boolean,
-  $7::jsonb
+  $7::jsonb,
+  $8::bigint
 )
 ON CONFLICT (id) DO UPDATE SET
   access_hash = EXCLUDED.access_hash,
@@ -1116,9 +1361,11 @@ type PutPhotoParams struct {
 	DcID          int32
 	HasStickers   bool
 	SizesJson     []byte
+	OwnerUserID   int64
 }
 
 // photos ----------------------------------------------------------------------
+// owner_user_id intentionally not updated on conflict, see PutDocument.
 func (q *Queries) PutPhoto(ctx context.Context, arg PutPhotoParams) error {
 	_, err := q.db.Exec(ctx, putPhoto,
 		arg.ID,
@@ -1128,6 +1375,7 @@ func (q *Queries) PutPhoto(ctx context.Context, arg PutPhotoParams) error {
 		arg.DcID,
 		arg.HasStickers,
 		arg.SizesJson,
+		arg.OwnerUserID,
 	)
 	return err
 }
@@ -1244,6 +1492,31 @@ func (q *Queries) PutStickerSet(ctx context.Context, arg PutStickerSetParams) er
 	return err
 }
 
+const removeMediaReference = `-- name: RemoveMediaReference :exec
+DELETE FROM media_references
+WHERE media_kind = $1::text
+  AND media_id = $2::bigint
+  AND ref_kind = $3::text
+  AND ref_key = $4::text
+`
+
+type RemoveMediaReferenceParams struct {
+	MediaKind string
+	MediaID   int64
+	RefKind   string
+	RefKey    string
+}
+
+func (q *Queries) RemoveMediaReference(ctx context.Context, arg RemoveMediaReferenceParams) error {
+	_, err := q.db.Exec(ctx, removeMediaReference,
+		arg.MediaKind,
+		arg.MediaID,
+		arg.RefKind,
+		arg.RefKey,
+	)
+	return err
+}
+
 const saveUploadPart = `-- name: SaveUploadPart :exec
 
 INSERT INTO upload_parts (owner_user_id, file_id, part, total_parts, is_big, backend, object_key, size, sha256)
@@ -1294,4 +1567,19 @@ func (q *Queries) SaveUploadPart(ctx context.Context, arg SaveUploadPartParams) 
 		arg.Sha256,
 	)
 	return err
+}
+
+const sumFileBlobBytes = `-- name: SumFileBlobBytes :one
+SELECT COALESCE(SUM(size), 0)::bigint FROM file_blobs
+`
+
+// Physical bytes actually held by the blob backend (dedup-aware: identical
+// content uploaded by different users is one row here). Used by the
+// low-space guard's cached usage gauge and the admin panel's "physical
+// usage" stat.
+func (q *Queries) SumFileBlobBytes(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, sumFileBlobBytes)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }

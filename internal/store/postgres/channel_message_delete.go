@@ -479,6 +479,11 @@ ORDER BY id`, channel.ID, id32)
 			// 删除入口统一静默跳过（官方客户端对它禁用删除）。
 			continue
 		}
+		// Drop this message's media_references (storage GC); orphans the
+		// document/photo if this was its last live reference anywhere.
+		if err := removeMediaReferencesByKeyTx(ctx, tx, domain.MediaRefKindChannelMessage, channelMessageRefKey(channel.ID, id)); err != nil {
+			return nil, domain.ChannelUpdateEvent{}, channel, fmt.Errorf("remove deleted channel message media references: %w", err)
+		}
 		deleted = append(deleted, id)
 		if err := s.insertChannelAdminLogTx(ctx, tx, domain.ChannelAdminLogEvent{
 			ChannelID: channel.ID,

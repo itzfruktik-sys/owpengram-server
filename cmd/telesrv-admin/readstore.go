@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -2540,4 +2541,134 @@ func clampBotVerificationLimit(limit int) int {
 		return botVerificationListMaxLimit
 	}
 	return limit
+}
+
+// storageUsageListDefaultLimit/storageUsageListMaxLimit bound the per-account
+// storage breakdown page, same convention as the account rating list above.
+const (
+	storageUsageListDefaultLimit = 50
+	storageUsageListMaxLimit     = 200
+)
+
+// perOwnerMediaSizeSQL is shared between StorageStats and
+// ListAccountStorageUsage: each document row's size is its stored column;
+// each photo row has no single size column (JSONB sizes holds one entry per
+// rendition), so its "attributed size" is the largest rendition -- the
+// dominant cost, thumbnails are comparatively tiny. This is an
+// approximation (not the exact sum of every rendition's blob bytes, which
+// would require joining file_blobs by location_key prefix) chosen for admin
+// visibility, not billing precision.
+const perOwnerMediaSizeSQL = `
+SELECT owner_user_id, size FROM documents
+UNION ALL
+SELECT p.owner_user_id, COALESCE((
+    SELECT MAX((elem->>'size')::bigint) FROM jsonb_array_elements(p.sizes) elem
+), 0) AS size
+FROM photos p
+`
+
+// StorageStatsRow is the admin panel's storage overview: physical bytes
+// (from file_blobs, backend-dedup-aware -- what's actually consuming disk
+// or S3) versus logical bytes (sum of the same approximate per-row
+// attribution the per-account breakdown uses, which can legitimately be
+// higher than physical when identical content is shared by more than one
+// document/photo).
+type StorageStatsRow struct {
+	PhysicalBytes     int64 `json:"PhysicalBytes,string"`
+	LogicalBytes      int64 `json:"LogicalBytes,string"`
+	UnattributedBytes int64 `json:"UnattributedBytes,string"`
+	DocumentCount     int64 `json:"DocumentCount,string"`
+	PhotoCount        int64 `json:"PhotoCount,string"`
+	AccountCount      int64 `json:"AccountCount,string"`
+	BackendKind       string
+}
+
+// StorageStats returns the admin panel's storage overview.
+func (s *readStore) StorageStats(ctx context.Context) (StorageStatsRow, error) {
+	var stats StorageStatsRow
+	if err := s.pool.QueryRow(ctx, `SELECT COALESCE(SUM(size), 0)::bigint FROM file_blobs`).Scan(&stats.PhysicalBytes); err != nil {
+		return StorageStatsRow{}, fmt.Errorf("sum physical blob bytes: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, `
+SELECT COALESCE(SUM(size), 0)::bigint FROM (`+perOwnerMediaSizeSQL+`) x`).Scan(&stats.LogicalBytes); err != nil {
+		return StorageStatsRow{}, fmt.Errorf("sum logical media bytes: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, `
+SELECT COALESCE(SUM(size), 0)::bigint FROM (`+perOwnerMediaSizeSQL+`) x WHERE owner_user_id = 0`).Scan(&stats.UnattributedBytes); err != nil {
+		return StorageStatsRow{}, fmt.Errorf("sum unattributed media bytes: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, `SELECT count(*)::bigint FROM documents`).Scan(&stats.DocumentCount); err != nil {
+		return StorageStatsRow{}, fmt.Errorf("count documents: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, `SELECT count(*)::bigint FROM photos`).Scan(&stats.PhotoCount); err != nil {
+		return StorageStatsRow{}, fmt.Errorf("count photos: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, `
+SELECT count(DISTINCT owner_user_id)::bigint FROM (`+perOwnerMediaSizeSQL+`) x WHERE owner_user_id <> 0`).Scan(&stats.AccountCount); err != nil {
+		return StorageStatsRow{}, fmt.Errorf("count storage accounts: %w", err)
+	}
+	stats.BackendKind = strings.ToLower(strings.TrimSpace(os.Getenv("TELESRV_BLOB_BACKEND")))
+	if stats.BackendKind == "" {
+		stats.BackendKind = "localfs"
+	}
+	return stats, nil
+}
+
+// AccountStorageRow is one account's row in the per-account storage
+// breakdown table.
+type AccountStorageRow struct {
+	UserID    int64  `json:"UserID,string"`
+	Username  string
+	FirstName string
+	Bytes     int64 `json:"Bytes,string"`
+	FileCount int64 `json:"FileCount,string"`
+}
+
+// ListAccountStorageUsage pages the per-account storage breakdown, largest
+// user first. Offset-based (not keyset): storage administration on a
+// self-hosted deployment doesn't need to support arbitrarily deep pages
+// efficiently the way an infinite-scroll feed does.
+func (s *readStore) ListAccountStorageUsage(ctx context.Context, offset, limit int) ([]AccountStorageRow, bool, error) {
+	if limit <= 0 {
+		limit = storageUsageListDefaultLimit
+	}
+	if limit > storageUsageListMaxLimit {
+		limit = storageUsageListMaxLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := s.pool.Query(ctx, `
+WITH totals AS (
+    SELECT owner_user_id, SUM(size)::bigint AS bytes, COUNT(*)::bigint AS file_count
+    FROM (`+perOwnerMediaSizeSQL+`) x
+    WHERE owner_user_id <> 0
+    GROUP BY owner_user_id
+)
+SELECT t.owner_user_id, COALESCE(u.username, ''), COALESCE(u.first_name, ''), t.bytes, t.file_count
+FROM totals t
+LEFT JOIN users u ON u.id = t.owner_user_id
+ORDER BY t.bytes DESC, t.owner_user_id
+OFFSET $1
+LIMIT $2`, offset, limit+1)
+	if err != nil {
+		return nil, false, fmt.Errorf("list account storage usage: %w", err)
+	}
+	defer rows.Close()
+	out := make([]AccountStorageRow, 0, limit+1)
+	for rows.Next() {
+		var item AccountStorageRow
+		if err := rows.Scan(&item.UserID, &item.Username, &item.FirstName, &item.Bytes, &item.FileCount); err != nil {
+			return nil, false, err
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	hasMore := len(out) > limit
+	if hasMore {
+		out = out[:limit]
+	}
+	return out, hasMore, nil
 }

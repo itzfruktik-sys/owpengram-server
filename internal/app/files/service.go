@@ -64,6 +64,7 @@ type Service struct {
 	stickerSetCache    *stickerSetFullCache
 	stickerSetNegCache *stickerSetNegativeCache
 	uploadQuota        domain.UploadPartQuota
+	spaceGuard         SpaceGuard
 	mapTiles           *mapTileProxy
 	externalMedia      *externalMediaFetcher
 	webpage            *webpageFetcher
@@ -116,6 +117,30 @@ func WithUploadPartQuota(quota domain.UploadPartQuota) Option {
 	}
 }
 
+// WithSpaceGuard installs the low-disk-space upload guard. Not calling this
+// (or passing nil) leaves the default NoopSpaceGuard, which never rejects.
+func WithSpaceGuard(guard SpaceGuard) Option {
+	return func(s *Service) {
+		if guard != nil {
+			s.spaceGuard = guard
+		}
+	}
+}
+
+// WithUploadPartBackend overrides where transient upload-part chunks are
+// staged before assembly, independent of the permanent blob backend passed
+// to NewService. Needed when the permanent backend is s3 (S3FS doesn't
+// implement UploadPartBackend -- chunk-per-request S3 round trips aren't
+// worth it for scratch data deleted within minutes): pass a LocalFS here so
+// uploads keep working, while permanent blobs still land in s3.
+func WithUploadPartBackend(backend UploadPartBackend) Option {
+	return func(s *Service) {
+		if backend != nil {
+			s.uploadParts = backend
+		}
+	}
+}
+
 // NewService 创建 files 服务。dc 是本 server 的 DC id，写入新建 document/photo 的 dc_id。
 func NewService(media store.MediaStore, blobs BlobBackend, dc int, opts ...Option) *Service {
 	s := &Service{
@@ -132,6 +157,7 @@ func NewService(media store.MediaStore, blobs BlobBackend, dc int, opts ...Optio
 			MaxParts: DefaultUploadInFlightMaxParts,
 			MaxFiles: DefaultUploadInFlightMaxFiles,
 		},
+		spaceGuard: NoopSpaceGuard{},
 	}
 	if partBackend, ok := blobs.(UploadPartBackend); ok {
 		s.uploadParts = partBackend
@@ -204,6 +230,16 @@ func (s *Service) SaveBigFilePart(ctx context.Context, ownerUserID, fileID int64
 func (s *Service) saveFilePart(ctx context.Context, part domain.UploadPart, bytes []byte) error {
 	if s.uploadParts == nil {
 		return fmt.Errorf("upload part backend not configured")
+	}
+	// Cheapest possible rejection point: reject before any disk write once
+	// the permanent blob backend is low on space. Upload parts themselves
+	// always land on local scratch disk (see UploadPartBackend), but a
+	// low-space condition on the permanent backend means assembly will
+	// fail anyway, so there's no point accepting more chunks toward it.
+	if allowed, err := s.spaceGuard.Allow(int64(len(bytes))); err != nil {
+		return err
+	} else if !allowed {
+		return domain.ErrStorageFull
 	}
 	slot, err := s.checkUploadPartQuota(ctx, part)
 	if err != nil {
@@ -584,9 +620,18 @@ type assembledUploadBlob struct {
 // assembleUploadBlob 把上传分片流式写入正式 blob。调用方应在 durable media 元数据
 // 成功提交后调用 cleanupUploadParts，避免 metadata 写失败时丢失可重试的上传分片。
 func (s *Service) assembleUploadBlob(ctx context.Context, ownerUserID, fileID int64, expectedParts int) (assembledUploadBlob, error) {
-	parts, _, err := s.loadAndValidateUploadParts(ctx, ownerUserID, fileID, expectedParts)
+	parts, total, err := s.loadAndValidateUploadParts(ctx, ownerUserID, fileID, expectedParts)
 	if err != nil {
 		return assembledUploadBlob{}, err
+	}
+	// Re-check free space against the full assembled size right before
+	// committing to the permanent blob backend: SaveFilePart already
+	// checked each chunk, but free space may have dropped since then over
+	// the lifetime of a large multi-part upload.
+	if allowed, err := s.spaceGuard.Allow(total); err != nil {
+		return assembledUploadBlob{}, err
+	} else if !allowed {
+		return assembledUploadBlob{}, domain.ErrStorageFull
 	}
 	if s.uploadParts == nil {
 		return assembledUploadBlob{}, fmt.Errorf("upload part backend not configured")

@@ -21,6 +21,7 @@ export function routeTitle(pathname: string): string {
   if (pathname.startsWith("/verification")) return "Official Verification";
   if (pathname.startsWith("/collectible-usernames")) return "Collectible Usernames";
   if (pathname.startsWith("/account-ratings")) return "Account Rating";
+  if (pathname.startsWith("/storage")) return "Storage";
   if (pathname.startsWith("/accounts")) return "Accounts";
   if (pathname.startsWith("/channels")) return "Supergroups and Channels";
   if (pathname.startsWith("/bots")) return "Bots";
@@ -39,6 +40,7 @@ export function routeSubtitle(pathname: string): string {
   if (pathname.startsWith("/verification")) return "Console / Verification";
   if (pathname.startsWith("/collectible-usernames")) return "Console / Collectible usernames";
   if (pathname.startsWith("/account-ratings")) return "Console / Account rating";
+  if (pathname.startsWith("/storage")) return "Console / Storage";
   if (pathname.startsWith("/accounts")) return "Console / Accounts";
   if (pathname.startsWith("/channels")) return "Console / Channels";
   if (pathname.startsWith("/bots")) return "Console / Bots";

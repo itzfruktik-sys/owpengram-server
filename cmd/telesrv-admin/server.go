@@ -78,6 +78,8 @@ func (s *server) routes() http.Handler {
 	mux.Handle("GET /api/collectible-usernames/{id}", s.requireAuthAPI(http.HandlerFunc(s.handleCollectibleUsernameDetailAPI)))
 	mux.Handle("GET /api/account-ratings", s.requireAuthAPI(http.HandlerFunc(s.handleAccountRatingsAPI)))
 	mux.Handle("GET /api/account-ratings/{user_id}", s.requireAuthAPI(http.HandlerFunc(s.handleAccountRatingDetailAPI)))
+	mux.Handle("GET /api/storage/stats", s.requireAuthAPI(http.HandlerFunc(s.handleStorageStatsAPI)))
+	mux.Handle("GET /api/storage/accounts", s.requireAuthAPI(http.HandlerFunc(s.handleStorageAccountsAPI)))
 	mux.Handle("GET /api/moderation/cases", s.requireAuthAPI(http.HandlerFunc(s.handleModerationCasesAPI)))
 	mux.Handle("GET /api/moderation/cases/{id}", s.requireAuthAPI(http.HandlerFunc(s.handleModerationCaseAPI)))
 	mux.Handle("GET /api/moderation/reports/{id}", s.requireAuthAPI(http.HandlerFunc(s.handleModerationReportAPI)))
@@ -2339,6 +2341,53 @@ func (s *server) handleAccountRatingsAPI(w http.ResponseWriter, r *http.Request)
 		"rows":           rows,
 		"has_more":       hasMore,
 		"next_before_id": nextBeforeID,
+	})
+}
+
+func (s *server) handleStorageStatsAPI(w http.ResponseWriter, r *http.Request) {
+	if s.read == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "read store is not configured")
+		return
+	}
+	stats, err := s.read.StorageStats(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
+// handleStorageAccountsAPI pages the per-account storage breakdown,
+// largest first.
+func (s *server) handleStorageAccountsAPI(w http.ResponseWriter, r *http.Request) {
+	if s.read == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "read store is not configured")
+		return
+	}
+	query := r.URL.Query()
+	offset, err := parseInt(query.Get("offset"))
+	if err != nil || offset < 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid offset")
+		return
+	}
+	limit, err := parseInt(query.Get("limit"))
+	if err != nil || limit < 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid limit")
+		return
+	}
+	rows, hasMore, err := s.read.ListAccountStorageUsage(r.Context(), offset, limit)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	nextOffset := 0
+	if hasMore {
+		nextOffset = offset + len(rows)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"rows":        rows,
+		"has_more":    hasMore,
+		"next_offset": nextOffset,
 	})
 }
 

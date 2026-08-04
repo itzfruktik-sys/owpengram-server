@@ -154,6 +154,26 @@ export function toSmallestUnits(value: string, currency: string): string | null 
   return digits === "" ? "0" : digits;
 }
 
+// formatBytes renders a byte count (as the JSON-string int64 the API sends)
+// in the largest unit that keeps it readable. Parses the decimal string
+// directly rather than through toNumeric first so precision past
+// Number.MAX_SAFE_INTEGER isn't silently lost before the division.
+export function formatBytes(value: string): string {
+  const raw = (value ?? "").trim();
+  if (!raw || !/^\d+$/.test(raw)) return "0 B";
+  const bytes = Number(raw);
+  if (!Number.isFinite(bytes)) return `${raw} B`;
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let size = bytes;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit++;
+  }
+  const precision = unit === 0 ? 0 : 1;
+  return `${size.toFixed(precision)} ${units[unit]}`;
+}
+
 export function formatSigned(value: string): string {
   const raw = (value ?? "").trim();
   if (!raw) return "0";

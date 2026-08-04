@@ -710,14 +710,36 @@ func run(logger *zap.Logger) error {
 	cachedPhotos := userprojection.NewCachedPhotoProvider(mediaStore, userprojection.DefaultPhotoCacheTTL)
 	privacyStore := privacyapp.NewCachedPrivacyStore(postgres.NewPrivacyStore(pool), 0)
 	storyStore := postgres.NewStoryStore(pool)
-	blobBackend, err := filesapp.NewLocalFS(cfg.BlobDir)
+	// Transient upload-part scratch storage always stays on local disk
+	// (TELESRV_BLOB_DIR) regardless of the permanent blob backend below --
+	// one S3 round trip per ~512KB chunk isn't worth it for data deleted
+	// within minutes of assembly.
+	localBlobFS, err := filesapp.NewLocalFS(cfg.BlobDir)
 	if err != nil {
-		return fmt.Errorf("init blob backend: %w", err)
+		return fmt.Errorf("init local blob dir: %w", err)
 	}
-	logger.Info("blob backend ready",
-		zap.String("backend", "localfs"),
-		zap.String("dir", cfg.BlobDir),
-	)
+	var blobBackend filesapp.BlobBackend = localBlobFS
+	var spaceGuard filesapp.SpaceGuard = filesapp.NoopSpaceGuard{}
+	if cfg.BlobBackendKind == "s3" {
+		s3Backend, err := filesapp.NewS3FS(ctx, cfg.S3Endpoint, cfg.S3AccessKeyID, cfg.S3SecretAccessKey, cfg.S3Bucket, cfg.S3Region, cfg.S3UseSSL, cfg.S3PathStyle)
+		if err != nil {
+			return fmt.Errorf("init s3 blob backend: %w", err)
+		}
+		blobBackend = s3Backend
+		logger.Info("blob backend ready", zap.String("backend", "s3"), zap.String("bucket", cfg.S3Bucket), zap.String("endpoint", cfg.S3Endpoint))
+		if cfg.StorageLowSpaceGuardEnable && cfg.StorageMaxTotalBytes > 0 {
+			s3Guard := filesapp.NewS3BudgetSpaceGuard(cfg.StorageMaxTotalBytes)
+			spaceGuard = s3Guard
+			go filesapp.NewS3DiskUsageWorker(s3Guard, mediaStore, cfg.StorageUsageRefreshInterval, logger.Named("files").Named("diskusage")).Run(ctx)
+		}
+	} else {
+		logger.Info("blob backend ready", zap.String("backend", "localfs"), zap.String("dir", cfg.BlobDir))
+		if cfg.StorageLowSpaceGuardEnable && cfg.StorageMinFreeBytes > 0 {
+			localGuard := filesapp.NewLocalDiskSpaceGuard(cfg.StorageMinFreeBytes)
+			spaceGuard = localGuard
+			go filesapp.NewLocalDiskUsageWorker(localGuard, cfg.BlobDir, cfg.StorageUsageRefreshInterval, logger.Named("files").Named("diskusage")).Run(ctx)
+		}
+	}
 	filesService := filesapp.NewService(mediaStore, blobBackend, cfg.DC,
 		filesapp.WithLogger(logger),
 		filesapp.WithUploadPartQuota(domain.UploadPartQuota{
@@ -725,6 +747,8 @@ func run(logger *zap.Logger) error {
 			MaxParts: cfg.UploadInFlightMaxParts,
 			MaxFiles: cfg.UploadInFlightMaxFiles,
 		}),
+		filesapp.WithUploadPartBackend(localBlobFS),
+		filesapp.WithSpaceGuard(spaceGuard),
 		filesapp.WithMapboxMapTiles(cfg.MapboxToken, cfg.MapTileCacheDir),
 		externalMediaOption(cfg),
 		webPagePreviewOption(cfg),
@@ -822,6 +846,10 @@ func run(logger *zap.Logger) error {
 		Restrictions:  adminStore,
 		OfficialGifts: officialgifts.New(cfg.OfficialGiftsDir),
 	})
+	storageRetentionMaxAge := cfg.StorageRetentionMaxAge
+	if !cfg.StorageRetentionEnable {
+		storageRetentionMaxAge = 0
+	}
 	go maintenance.NewRetentionWorker(dispatchOutboxStore, tempAuthKeyStore, logger.Named("maintenance").Named("retention"),
 		cfg.UpdateEventRetention,
 		cfg.RetentionInterval,
@@ -836,6 +864,7 @@ func run(logger *zap.Logger) error {
 		WithUserUpdateRetention(updateEventStore).
 		WithChannelUpdateRetention(channelStore).
 		WithOrphanAuthKeyRetention(authKeyStore, activeSessions, cfg.OrphanAuthKeyRetention).
+		WithOrphanedMediaRetention(filesService, storageRetentionMaxAge).
 		Run(ctx)
 	go filesapp.NewUploadPartGCWorker(filesService, logger.Named("files").Named("upload_gc"),
 		cfg.UploadPartTTL,

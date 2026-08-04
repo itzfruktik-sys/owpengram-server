@@ -107,6 +107,11 @@ func locationInvalidErr() error      { return tgerr.New(400, "LOCATION_INVALID")
 func fileIDInvalidErr() error        { return tgerr.New(400, "FILE_ID_INVALID") }
 func documentInvalidErr() error      { return tgerr.New(400, "DOCUMENT_INVALID") }
 
+// storageFullErr surfaces the low-disk-space upload guard. Deliberately not
+// a flood-wait: a full disk won't resolve itself in 60 seconds, and telling
+// the client to retry shortly would be misleading.
+func storageFullErr() error { return tgerr.New(400, "STORAGE_FULL") }
+
 func mediaEmptyErr() error { return tgerr.New(400, "MEDIA_EMPTY") }
 
 func frozenMethodInvalidErr() error      { return tgerr.New(420, "FROZEN_METHOD_INVALID") }

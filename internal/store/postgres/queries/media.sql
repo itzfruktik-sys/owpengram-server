@@ -108,7 +108,7 @@ WHERE location_key = sqlc.arg(location_key)::text;
 -- documents -------------------------------------------------------------------
 
 -- name: PutDocument :exec
-INSERT INTO documents (id, access_hash, file_reference, date, mime_type, size, dc_id, attributes, thumbs)
+INSERT INTO documents (id, access_hash, file_reference, date, mime_type, size, dc_id, attributes, thumbs, owner_user_id)
 VALUES (
   sqlc.arg(id)::bigint,
   sqlc.arg(access_hash)::bigint,
@@ -118,8 +118,13 @@ VALUES (
   sqlc.arg(size)::bigint,
   sqlc.arg(dc_id)::int,
   sqlc.arg(attributes_json)::jsonb,
-  sqlc.arg(thumbs_json)::jsonb
+  sqlc.arg(thumbs_json)::jsonb,
+  sqlc.arg(owner_user_id)::bigint
 )
+-- owner_user_id is intentionally NOT in the UPDATE SET list: a document id is
+-- only ever (re-)upserted by its original uploader's own request replay, and
+-- keeping the first-write owner sticky avoids any risk of a later call
+-- (e.g. a forward re-touching the row) reassigning ownership.
 ON CONFLICT (id) DO UPDATE SET
   access_hash = EXCLUDED.access_hash,
   file_reference = EXCLUDED.file_reference,
@@ -133,21 +138,26 @@ ON CONFLICT (id) DO UPDATE SET
 -- name: GetDocument :one
 SELECT id, access_hash, file_reference, date, mime_type, size, dc_id,
   attributes::text AS attributes_json,
-  thumbs::text AS thumbs_json
+  thumbs::text AS thumbs_json,
+  owner_user_id
 FROM documents
 WHERE id = sqlc.arg(id)::bigint;
 
 -- name: GetDocuments :many
 SELECT id, access_hash, file_reference, date, mime_type, size, dc_id,
   attributes::text AS attributes_json,
-  thumbs::text AS thumbs_json
+  thumbs::text AS thumbs_json,
+  owner_user_id
 FROM documents
 WHERE id = ANY(sqlc.arg(ids)::bigint[]);
+
+-- name: DeleteDocumentRow :exec
+DELETE FROM documents WHERE id = sqlc.arg(id)::bigint;
 
 -- photos ----------------------------------------------------------------------
 
 -- name: PutPhoto :exec
-INSERT INTO photos (id, access_hash, file_reference, date, dc_id, has_stickers, sizes)
+INSERT INTO photos (id, access_hash, file_reference, date, dc_id, has_stickers, sizes, owner_user_id)
 VALUES (
   sqlc.arg(id)::bigint,
   sqlc.arg(access_hash)::bigint,
@@ -155,8 +165,10 @@ VALUES (
   sqlc.arg(date)::int,
   sqlc.arg(dc_id)::int,
   sqlc.arg(has_stickers)::boolean,
-  sqlc.arg(sizes_json)::jsonb
+  sqlc.arg(sizes_json)::jsonb,
+  sqlc.arg(owner_user_id)::bigint
 )
+-- owner_user_id intentionally not updated on conflict, see PutDocument.
 ON CONFLICT (id) DO UPDATE SET
   access_hash = EXCLUDED.access_hash,
   file_reference = EXCLUDED.file_reference,
@@ -167,9 +179,86 @@ ON CONFLICT (id) DO UPDATE SET
 
 -- name: GetPhoto :one
 SELECT id, access_hash, file_reference, date, dc_id, has_stickers,
-  sizes::text AS sizes_json
+  sizes::text AS sizes_json,
+  owner_user_id
 FROM photos
 WHERE id = sqlc.arg(id)::bigint;
+
+-- name: DeletePhotoRow :exec
+DELETE FROM photos WHERE id = sqlc.arg(id)::bigint;
+
+-- media_references / storage retention -----------------------------------------
+
+-- name: InsertMediaReference :exec
+INSERT INTO media_references (media_kind, media_id, ref_kind, ref_key)
+VALUES (sqlc.arg(media_kind)::text, sqlc.arg(media_id)::bigint, sqlc.arg(ref_kind)::text, sqlc.arg(ref_key)::text)
+ON CONFLICT DO NOTHING;
+
+-- name: ClearDocumentOrphan :exec
+UPDATE documents SET orphaned_at = NULL
+WHERE id = sqlc.arg(media_id)::bigint AND orphaned_at IS NOT NULL;
+
+-- name: ClearPhotoOrphan :exec
+UPDATE photos SET orphaned_at = NULL
+WHERE id = sqlc.arg(media_id)::bigint AND orphaned_at IS NOT NULL;
+
+-- name: RemoveMediaReference :exec
+DELETE FROM media_references
+WHERE media_kind = sqlc.arg(media_kind)::text
+  AND media_id = sqlc.arg(media_id)::bigint
+  AND ref_kind = sqlc.arg(ref_kind)::text
+  AND ref_key = sqlc.arg(ref_key)::text;
+
+-- name: OrphanDocumentIfUnreferenced :exec
+UPDATE documents SET orphaned_at = now()
+WHERE id = sqlc.arg(media_id)::bigint
+  AND orphaned_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM media_references WHERE media_kind = 'document' AND media_id = sqlc.arg(media_id)::bigint
+  );
+
+-- name: OrphanPhotoIfUnreferenced :exec
+UPDATE photos SET orphaned_at = now()
+WHERE id = sqlc.arg(media_id)::bigint
+  AND orphaned_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM media_references WHERE media_kind = 'photo' AND media_id = sqlc.arg(media_id)::bigint
+  );
+
+-- name: ListOrphanedDocumentIDsOlderThan :many
+SELECT id FROM documents
+WHERE orphaned_at IS NOT NULL AND orphaned_at < sqlc.arg(cutoff)::timestamptz
+ORDER BY orphaned_at ASC
+LIMIT sqlc.arg(batch_limit)::int;
+
+-- name: ListOrphanedPhotoIDsOlderThan :many
+SELECT id FROM photos
+WHERE orphaned_at IS NOT NULL AND orphaned_at < sqlc.arg(cutoff)::timestamptz
+ORDER BY orphaned_at ASC
+LIMIT sqlc.arg(batch_limit)::int;
+
+-- name: CountFileBlobRefs :one
+SELECT COUNT(*)::int FROM file_blobs WHERE backend = sqlc.arg(backend)::text AND object_key = sqlc.arg(object_key)::text;
+
+-- name: DeleteFileBlobRow :exec
+DELETE FROM file_blobs WHERE location_key = sqlc.arg(location_key)::text;
+
+-- name: ListFileBlobsByLocationPrefix :many
+-- Matches a media's main blob (exact_key, e.g. "doc:123") plus every
+-- variant keyed off it (prefix_pattern, e.g. "doc:123:%" for thumbnails /
+-- "photo:456:%" for each rendition size) -- a document/photo can own
+-- multiple file_blobs rows.
+SELECT location_key, backend, object_key, size
+FROM file_blobs
+WHERE location_key = sqlc.arg(exact_key)::text
+   OR location_key LIKE sqlc.arg(prefix_pattern)::text;
+
+-- name: SumFileBlobBytes :one
+-- Physical bytes actually held by the blob backend (dedup-aware: identical
+-- content uploaded by different users is one row here). Used by the
+-- low-space guard's cached usage gauge and the admin panel's "physical
+-- usage" stat.
+SELECT COALESCE(SUM(size), 0)::bigint FROM file_blobs;
 
 -- sticker_sets ----------------------------------------------------------------
 

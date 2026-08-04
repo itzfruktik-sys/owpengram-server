@@ -27,6 +27,12 @@ type BlobBackend interface {
 	// GetRange 只读 [offset, offset+limit) 段并返回该段字节与文件总大小（limit<=0 读到末尾），
 	// 避免大文件每个 chunk 都整文件读入内存（getFile 按 chunk 多次请求 ⇒ 否则 O(N²) 放大）。
 	GetRange(ctx context.Context, objectKey string, offset, limit int64) (data []byte, total int64, err error)
+	// Delete removes the object at objectKey. Callers (storage retention GC)
+	// must first confirm no remaining file_blobs row on this backend still
+	// references objectKey -- content-addressed storage means the same
+	// object can be shared by multiple documents/photos. Deleting an
+	// already-absent object is not an error.
+	Delete(ctx context.Context, objectKey string) error
 }
 
 // UploadPartBackend 保存 upload.saveFilePart/saveBigFilePart 的临时分片字节。
@@ -203,6 +209,16 @@ func (l *LocalFS) GetRange(_ context.Context, objectKey string, offset, limit in
 		return nil, 0, err
 	}
 	return buf[:read], total, nil
+}
+
+// Delete removes the on-disk object for objectKey. Missing objects are not
+// an error (idempotent, safe to retry). Callers must have already confirmed
+// no other file_blobs row on this backend still references objectKey.
+func (l *LocalFS) Delete(_ context.Context, objectKey string) error {
+	if err := os.Remove(l.pathFor(objectKey)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete blob: %w", err)
+	}
+	return nil
 }
 
 func (l *LocalFS) openBlobFile(objectKey string) (*sharedBlobFile, error) {

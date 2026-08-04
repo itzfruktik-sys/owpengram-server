@@ -272,6 +272,10 @@ WHERE location_key = ANY($1::text[])`, locationKeys)
 	return out, nil
 }
 
+func (s *MediaStore) SumFileBlobBytes(ctx context.Context) (int64, error) {
+	return s.q.SumFileBlobBytes(ctx)
+}
+
 func (s *MediaStore) GetSeedState(ctx context.Context, key string) (string, bool, error) {
 	var hash string
 	if err := s.db.QueryRow(ctx, `
@@ -332,6 +336,7 @@ func putDocumentParams(doc domain.Document) (sqlcgen.PutDocumentParams, error) {
 		DcID:           int32(doc.DCID),
 		AttributesJson: attrs,
 		ThumbsJson:     thumbs,
+		OwnerUserID:    doc.OwnerUserID,
 	}, nil
 }
 
@@ -472,6 +477,20 @@ func (c *documentMetaCache) put(id int64, doc domain.Document) {
 	}
 }
 
+// remove evicts id, e.g. after the row is permanently deleted (storage
+// retention sweep) so a stale cache hit can't outlive the row.
+func (c *documentMetaCache) remove(id int64) {
+	if c == nil || id == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if el, ok := c.m[id]; ok {
+		c.ll.Remove(el)
+		delete(c.m, id)
+	}
+}
+
 func cloneDocument(doc domain.Document) domain.Document {
 	doc.FileReference = append([]byte(nil), doc.FileReference...)
 	if len(doc.Attributes) > 0 {
@@ -514,6 +533,7 @@ func documentFromRow(row sqlcgen.GetDocumentRow) (domain.Document, error) {
 		DCID:          int(row.DcID),
 		Attributes:    attrs,
 		Thumbs:        thumbs,
+		OwnerUserID:   row.OwnerUserID,
 	}, nil
 }
 
@@ -532,6 +552,7 @@ func (s *MediaStore) PutPhoto(ctx context.Context, photo domain.Photo) error {
 		DcID:          int32(photo.DCID),
 		HasStickers:   photo.HasStickers,
 		SizesJson:     sizes,
+		OwnerUserID:   photo.OwnerUserID,
 	})
 }
 
@@ -543,7 +564,7 @@ func (s *MediaStore) GetPhoto(ctx context.Context, id int64) (domain.Photo, bool
 		}
 		return domain.Photo{}, false, err
 	}
-	photo, err := photoFromFields(row.ID, row.AccessHash, row.FileReference, int(row.Date), int(row.DcID), row.HasStickers, row.SizesJson)
+	photo, err := photoFromFields(row.ID, row.AccessHash, row.FileReference, int(row.Date), int(row.DcID), row.HasStickers, row.SizesJson, row.OwnerUserID)
 	if err != nil {
 		return domain.Photo{}, false, err
 	}
@@ -572,7 +593,7 @@ func (s *MediaStore) GetPhotos(ctx context.Context, ids []int64) ([]domain.Photo
 		return nil, nil
 	}
 	rows, err := s.db.Query(ctx, `
-SELECT id, access_hash, file_reference, date, dc_id, has_stickers, sizes::text
+SELECT id, access_hash, file_reference, date, dc_id, has_stickers, sizes::text, owner_user_id
 FROM photos
 WHERE id = ANY($1::bigint[])
 `, unique)
@@ -613,14 +634,15 @@ func scanPhotoRow(row photoScanner) (domain.Photo, error) {
 		dcID          int32
 		hasStickers   bool
 		sizesJSON     string
+		ownerUserID   int64
 	)
-	if err := row.Scan(&id, &accessHash, &fileReference, &date, &dcID, &hasStickers, &sizesJSON); err != nil {
+	if err := row.Scan(&id, &accessHash, &fileReference, &date, &dcID, &hasStickers, &sizesJSON, &ownerUserID); err != nil {
 		return domain.Photo{}, err
 	}
-	return photoFromFields(id, accessHash, fileReference, int(date), int(dcID), hasStickers, sizesJSON)
+	return photoFromFields(id, accessHash, fileReference, int(date), int(dcID), hasStickers, sizesJSON, ownerUserID)
 }
 
-func photoFromFields(id, accessHash int64, fileReference []byte, date, dcID int, hasStickers bool, sizesJSON string) (domain.Photo, error) {
+func photoFromFields(id, accessHash int64, fileReference []byte, date, dcID int, hasStickers bool, sizesJSON string, ownerUserID int64) (domain.Photo, error) {
 	sizes, err := decodePhotoSizes(sizesJSON)
 	if err != nil {
 		return domain.Photo{}, err
@@ -633,6 +655,7 @@ func photoFromFields(id, accessHash int64, fileReference []byte, date, dcID int,
 		DCID:          dcID,
 		HasStickers:   hasStickers,
 		Sizes:         sizes,
+		OwnerUserID:   ownerUserID,
 	}, nil
 }
 
@@ -697,7 +720,7 @@ func (s *MediaStore) CreateStickerSet(ctx context.Context, set domain.StickerSet
 				return err
 			}
 		}
-		return nil
+		return addStickerSetMediaReferencesTx(ctx, qtx, set.ID, docs)
 	})
 	if err != nil {
 		if stickerSetShortNameConflict(err) {
@@ -726,7 +749,13 @@ func (s *MediaStore) UpdateStickerSet(ctx context.Context, set domain.StickerSet
 				return err
 			}
 		}
-		return nil
+		// Re-register from scratch: drops references for any document no
+		// longer in the set (candidate for storage GC once orphaned long
+		// enough) and refreshes the rest.
+		if err := removeMediaReferencesByKeyTx(ctx, tx, domain.MediaRefKindStickerSet, stickerSetRefKey(set.ID)); err != nil {
+			return err
+		}
+		return addStickerSetMediaReferencesTx(ctx, qtx, set.ID, docs)
 	})
 	if err != nil {
 		return err
@@ -751,8 +780,10 @@ WHERE id = $1
 		if tag.RowsAffected() == 0 {
 			return domain.ErrStickerSetInvalid
 		}
-		_, err = tx.Exec(ctx, `DELETE FROM user_sticker_sets WHERE sticker_set_id = $1`, setID)
-		return err
+		if _, err := tx.Exec(ctx, `DELETE FROM user_sticker_sets WHERE sticker_set_id = $1`, setID); err != nil {
+			return err
+		}
+		return removeMediaReferencesByKeyTx(ctx, tx, domain.MediaRefKindStickerSet, stickerSetRefKey(setID))
 	})
 }
 
@@ -769,9 +800,38 @@ WHERE id = $1
 		if tag.RowsAffected() == 0 {
 			return domain.ErrStickerSetInvalid
 		}
-		_, err = tx.Exec(ctx, `DELETE FROM user_sticker_sets WHERE sticker_set_id = $1`, setID)
-		return err
+		if _, err := tx.Exec(ctx, `DELETE FROM user_sticker_sets WHERE sticker_set_id = $1`, setID); err != nil {
+			return err
+		}
+		return removeMediaReferencesByKeyTx(ctx, tx, domain.MediaRefKindStickerSet, stickerSetRefKey(setID))
 	})
+}
+
+func stickerSetRefKey(setID int64) string {
+	return fmt.Sprintf("stickerset:%d", setID)
+}
+
+// addStickerSetMediaReferencesTx registers every document belonging to a
+// sticker set as referenced (storage GC), clearing orphaned_at on each.
+func addStickerSetMediaReferencesTx(ctx context.Context, qtx *sqlcgen.Queries, setID int64, docs []domain.Document) error {
+	refKey := stickerSetRefKey(setID)
+	for _, doc := range docs {
+		if doc.ID == 0 {
+			continue
+		}
+		if err := qtx.InsertMediaReference(ctx, sqlcgen.InsertMediaReferenceParams{
+			MediaKind: string(domain.MediaKindDocument),
+			MediaID:   doc.ID,
+			RefKind:   string(domain.MediaRefKindStickerSet),
+			RefKey:    refKey,
+		}); err != nil {
+			return fmt.Errorf("register sticker set media reference: %w", err)
+		}
+		if err := qtx.ClearDocumentOrphan(ctx, doc.ID); err != nil {
+			return fmt.Errorf("clear sticker document orphan: %w", err)
+		}
+	}
+	return nil
 }
 
 func insertStickerSet(ctx context.Context, db sqlcgen.DBTX, set domain.StickerSet) error {
@@ -1197,15 +1257,29 @@ func (s *MediaStore) AddProfilePhotoKind(ctx context.Context, ownerType domain.P
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `
+	if _, err := s.db.Exec(ctx, `
 INSERT INTO profile_photos (owner_peer_type, owner_peer_id, kind, photo_id, date, active, sort_order)
 VALUES ($1, $2, $3, $4, $5, true, $6)
 ON CONFLICT (owner_peer_type, owner_peer_id, kind, photo_id) DO UPDATE SET
   date = EXCLUDED.date,
   active = true,
   sort_order = EXCLUDED.sort_order
-`, string(ownerType), ownerID, string(kind), photoID, date, next+1)
-	return err
+`, string(ownerType), ownerID, string(kind), photoID, date, next+1); err != nil {
+		return err
+	}
+	if err := s.q.InsertMediaReference(ctx, sqlcgen.InsertMediaReferenceParams{
+		MediaKind: string(domain.MediaKindPhoto),
+		MediaID:   photoID,
+		RefKind:   string(domain.MediaRefKindProfilePhoto),
+		RefKey:    profilePhotoRefKey(ownerType, ownerID, kind, photoID),
+	}); err != nil {
+		return fmt.Errorf("register profile photo reference: %w", err)
+	}
+	return s.q.ClearPhotoOrphan(ctx, photoID)
+}
+
+func profilePhotoRefKey(ownerType domain.PeerType, ownerID int64, kind domain.ProfilePhotoKind, photoID int64) string {
+	return fmt.Sprintf("%s:%d:kind:%s:photo:%d", ownerType, ownerID, kind, photoID)
 }
 
 func (s *MediaStore) CurrentProfilePhotoKind(ctx context.Context, ownerType domain.PeerType, ownerID int64, kind domain.ProfilePhotoKind) (int64, bool, error) {
@@ -1336,7 +1410,7 @@ func (s *MediaStore) ListProfilePhotoDetailsKind(ctx context.Context, ownerType 
 	var err error
 	if offset < 0 && maxID > 0 {
 		rows, err = s.db.Query(ctx, `
-SELECT ph.id, ph.access_hash, ph.file_reference, ph.date, ph.dc_id, ph.has_stickers, ph.sizes::text AS sizes_json
+SELECT ph.id, ph.access_hash, ph.file_reference, ph.date, ph.dc_id, ph.has_stickers, ph.sizes::text AS sizes_json, ph.owner_user_id
 FROM profile_photos pp
 JOIN photos ph ON ph.id = pp.photo_id
 WHERE pp.owner_peer_type = $1
@@ -1352,7 +1426,7 @@ LIMIT $5
 			offset = 0
 		}
 		rows, err = s.db.Query(ctx, `
-SELECT ph.id, ph.access_hash, ph.file_reference, ph.date, ph.dc_id, ph.has_stickers, ph.sizes::text AS sizes_json
+SELECT ph.id, ph.access_hash, ph.file_reference, ph.date, ph.dc_id, ph.has_stickers, ph.sizes::text AS sizes_json, ph.owner_user_id
 FROM profile_photos pp
 JOIN photos ph ON ph.id = pp.photo_id
 WHERE pp.owner_peer_type = $1
@@ -1428,6 +1502,19 @@ RETURNING photo_id
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	for _, id := range deleted {
+		if err := s.q.RemoveMediaReference(ctx, sqlcgen.RemoveMediaReferenceParams{
+			MediaKind: string(domain.MediaKindPhoto),
+			MediaID:   id,
+			RefKind:   string(domain.MediaRefKindProfilePhoto),
+			RefKey:    profilePhotoRefKey(ownerType, ownerID, kind, id),
+		}); err != nil {
+			return nil, fmt.Errorf("remove profile photo reference: %w", err)
+		}
+		if err := s.q.OrphanPhotoIfUnreferenced(ctx, id); err != nil {
+			return nil, fmt.Errorf("orphan check profile photo: %w", err)
+		}
 	}
 	return deleted, nil
 }

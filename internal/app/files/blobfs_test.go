@@ -44,6 +44,32 @@ func TestLocalFSPutGetRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLocalFSDelete(t *testing.T) {
+	fs, err := NewLocalFS(t.TempDir())
+	if err != nil {
+		t.Fatalf("new local fs: %v", err)
+	}
+	ctx := context.Background()
+	key, err := fs.Put(ctx, []byte("delete me"))
+	if err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if _, err := fs.Get(ctx, key); err != nil {
+		t.Fatalf("get before delete: %v", err)
+	}
+	if err := fs.Delete(ctx, key); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := fs.Get(ctx, key); err == nil {
+		t.Fatal("expected get after delete to fail")
+	}
+	// Deleting an already-absent object must be idempotent, not an error --
+	// the retention sweep can legitimately retry after a partial failure.
+	if err := fs.Delete(ctx, key); err != nil {
+		t.Fatalf("delete already-missing object: %v", err)
+	}
+}
+
 func TestLocalFSPutReaderRoundTrip(t *testing.T) {
 	fs, err := NewLocalFS(t.TempDir())
 	if err != nil {

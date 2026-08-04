@@ -684,6 +684,8 @@ func photoUploadErr(err error) error {
 		return filePartsInvalidErr()
 	case errors.Is(err, domain.ErrPhotoInvalid):
 		return photoInvalidErr()
+	case errors.Is(err, domain.ErrStorageFull):
+		return storageFullErr()
 	default:
 		return internalErr()
 	}

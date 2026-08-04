@@ -253,6 +253,45 @@ type Config struct {
 	StarGiftTONStartingGrant int64
 	// BlobDir 是本地磁盘 blob backend 根目录（媒体文件字节内容）。
 	BlobDir string
+	// BlobBackendKind selects the blob storage backend: "localfs" (default)
+	// or "s3". Transient upload parts always stay on local disk (BlobDir)
+	// regardless of this setting -- only the permanent blob store moves.
+	BlobBackendKind string
+	// S3Endpoint/S3Region/S3Bucket/S3AccessKeyID/S3SecretAccessKey/S3UseSSL/
+	// S3PathStyle configure the s3 blob backend; only used when
+	// BlobBackendKind == "s3". Works against self-hosted MinIO or AWS S3.
+	S3Endpoint        string
+	S3Region          string
+	S3Bucket          string
+	S3AccessKeyID     string
+	S3SecretAccessKey string
+	S3UseSSL          bool
+	S3PathStyle       bool
+	// StorageLowSpaceGuardEnable turns on the pre-upload free-space check.
+	StorageLowSpaceGuardEnable bool
+	// StorageMinFreeBytes: for the localfs backend, reject new uploads once
+	// real free disk bytes fall below this. <=0 disables this check.
+	StorageMinFreeBytes int64
+	// StorageMaxTotalBytes: reject new uploads once total tracked blob
+	// bytes would exceed this -- the only meaningful "low space" signal for
+	// the s3 backend (no OS-level free space concept), and usable as an
+	// optional soft budget cap on localfs too. <=0 disables this check.
+	StorageMaxTotalBytes int64
+	// StorageUsageRefreshInterval is how often the cached free-space/budget
+	// usage gauge refreshes; <=0 uses a 1 minute default.
+	StorageUsageRefreshInterval time.Duration
+	// StorageRetentionEnable turns on the orphaned-media age sweep. Off by
+	// default: orphaned media (no live message/profile-photo/sticker-set
+	// reference) is tracked and visible in the admin panel, but nothing is
+	// auto-deleted until the operator explicitly opts in.
+	StorageRetentionEnable bool
+	// StorageRetentionMaxAge is how long a document/photo must have been
+	// orphaned (not how old the media itself is) before the sweep deletes
+	// it. Never deletes media that still has a live reference, regardless
+	// of age. <=0 uses a 30 day default. The sweep itself runs on the
+	// shared RetentionInterval/RetentionBatch cadence alongside every other
+	// retention check (see maintenance.RetentionWorker).
+	StorageRetentionMaxAge time.Duration
 	// StickerSeedDir 是 reaction / sticker 资源种子目录（导入到 documents/sticker_sets + blob）。
 	StickerSeedDir string
 	// StickerSeedMaxSets 限制导入的常规贴纸集数量（避免启动时导入过多包），<=0 表示不限。
@@ -756,6 +795,20 @@ func Load() (Config, error) {
 		OfficialGiftsDir:              envOr("TELESRV_OFFICIAL_GIFTS_DIR", "data/official-gifts"),
 		StarGiftTONStartingGrant:      envInt64Or("TELESRV_STARGIFT_TON_STARTING_GRANT", 10_000_000_000),
 		BlobDir:                       envOr("TELESRV_BLOB_DIR", "data/blobs"),
+		BlobBackendKind:               strings.ToLower(strings.TrimSpace(envOr("TELESRV_BLOB_BACKEND", "localfs"))),
+		S3Endpoint:                    envOr("TELESRV_S3_ENDPOINT", ""),
+		S3Region:                      envOr("TELESRV_S3_REGION", "us-east-1"),
+		S3Bucket:                      envOr("TELESRV_S3_BUCKET", ""),
+		S3AccessKeyID:                 envOr("TELESRV_S3_ACCESS_KEY_ID", ""),
+		S3SecretAccessKey:             envOr("TELESRV_S3_SECRET_ACCESS_KEY", ""),
+		S3UseSSL:                      envBoolOr("TELESRV_S3_USE_SSL", true),
+		S3PathStyle:                   envBoolOr("TELESRV_S3_PATH_STYLE", false),
+		StorageLowSpaceGuardEnable:    envBoolOr("TELESRV_STORAGE_LOW_SPACE_GUARD_ENABLE", true),
+		StorageMinFreeBytes:           envInt64Or("TELESRV_STORAGE_MIN_FREE_BYTES", 1<<30),
+		StorageMaxTotalBytes:          envInt64Or("TELESRV_STORAGE_MAX_TOTAL_BYTES", 0),
+		StorageUsageRefreshInterval:   envDurationOr("TELESRV_STORAGE_USAGE_REFRESH_INTERVAL", time.Minute),
+		StorageRetentionEnable:        envBoolOr("TELESRV_STORAGE_RETENTION_ENABLE", false),
+		StorageRetentionMaxAge:        envDurationOr("TELESRV_STORAGE_RETENTION_MAX_AGE", 30*24*time.Hour),
 		StickerSeedDir:                envOr("TELESRV_STICKER_SEED_DIR", "data/sticker-seed"),
 		StickerSeedMaxSets:            envIntOr("TELESRV_STICKER_SEED_MAX_SETS", 300),
 		PremiumPromoSeedDir:           envOr("TELESRV_PREMIUM_PROMO_SEED_DIR", "data/premium-promo"),
@@ -928,6 +981,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := validateTelegramLoginConfig(cfg); err != nil {
+		return Config{}, err
+	}
+	if err := validateStorageConfig(cfg); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
@@ -1128,6 +1184,40 @@ func validateVerificationConfig(cfg Config) error {
 	// not "unlimited", it is a limiter that can never refill.
 	if cfg.BotVerificationRequestRateLimit > 0 && cfg.BotVerificationRequestRateWindow <= 0 {
 		return fmt.Errorf("TELESRV_BOT_VERIFICATION_REQUEST_RATE_WINDOW must be positive when TELESRV_BOT_VERIFICATION_REQUEST_RATE_LIMIT is set")
+	}
+	return nil
+}
+
+// validateStorageConfig checks the blob backend selection and storage
+// management (low-space guard, retention sweep) settings.
+func validateStorageConfig(cfg Config) error {
+	switch cfg.BlobBackendKind {
+	case "localfs":
+		// no extra requirements
+	case "s3":
+		if strings.TrimSpace(cfg.S3Endpoint) == "" {
+			return fmt.Errorf("TELESRV_S3_ENDPOINT is required when TELESRV_BLOB_BACKEND=s3")
+		}
+		if strings.TrimSpace(cfg.S3Bucket) == "" {
+			return fmt.Errorf("TELESRV_S3_BUCKET is required when TELESRV_BLOB_BACKEND=s3")
+		}
+	default:
+		return fmt.Errorf("TELESRV_BLOB_BACKEND must be \"localfs\" or \"s3\", got %q", cfg.BlobBackendKind)
+	}
+	if cfg.StorageMinFreeBytes < 0 {
+		return fmt.Errorf("TELESRV_STORAGE_MIN_FREE_BYTES must be non-negative")
+	}
+	if cfg.StorageMaxTotalBytes < 0 {
+		return fmt.Errorf("TELESRV_STORAGE_MAX_TOTAL_BYTES must be non-negative")
+	}
+	if cfg.StorageUsageRefreshInterval < 0 {
+		return fmt.Errorf("TELESRV_STORAGE_USAGE_REFRESH_INTERVAL must be non-negative")
+	}
+	if cfg.StorageRetentionMaxAge < 0 {
+		return fmt.Errorf("TELESRV_STORAGE_RETENTION_MAX_AGE must be non-negative")
+	}
+	if cfg.StorageRetentionEnable && cfg.StorageRetentionMaxAge <= 0 {
+		return fmt.Errorf("TELESRV_STORAGE_RETENTION_MAX_AGE must be positive when TELESRV_STORAGE_RETENTION_ENABLE is true")
 	}
 	return nil
 }
