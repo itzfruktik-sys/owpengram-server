@@ -60,11 +60,17 @@
   border-radius: var(--radius);
 }
 
+/* A fixed column count, not auto-fit: auto-fit packs as many cards per row as
+   the viewport allows, which for an odd card count (e.g. 5 or 6) leaves a lone
+   orphan card stranded alone in its own row with a huge empty gap beside it,
+   and the exact column count shifts unpredictably with viewport width. Fixed
+   columns keep the grid predictable and let the responsive breakpoints below
+   step it down deliberately instead of at whatever width auto-fit happens to
+   drop a column. */
 .action-groups {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
-  align-items: start;
 }
 
 .section-block,
@@ -181,19 +187,19 @@
 }
 
 .device-actions-head {
-  width: 190px;
+  width: 250px;
 }
 
 .device-actions-cell {
-  width: 190px;
-  min-width: 190px;
+  width: 250px;
+  min-width: 250px;
 }
 
 .device-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(82px, 1fr));
+  grid-template-columns: repeat(2, minmax(110px, 1fr));
   gap: 6px;
-  min-width: 178px;
+  min-width: 226px;
   white-space: normal;
 }
 

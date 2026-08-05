@@ -248,17 +248,23 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
                   onDone={load}
                 />
                 <ScamFakeActions idKey="user_id" id={account.ID} path="/api/actions/set-account-flags" scam={detail.Scam} fake={detail.Fake} onDone={load} />
+                <SupportAction id={account.ID} support={detail.Support} onDone={load} />
               </div>
             </section>
 
             <section className="section-block">
-              <SectionHead title={"Profile Attributes"} />
-              <div className="action-stack">
-                <SupportAction id={account.ID} support={detail.Support} onDone={load} />
-                <UsernameAction idKey="user_id" id={account.ID} path="/api/actions/set-account-username" current={account.Username} onDone={load} />
-                <ColorAction idKey="user_id" id={account.ID} path="/api/actions/set-account-color" onDone={load} />
-                <EmojiStatusAction idKey="user_id" id={account.ID} path="/api/actions/set-account-emoji-status" onDone={load} />
-              </div>
+              <SectionHead title={"Username"} />
+              <UsernameAction idKey="user_id" id={account.ID} path="/api/actions/set-account-username" current={account.Username} onDone={load} />
+            </section>
+
+            <section className="section-block">
+              <SectionHead title={"Profile Color"} />
+              <ColorAction idKey="user_id" id={account.ID} path="/api/actions/set-account-color" onDone={load} />
+            </section>
+
+            <section className="section-block">
+              <SectionHead title={"Emoji Status"} />
+              <EmojiStatusAction idKey="user_id" id={account.ID} path="/api/actions/set-account-emoji-status" onDone={load} />
             </section>
           </div>
 

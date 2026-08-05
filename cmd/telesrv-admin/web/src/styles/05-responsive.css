@@ -28,6 +28,10 @@
   .action-dock {
     position: static;
   }
+
+  .action-groups {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
@@ -42,7 +46,8 @@
   .overview-metrics,
   .metric-row,
   .summary-grid,
-  .command-steps {
+  .command-steps,
+  .action-groups {
     grid-template-columns: 1fr;
   }
 
