@@ -149,151 +149,169 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
           <div className="action-groups">
             <section className="section-block">
               <SectionHead title={"Freeze & Restriction"} text={"Blocks sign-in and marks the account for appeal review."} />
-              <div className="attr-block">
-                <label className="duration-field">
-                  <span>{"Appeal deadline"}</span>
-                  <input
-                    aria-label={"Freeze appeal deadline"}
-                    value={freezeUntil}
-                    onChange={(event) => setFreezeUntil(event.target.value)}
-                    type="datetime-local"
-                  />
-                </label>
-                <label className="duration-field">
-                  <span>{"Appeal URL"}</span>
-                  <input
-                    aria-label={"Freeze appeal URL"}
-                    value={freezeAppealURL}
-                    onChange={(event) => setFreezeAppealURL(event.target.value)}
-                    type="url"
-                    placeholder="https://..."
-                  />
-                </label>
-                <ActionButton
-                  label={account.Frozen ? "Update freeze" : "Freeze account"}
-                  icon={<CircleAlert size={15} />}
-                  tone="danger"
-                  path="/api/actions/set-frozen"
-                  payload={() => ({
-                    user_id: account.ID,
-                    frozen: true,
-                    freeze_until: new Date(freezeUntil).toISOString(),
-                    freeze_appeal_url: freezeAppealURL.trim()
-                  })}
-                  onDone={load}
-                />
-                {account.Frozen && (
+              <div className="card-body">
+                <div className="attr-block">
+                  <label className="duration-field">
+                    <span>{"Appeal deadline"}</span>
+                    <input
+                      aria-label={"Freeze appeal deadline"}
+                      value={freezeUntil}
+                      onChange={(event) => setFreezeUntil(event.target.value)}
+                      type="datetime-local"
+                    />
+                  </label>
+                  <label className="duration-field">
+                    <span>{"Appeal URL"}</span>
+                    <input
+                      aria-label={"Freeze appeal URL"}
+                      value={freezeAppealURL}
+                      onChange={(event) => setFreezeAppealURL(event.target.value)}
+                      type="url"
+                      placeholder="https://..."
+                    />
+                  </label>
                   <ActionButton
-                    label={"Unfreeze account"}
+                    label={account.Frozen ? "Update freeze" : "Freeze account"}
                     icon={<CircleAlert size={15} />}
+                    tone="danger"
                     path="/api/actions/set-frozen"
-                    payload={() => ({ user_id: account.ID, frozen: false })}
+                    payload={() => ({
+                      user_id: account.ID,
+                      frozen: true,
+                      freeze_until: new Date(freezeUntil).toISOString(),
+                      freeze_appeal_url: freezeAppealURL.trim()
+                    })}
                     onDone={load}
                   />
-                )}
+                  {account.Frozen && (
+                    <ActionButton
+                      label={"Unfreeze account"}
+                      icon={<CircleAlert size={15} />}
+                      path="/api/actions/set-frozen"
+                      payload={() => ({ user_id: account.ID, frozen: false })}
+                      onDone={load}
+                    />
+                  )}
+                </div>
               </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Premium & Stars"} />
-              <div className="attr-block">
-                <label className="duration-field">
-                  <span>{"Premium duration (months)"}</span>
-                  <input
-                    aria-label={"Set premium duration in months"}
-                    value={months}
-                    onChange={(event) => setMonths(event.target.value)}
-                    type="number"
-                    min="1"
-                    max="120"
-                  />
-                </label>
-                <div className="action-stack">
+              <div className="card-body">
+                <div className="attr-block">
+                  <label className="duration-field">
+                    <span>{"Premium duration (months)"}</span>
+                    <input
+                      aria-label={"Set premium duration in months"}
+                      value={months}
+                      onChange={(event) => setMonths(event.target.value)}
+                      type="number"
+                      min="1"
+                      max="120"
+                    />
+                  </label>
+                  <div className="action-stack">
+                    <ActionButton
+                      label={"Set premium"}
+                      icon={<Sparkles size={15} />}
+                      tone="warn"
+                      path="/api/actions/grant-premium"
+                      payload={() => ({ user_id: account.ID, months: toInt(months) })}
+                      onDone={load}
+                    />
+                    <ActionButton
+                      label={"Clear premium"}
+                      icon={<Sparkles size={15} />}
+                      tone="warn"
+                      path="/api/actions/grant-premium"
+                      payload={() => ({ user_id: account.ID, months: 0 })}
+                      onDone={load}
+                    />
+                  </div>
+                </div>
+                <div className="attr-block">
+                  <label className="duration-field">
+                    <span>{"Stars to grant"}</span>
+                    <input
+                      aria-label={"Set Stars amount to grant"}
+                      value={starsAmount}
+                      onChange={(event) => setStarsAmount(event.target.value)}
+                      type="number"
+                      min="1"
+                      max="1000000000"
+                    />
+                  </label>
                   <ActionButton
-                    label={"Set premium"}
-                    icon={<Sparkles size={15} />}
+                    label={"Grant Stars"}
+                    icon={<Star size={15} />}
                     tone="warn"
-                    path="/api/actions/grant-premium"
-                    payload={() => ({ user_id: account.ID, months: toInt(months) })}
-                    onDone={load}
-                  />
-                  <ActionButton
-                    label={"Clear premium"}
-                    icon={<Sparkles size={15} />}
-                    tone="warn"
-                    path="/api/actions/grant-premium"
-                    payload={() => ({ user_id: account.ID, months: 0 })}
+                    path="/api/actions/grant-stars"
+                    payload={() => ({ user_id: account.ID, amount: toInt(starsAmount) })}
                     onDone={load}
                   />
                 </div>
-              </div>
-              <div className="attr-block">
-                <label className="duration-field">
-                  <span>{"Stars to grant"}</span>
-                  <input
-                    aria-label={"Set Stars amount to grant"}
-                    value={starsAmount}
-                    onChange={(event) => setStarsAmount(event.target.value)}
-                    type="number"
-                    min="1"
-                    max="1000000000"
-                  />
-                </label>
-                <ActionButton
-                  label={"Grant Stars"}
-                  icon={<Star size={15} />}
-                  tone="warn"
-                  path="/api/actions/grant-stars"
-                  payload={() => ({ user_id: account.ID, amount: toInt(starsAmount) })}
-                  onDone={load}
-                />
               </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Verification & Moderation Flags"} />
-              <div className="action-stack">
-                <ActionButton
-                  label={detail.Verified ? "Clear verified" : "Set verified"}
-                  icon={<BadgeCheck size={15} />}
-                  tone="warn"
-                  path="/api/actions/set-verified"
-                  payload={() => ({ user_id: account.ID, verified: !detail.Verified })}
-                  onDone={load}
-                />
-                <ScamFakeActions idKey="user_id" id={account.ID} path="/api/actions/set-account-flags" scam={detail.Scam} fake={detail.Fake} onDone={load} />
-                <SupportAction id={account.ID} support={detail.Support} onDone={load} />
+              <div className="card-body">
+                <div className="action-stack">
+                  <ActionButton
+                    label={detail.Verified ? "Clear verified" : "Set verified"}
+                    icon={<BadgeCheck size={15} />}
+                    tone="warn"
+                    path="/api/actions/set-verified"
+                    payload={() => ({ user_id: account.ID, verified: !detail.Verified })}
+                    onDone={load}
+                  />
+                  <ScamFakeActions idKey="user_id" id={account.ID} path="/api/actions/set-account-flags" scam={detail.Scam} fake={detail.Fake} onDone={load} />
+                  <SupportAction id={account.ID} support={detail.Support} onDone={load} />
+                </div>
               </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Username"} />
-              <UsernameAction idKey="user_id" id={account.ID} path="/api/actions/set-account-username" current={account.Username} onDone={load} />
+              <div className="card-body">
+                <UsernameAction idKey="user_id" id={account.ID} path="/api/actions/set-account-username" current={account.Username} onDone={load} />
+              </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Name"} />
-              <ProfileNameAction id={account.ID} path="/api/actions/set-account-profile" currentFirstName={account.FirstName} currentLastName={account.LastName} onDone={load} />
+              <div className="card-body">
+                <ProfileNameAction id={account.ID} path="/api/actions/set-account-profile" currentFirstName={account.FirstName} currentLastName={account.LastName} onDone={load} />
+              </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Phone Number"} />
-              <PhoneAction id={account.ID} path="/api/actions/set-account-phone" current={account.Phone} onDone={load} />
+              <div className="card-body">
+                <PhoneAction id={account.ID} path="/api/actions/set-account-phone" current={account.Phone} onDone={load} />
+              </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Login Email"} text={"The email used for sign-in / password-recovery, not a contact address."} />
-              <LoginEmailAction id={account.ID} path="/api/actions/set-account-login-email" current={account.LoginEmail} onDone={load} />
+              <div className="card-body">
+                <LoginEmailAction id={account.ID} path="/api/actions/set-account-login-email" current={account.LoginEmail} onDone={load} />
+              </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Profile Color"} />
-              <ColorAction idKey="user_id" id={account.ID} path="/api/actions/set-account-color" onDone={load} />
+              <div className="card-body">
+                <ColorAction idKey="user_id" id={account.ID} path="/api/actions/set-account-color" onDone={load} />
+              </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Emoji Status"} />
-              <EmojiStatusAction idKey="user_id" id={account.ID} path="/api/actions/set-account-emoji-status" onDone={load} />
+              <div className="card-body">
+                <EmojiStatusAction idKey="user_id" id={account.ID} path="/api/actions/set-account-emoji-status" onDone={load} />
+              </div>
             </section>
           </div>
 

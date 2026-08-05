@@ -92,6 +92,31 @@
   gap: 14px;
 }
 
+/* Cards in a row are stretched to match the row's tallest card (see
+   .action-groups > .section-block below), which otherwise leaves a card with
+   little content top-heavy with empty space beneath it. .card-body wraps
+   everything after a card's SectionHead so that content can be centered in
+   the remaining height while the header itself stays pinned to the top and
+   aligned across the row. Its own flex gap also keeps adjacent blocks (e.g.
+   a verified-toggle stack followed by ScamFakeActions' own stack) from
+   sitting flush against each other the way plain block-flow siblings would. */
+.action-groups > .section-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.action-groups > .section-block > .section-head {
+  flex-shrink: 0;
+}
+
+.action-groups > .section-block > .card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+}
+
 .section-block,
 .action-dock,
 .surface {

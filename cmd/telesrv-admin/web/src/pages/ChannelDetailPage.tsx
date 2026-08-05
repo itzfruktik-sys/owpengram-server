@@ -124,37 +124,47 @@ export function ChannelDetailPage({ id, navigate }: { id: number; navigate: Navi
           <div className="action-groups">
             <section className="section-block">
               <SectionHead title={"Verification & Moderation Flags"} />
-              <div className="action-stack">
-                <ActionButton
-                  label={ch.Verified ? "Clear verified" : "Set verified"}
-                  icon={<BadgeCheck size={15} />}
-                  tone="warn"
-                  path="/api/actions/set-channel-verified"
-                  payload={() => ({ channel_id: ch.ID, verified: !ch.Verified })}
-                  onDone={load}
-                />
-                <ScamFakeActions idKey="channel_id" id={ch.ID} path="/api/actions/set-channel-flags" scam={ch.Scam} fake={ch.Fake} onDone={load} />
+              <div className="card-body">
+                <div className="action-stack">
+                  <ActionButton
+                    label={ch.Verified ? "Clear verified" : "Set verified"}
+                    icon={<BadgeCheck size={15} />}
+                    tone="warn"
+                    path="/api/actions/set-channel-verified"
+                    payload={() => ({ channel_id: ch.ID, verified: !ch.Verified })}
+                    onDone={load}
+                  />
+                  <ScamFakeActions idKey="channel_id" id={ch.ID} path="/api/actions/set-channel-flags" scam={ch.Scam} fake={ch.Fake} onDone={load} />
+                </div>
               </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Settings"} />
-              <ChannelSettingsAction channel={ch} onDone={load} />
+              <div className="card-body">
+                <ChannelSettingsAction channel={ch} onDone={load} />
+              </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Username"} />
-              <UsernameAction idKey="channel_id" id={ch.ID} path="/api/actions/set-channel-username" current={ch.Username} onDone={load} />
+              <div className="card-body">
+                <UsernameAction idKey="channel_id" id={ch.ID} path="/api/actions/set-channel-username" current={ch.Username} onDone={load} />
+              </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Profile Color"} />
-              <ColorAction idKey="channel_id" id={ch.ID} path="/api/actions/set-channel-color" onDone={load} />
+              <div className="card-body">
+                <ColorAction idKey="channel_id" id={ch.ID} path="/api/actions/set-channel-color" onDone={load} />
+              </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Emoji Status"} />
-              <EmojiStatusAction idKey="channel_id" id={ch.ID} path="/api/actions/set-channel-emoji-status" onDone={load} />
+              <div className="card-body">
+                <EmojiStatusAction idKey="channel_id" id={ch.ID} path="/api/actions/set-channel-emoji-status" onDone={load} />
+              </div>
             </section>
           </div>
 

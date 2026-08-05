@@ -119,63 +119,75 @@ export function BotDetailPage({ id, navigate }: { id: number; navigate: Navigate
           <div className="action-groups">
             <section className="section-block">
               <SectionHead title={"Verification & Moderation Flags"} />
-              <div className="action-stack">
-                <ActionButton
-                  label={bot.Verified ? "Clear verified" : "Set verified"}
-                  icon={<BadgeCheck size={15} />}
-                  tone="neutral"
-                  path="/api/actions/set-verified"
-                  payload={() => ({ user_id: bot.ID, verified: !bot.Verified })}
-                  onDone={load}
-                />
+              <div className="card-body">
+                <div className="action-stack">
+                  <ActionButton
+                    label={bot.Verified ? "Clear verified" : "Set verified"}
+                    icon={<BadgeCheck size={15} />}
+                    tone="neutral"
+                    path="/api/actions/set-verified"
+                    payload={() => ({ user_id: bot.ID, verified: !bot.Verified })}
+                    onDone={load}
+                  />
+                  <ScamFakeActions idKey="user_id" id={bot.ID} path="/api/actions/set-account-flags" scam={bot.Scam} fake={bot.Fake} onDone={load} />
+                </div>
               </div>
-              <ScamFakeActions idKey="user_id" id={bot.ID} path="/api/actions/set-account-flags" scam={bot.Scam} fake={bot.Fake} onDone={load} />
             </section>
 
             <section className="section-block">
               <SectionHead title={"Username"} />
-              <UsernameAction idKey="user_id" id={bot.ID} path="/api/actions/set-account-username" current={bot.Username} onDone={load} />
+              <div className="card-body">
+                <UsernameAction idKey="user_id" id={bot.ID} path="/api/actions/set-account-username" current={bot.Username} onDone={load} />
+              </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Profile Color"} />
-              <ColorAction idKey="user_id" id={bot.ID} path="/api/actions/set-account-color" onDone={load} />
+              <div className="card-body">
+                <ColorAction idKey="user_id" id={bot.ID} path="/api/actions/set-account-color" onDone={load} />
+              </div>
             </section>
 
             <section className="section-block">
               <SectionHead title={"Emoji Status"} />
-              <EmojiStatusAction idKey="user_id" id={bot.ID} path="/api/actions/set-account-emoji-status" onDone={load} />
+              <div className="card-body">
+                <EmojiStatusAction idKey="user_id" id={bot.ID} path="/api/actions/set-account-emoji-status" onDone={load} />
+              </div>
             </section>
 
             {!bot.System && (
               <section className="section-block">
                 <SectionHead title={"Credentials"} />
-                <div className="action-stack">
-                  <button className="btn icon-text" type="button" onClick={() => setCopyTokenModalOpen(true)}>
-                    <Copy size={15} /> {"Copy token"}
-                  </button>
+                <div className="card-body">
+                  <div className="action-stack">
+                    <button className="btn icon-text" type="button" onClick={() => setCopyTokenModalOpen(true)}>
+                      <Copy size={15} /> {"Copy token"}
+                    </button>
+                  </div>
+                  <p className="bot-create-note">{"Copies straight to the clipboard through a dedicated confirmation step -- the token itself is never shown on this page."}</p>
                 </div>
-                <p className="bot-create-note">{"Copies straight to the clipboard through a dedicated confirmation step -- the token itself is never shown on this page."}</p>
               </section>
             )}
 
             <section className="section-block">
               <SectionHead title={"Danger Zone"} />
-              {bot.System ? (
-                <p className="bot-create-note">{"System bots are built in and cannot be deleted."}</p>
-              ) : (
-                <div className="danger-zone">
-                  <ActionButton
-                    label={"Delete bot"}
-                    icon={<Trash2 size={15} />}
-                    tone="danger"
-                    path="/api/actions/delete-bot"
-                    payload={() => ({ bot_user_id: bot.ID })}
-                    onDone={() => navigate("/bots")}
-                  />
-                  <p className="bot-create-note">{"Permanently deletes this user-created bot and invalidates its token. This cannot be undone."}</p>
-                </div>
-              )}
+              <div className="card-body">
+                {bot.System ? (
+                  <p className="bot-create-note">{"System bots are built in and cannot be deleted."}</p>
+                ) : (
+                  <div className="danger-zone">
+                    <ActionButton
+                      label={"Delete bot"}
+                      icon={<Trash2 size={15} />}
+                      tone="danger"
+                      path="/api/actions/delete-bot"
+                      payload={() => ({ bot_user_id: bot.ID })}
+                      onDone={() => navigate("/bots")}
+                    />
+                    <p className="bot-create-note">{"Permanently deletes this user-created bot and invalidates its token. This cannot be undone."}</p>
+                  </div>
+                )}
+              </div>
             </section>
           </div>
 
