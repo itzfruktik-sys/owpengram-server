@@ -57,6 +57,8 @@ type Service interface {
 	SetPhone(ctx context.Context, req admin.SetPhoneRequest) (admin.CommandResult, error)
 	SetLoginEmail(ctx context.Context, req admin.SetLoginEmailRequest) (admin.CommandResult, error)
 	SetAccountAvatar(ctx context.Context, req admin.SetAccountAvatarRequest) (admin.CommandResult, error)
+	ChannelAvatar(ctx context.Context, channelID int64) ([]byte, string, bool, error)
+	SetChannelAvatar(ctx context.Context, req admin.SetChannelAvatarRequest) (admin.CommandResult, error)
 	SetUserColor(ctx context.Context, req admin.SetUserColorRequest) (admin.CommandResult, error)
 	SetUserEmojiStatus(ctx context.Context, req admin.SetUserEmojiStatusRequest) (admin.CommandResult, error)
 	SetChannelSettings(ctx context.Context, req admin.SetChannelSettingsRequest) (admin.CommandResult, error)
@@ -203,6 +205,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/accounts/set-color", s.authenticated(s.handleSetUserColor))
 	mux.HandleFunc("POST /v1/accounts/set-emoji-status", s.authenticated(s.handleSetUserEmojiStatus))
 	mux.HandleFunc("POST /v1/accounts/revoke-sessions", s.authenticated(s.handleRevokeSessions))
+	mux.HandleFunc("GET /v1/channels/{id}/avatar", s.authenticated(s.handleChannelAvatar))
+	mux.HandleFunc("POST /v1/channels/set-avatar", s.authenticated(s.handleSetChannelAvatar))
 	mux.HandleFunc("POST /v1/channels/set-verified", s.authenticated(s.handleSetChannelVerified))
 	mux.HandleFunc("POST /v1/channels/set-flags", s.authenticated(s.handleSetChannelFlags))
 	mux.HandleFunc("POST /v1/channels/set-settings", s.authenticated(s.handleSetChannelSettings))
@@ -450,6 +454,62 @@ func (s *Server) handleSetAccountAvatar(w http.ResponseWriter, r *http.Request) 
 	req.FileName = header.Filename
 	req.Data = data
 	result, err := s.svc.SetAccountAvatar(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleChannelAvatar(w http.ResponseWriter, r *http.Request) {
+	channelID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || channelID <= 0 {
+		http.NotFound(w, r)
+		return
+	}
+	data, mimeType, found, err := s.svc.ChannelAvatar(r.Context(), channelID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func (s *Server) handleSetChannelAvatar(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, admin.MaxAccountAvatarBytes+(1<<20))
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid multipart form: "+err.Error())
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	var req admin.SetChannelAvatarRequest
+	dec := json.NewDecoder(strings.NewReader(r.FormValue("metadata")))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid metadata: "+err.Error())
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "avatar file is required")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, admin.MaxAccountAvatarBytes+1))
+	if err != nil || len(data) == 0 || int64(len(data)) > admin.MaxAccountAvatarBytes {
+		writeError(w, http.StatusBadRequest, "avatar file is empty or too large")
+		return
+	}
+	req.FileName = header.Filename
+	req.Data = data
+	result, err := s.svc.SetChannelAvatar(r.Context(), req)
 	writeCommandResult(w, result, err)
 }
 

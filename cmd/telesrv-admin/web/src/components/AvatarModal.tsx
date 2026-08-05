@@ -4,11 +4,13 @@ import { createPortal } from "react-dom";
 import { api, errorMessage } from "../api";
 import { Alert } from "./ui";
 
-// AccountAvatarModal uploads a new profile photo for an account. It follows
-// CreateStickerSetModal's shape (a single reason field + direct execute,
-// rather than ActionButton's JSON dry-run/confirm flow) since the payload is
-// a multipart file upload, not a plain JSON body.
-export function AccountAvatarModal({ userID, onClose, onDone }: { userID: number; onClose: () => void; onDone: () => void }) {
+type AvatarModalKind = "user" | "channel";
+
+// AvatarModal uploads a new photo for an account or a channel/supergroup. It
+// follows CreateStickerSetModal's shape (a single reason field + direct
+// execute, rather than ActionButton's JSON dry-run/confirm flow) since the
+// payload is a multipart file upload, not a plain JSON body.
+export function AvatarModal({ kind, id, onClose, onDone }: { kind: AvatarModalKind; id: number; onClose: () => void; onDone: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [previewURL, setPreviewURL] = useState("");
   const [reason, setReason] = useState("");
@@ -37,10 +39,11 @@ export function AccountAvatarModal({ userID, onClose, onDone }: { userID: number
     setBusy(true);
     setError("");
     try {
+      const idField = kind === "channel" ? "channel_id" : "user_id";
       const form = new FormData();
-      form.set("metadata", JSON.stringify({ command_id: "", reason: reason.trim(), confirm: true, user_id: userID }));
+      form.set("metadata", JSON.stringify({ command_id: "", reason: reason.trim(), confirm: true, [idField]: id }));
       form.set("file", file, file.name);
-      const result = await api.setAccountAvatar(form);
+      const result = kind === "channel" ? await api.setChannelAvatar(form) : await api.setAccountAvatar(form);
       if (result.error) {
         setError(result.error);
         return;
@@ -54,12 +57,14 @@ export function AccountAvatarModal({ userID, onClose, onDone }: { userID: number
     }
   }
 
+  const noun = kind === "channel" ? "Channel" : "Account";
+
   return createPortal(
     <div className="modal-backdrop" role="presentation">
       <section className="modal command-modal" role="dialog" aria-modal="true" aria-label={"Change avatar"}>
         <div className="modal-head">
           <div>
-            <div className="eyebrow">{"Account"}</div>
+            <div className="eyebrow">{noun}</div>
             <h2>{"Change avatar"}</h2>
           </div>
           <button className="icon-btn" type="button" onClick={onClose} disabled={busy} aria-label={"Close"}><X size={15} /></button>

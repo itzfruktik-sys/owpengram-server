@@ -497,6 +497,35 @@ func (s *ChannelStore) SetChannelEmojiStatusAdmin(ctx context.Context, channelID
 	return channel, nil
 }
 
+// SetChannelPhotoAdmin force-sets a channel's avatar with no permission
+// checks and no "changed photo" service message — unlike SetChannelPhoto,
+// which requires an acting admin member and broadcasts to the channel's
+// timeline. Mirrors SetChannelColorAdmin/SetChannelEmojiStatusAdmin's shape.
+func (s *ChannelStore) SetChannelPhotoAdmin(ctx context.Context, channelID int64, photo domain.Photo) (domain.Channel, error) {
+	if channelID == 0 {
+		return domain.Channel{}, domain.ErrChannelInvalid
+	}
+	channel, err := s.channelByID(ctx, s.db, channelID)
+	if err != nil {
+		return domain.Channel{}, err
+	}
+	stripped := domain.StrippedFromSizes(photo.Sizes)
+	if stripped == nil {
+		stripped = []byte{}
+	}
+	if _, err := s.db.Exec(ctx, `UPDATE channels SET photo_id = $2, photo_dc_id = $3, photo_stripped = $4, updated_at = now() WHERE id = $1`,
+		channelID, photo.ID, photo.DCID, stripped); err != nil {
+		return domain.Channel{}, fmt.Errorf("set channel photo admin: %w", err)
+	}
+	if s.rowCache != nil {
+		s.rowCache.delete(channelID)
+	}
+	channel.PhotoID = photo.ID
+	channel.PhotoDCID = photo.DCID
+	channel.PhotoStripped = stripped
+	return channel, nil
+}
+
 func (s *ChannelStore) ResolvePublicChannelUsername(ctx context.Context, viewerUserID int64, username string) (domain.Channel, bool, error) {
 	_ = viewerUserID // zero is the anonymous public-web view; this query is viewer-independent.
 	usernameLower := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(username, "@")))

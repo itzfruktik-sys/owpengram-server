@@ -40,6 +40,10 @@ type ChannelStore interface {
 	SetChannelUsernameAdmin(ctx context.Context, channelID int64, username string) (domain.Channel, error)
 	SetChannelColorAdmin(ctx context.Context, channelID int64, forProfile bool, color domain.ChannelPeerColor) (domain.Channel, error)
 	SetChannelEmojiStatusAdmin(ctx context.Context, channelID int64, status domain.ChannelEmojiStatus) (domain.Channel, error)
+	// SetChannelPhotoAdmin force-sets a channel's avatar with no permission
+	// checks and no service message (unlike SetChannelPhoto, which requires an
+	// acting admin member and posts a "changed photo" service message).
+	SetChannelPhotoAdmin(ctx context.Context, channelID int64, photo domain.Photo) (domain.Channel, error)
 	ListAdminedPublicChannels(ctx context.Context, userID int64) ([]domain.Channel, error)
 	ListCommunityLinkableChannels(ctx context.Context, userID int64) ([]domain.Channel, error)
 	ListStoryPostableChannels(ctx context.Context, userID int64) ([]domain.Channel, error)

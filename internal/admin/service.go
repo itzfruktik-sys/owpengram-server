@@ -37,6 +37,7 @@ const (
 	ActionSetPhone                   = "account.set_phone"
 	ActionSetLoginEmail              = "account.set_login_email"
 	ActionSetAccountAvatar           = "account.set_avatar"
+	ActionSetChannelAvatar           = "channel.set_avatar"
 	ActionSetChannelUsername         = "channel.set_username"
 	ActionSetChannelSettings         = "channel.set_settings"
 	ActionSetChannelColor            = "channel.set_color"
@@ -255,6 +256,7 @@ type ChannelsService interface {
 	AdminSetUsername(ctx context.Context, channelID int64, username string) (domain.Channel, error)
 	AdminSetColor(ctx context.Context, channelID int64, forProfile bool, color domain.ChannelPeerColor) (domain.Channel, error)
 	AdminSetEmojiStatus(ctx context.Context, channelID int64, status domain.ChannelEmojiStatus) (domain.Channel, error)
+	AdminSetPhoto(ctx context.Context, channelID int64, photo domain.Photo) (domain.Channel, error)
 }
 
 type ChannelNotifier interface {
@@ -302,6 +304,10 @@ type AvatarResolver interface {
 	ValidateAvatarUpload(data []byte) bool
 	CreateAvatarFromBytes(ctx context.Context, data []byte, ownerUserID int64) (domain.Photo, error)
 	SetCurrentProfilePhotoKind(ctx context.Context, ownerType domain.PeerType, ownerID int64, kind domain.ProfilePhotoKind, photoID int64, date int) (domain.Photo, bool, error)
+	// GetPhoto looks up a photo by id directly -- used to read a channel's
+	// current avatar, which is denormalized on the channel row as a bare
+	// photo_id rather than tracked through CurrentProfilePhotoKind.
+	GetPhoto(ctx context.Context, id int64) (domain.Photo, bool, error)
 }
 
 // StickerSetsService is the admin-console management surface over sticker/custom-emoji
@@ -946,6 +952,13 @@ type SetAccountAvatarRequest struct {
 	UserID   int64  `json:"user_id"`
 	FileName string `json:"file_name"`
 	Data     []byte `json:"-"`
+}
+
+type SetChannelAvatarRequest struct {
+	CommandMeta
+	ChannelID int64  `json:"channel_id"`
+	FileName  string `json:"file_name"`
+	Data      []byte `json:"-"`
 }
 
 type SetChannelUsernameRequest struct {
@@ -1796,6 +1809,97 @@ func (s *Service) SetAccountAvatar(ctx context.Context, req SetAccountAvatarRequ
 		}
 		return CommandResult{Message: "avatar updated", Details: details}, nil
 	})
+}
+
+// SetChannelAvatar force-sets a channel's avatar from raw uploaded image
+// bytes, reusing the same avatar rendition pipeline (s/a/c sizes) as
+// SetAccountAvatar, but attaching the resulting photo directly to the
+// channel row (photo_id) through the permission-check-free admin path
+// instead of profile_photos history.
+func (s *Service) SetChannelAvatar(ctx context.Context, req SetChannelAvatarRequest) (CommandResult, error) {
+	if req.ChannelID <= 0 {
+		return CommandResult{}, fmt.Errorf("channel_id is required")
+	}
+	if s == nil || s.photos == nil {
+		return CommandResult{}, fmt.Errorf("admin photos dependency is not configured")
+	}
+	if s.channels == nil {
+		return CommandResult{}, fmt.Errorf("admin channel dependency is not configured")
+	}
+	if len(req.Data) == 0 || len(req.Data) > MaxAccountAvatarBytes || !s.photos.ValidateAvatarUpload(req.Data) {
+		return CommandResult{}, domain.ErrPhotoInvalid
+	}
+	target := domain.Peer{Type: domain.PeerTypeChannel, ID: req.ChannelID}
+	return s.runCommand(ctx, req.CommandMeta, ActionSetChannelAvatar, 0, target, req, func() (CommandResult, error) {
+		details := map[string]any{"file_name": req.FileName, "bytes": len(req.Data)}
+		if req.DryRun {
+			return CommandResult{Message: "avatar validated", Details: details}, nil
+		}
+		photo, err := s.photos.CreateAvatarFromBytes(ctx, req.Data, 0)
+		if err != nil {
+			return CommandResult{Details: details}, err
+		}
+		updated, err := s.channels.AdminSetPhoto(ctx, req.ChannelID, photo)
+		if err != nil {
+			return CommandResult{Details: details}, err
+		}
+		details["photo_id"] = photo.ID
+		if err := s.notifyChannelChanged(ctx, updated); err != nil {
+			details["notify_error"] = err.Error()
+		}
+		return CommandResult{Message: "avatar updated", Details: details}, nil
+	})
+}
+
+// ChannelAvatar returns a channel's current avatar bytes and detected MIME
+// type. Unlike a user's profile photo (tracked via profile_photos history),
+// a channel's current photo is denormalized directly on the channel row as
+// photo_id, so this resolves that id through GetPhoto instead of
+// CurrentProfilePhotoKind.
+func (s *Service) ChannelAvatar(ctx context.Context, channelID int64) ([]byte, string, bool, error) {
+	if s == nil || s.photos == nil || s.channels == nil || channelID <= 0 {
+		return nil, "", false, nil
+	}
+	channel, err := s.channels.GetChannelByID(ctx, channelID)
+	if err != nil {
+		return nil, "", false, err
+	}
+	if channel.PhotoID == 0 {
+		return nil, "", false, nil
+	}
+	photo, found, err := s.photos.GetPhoto(ctx, channel.PhotoID)
+	if err != nil {
+		return nil, "", false, err
+	}
+	if !found {
+		return nil, "", false, nil
+	}
+	size, inline, ok := bestAccountPhotoSize(photo.Sizes)
+	if !ok {
+		return nil, "", false, nil
+	}
+	data := inline
+	if len(data) == 0 {
+		chunk, found, err := s.photos.GetFile(ctx, domain.FileDownloadRequest{
+			LocationKey: fmt.Sprintf("photo:%d:%s", photo.ID, size.Type),
+			Limit:       MaxAccountAvatarBytes + 1,
+		})
+		if err != nil {
+			return nil, "", false, err
+		}
+		if !found || chunk.Total <= 0 || chunk.Total > MaxAccountAvatarBytes || int64(len(chunk.Bytes)) != chunk.Total {
+			return nil, "", false, nil
+		}
+		data = chunk.Bytes
+	}
+	if len(data) == 0 || len(data) > MaxAccountAvatarBytes {
+		return nil, "", false, nil
+	}
+	detected := http.DetectContentType(data)
+	if !safeAccountImageType(detected) {
+		return nil, "", false, nil
+	}
+	return data, detected, true, nil
 }
 
 // SetUserColor force-sets or clears a user's name/profile color.

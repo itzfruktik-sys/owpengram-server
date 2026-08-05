@@ -166,7 +166,7 @@ export function AccountsPage({ navigate }: { navigate: Navigate }) {
           <tbody>
             {data?.rows.map((row) => (
               <tr key={row.ID}>
-                <td className="avatar-col"><Avatar userID={row.ID} firstName={row.FirstName} lastName={row.LastName} username={row.Username} /></td>
+                <td className="avatar-col"><Avatar id={row.ID} firstName={row.FirstName} lastName={row.LastName} username={row.Username} /></td>
                 <td className="mono">{row.ID}</td>
                 <td>{displayPhone(row.Phone)}</td>
                 <td><UsernameCell username={row.Username} collectibles={row.Collectibles} /></td>

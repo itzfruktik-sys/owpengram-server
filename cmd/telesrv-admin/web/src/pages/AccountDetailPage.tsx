@@ -1,7 +1,7 @@
 import { ArrowLeft, BadgeCheck, CircleAlert, ImagePlus, MonitorSmartphone, ScrollText, Settings2, Sparkles, Star, UserRound } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, errorMessage } from "../api";
-import { AccountAvatarModal } from "../components/AccountAvatarModal";
+import { AvatarModal } from "../components/AvatarModal";
 import { ActionButton } from "../components/ActionButton";
 import { Avatar } from "../components/Avatar";
 import { AuthorizationTable } from "../components/AuthorizationTable";
@@ -74,7 +74,7 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
       <section className="entity-head">
         <div className="entity-head-main">
           <div className="avatar-edit-slot">
-            <Avatar userID={account.ID} firstName={account.FirstName} lastName={account.LastName} username={account.Username} size={64} refreshKey={avatarVersion || undefined} />
+            <Avatar id={account.ID} firstName={account.FirstName} lastName={account.LastName} username={account.Username} size={64} refreshKey={avatarVersion || undefined} />
             <button
               className="icon-btn avatar-edit-btn"
               type="button"
@@ -305,8 +305,9 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
       )}
 
       {avatarModalOpen && (
-        <AccountAvatarModal
-          userID={account.ID}
+        <AvatarModal
+          kind="user"
+          id={account.ID}
           onClose={() => setAvatarModalOpen(false)}
           onDone={() => {
             setAvatarVersion((v) => v + 1);

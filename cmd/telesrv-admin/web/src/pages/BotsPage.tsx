@@ -1,18 +1,28 @@
-import { BadgeCheck, Bot, ChevronRight, Loader2, Plus, RefreshCw, Search } from "lucide-react";
+import { BadgeCheck, Bot, ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { ActionButton } from "../components/ActionButton";
+import { Avatar } from "../components/Avatar";
 import { Alert, Badge, EmptyRow, Metric, PageFrame, QueryPanel } from "../components/ui";
 import { ScamFakeBadges } from "../components/flags";
 import { displayUsername, formatDate, toInt } from "../lib/format";
 import type { Navigate } from "../routing";
 import type { BotListResponse } from "../types";
 
+type Cursor = { beforeID: number };
+type BotPageSize = 10 | 20 | 50 | 100;
+
+const zeroCursor: Cursor = { beforeID: 0 };
+
 export function BotsPage({ navigate }: { navigate: Navigate }) {
   const [q, setQ] = useState("");
-  const [limit, setLimit] = useState("50");
+  const [limit, setLimit] = useState<BotPageSize>(50);
   const [data, setData] = useState<BotListResponse | null>(null);
-  const [cursor, setCursor] = useState(0);
+  // history holds the cursor used to reach every page before the current
+  // one, so "Previous" can pop back without re-deriving offsets -- keyset
+  // pagination has no notion of "page N" to jump back to otherwise.
+  const [history, setHistory] = useState<Cursor[]>([]);
+  const [cursor, setCursor] = useState<Cursor>(zeroCursor);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -20,40 +30,71 @@ export function BotsPage({ navigate }: { navigate: Navigate }) {
   const [botName, setBotName] = useState("");
   const [botUsername, setBotUsername] = useState("");
 
-  async function load(next = false) {
+  async function fetchPage(query: string, at: Cursor) {
     setBusy(true);
     setError("");
-    const params = new URLSearchParams({ limit });
-    if (q.trim()) {
-      params.set("q", q.trim());
-    } else if (next) {
-      params.set("before_id", String(cursor));
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (query.trim()) {
+      params.set("q", query.trim());
+    }
+    if (at.beforeID) {
+      params.set("before_id", String(at.beforeID));
     }
     try {
       const result = await api.bots(params);
       setData(result);
-      setCursor(result.next_before_id);
+      return result;
     } catch (err) {
       setError(errorMessage(err));
+      return null;
     } finally {
       setBusy(false);
     }
   }
 
+  async function loadFresh() {
+    setHistory([]);
+    setCursor(zeroCursor);
+    await fetchPage(q, zeroCursor);
+  }
+
+  async function loadNext() {
+    if (!data?.has_more) return;
+    const at = { beforeID: data.next_before_id };
+    const result = await fetchPage(q, at);
+    if (result) {
+      setHistory((prev) => [...prev, cursor]);
+      setCursor(at);
+    }
+  }
+
+  async function loadPrev() {
+    if (history.length === 0) return;
+    const at = history[history.length - 1];
+    const result = await fetchPage(q, at);
+    if (result) {
+      setHistory((prev) => prev.slice(0, -1));
+      setCursor(at);
+    }
+  }
+
   useEffect(() => {
-    void load(false);
+    void loadFresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const rows = data?.rows ?? [];
   const verified = rows.filter((row) => row.Verified).length;
   const systemCount = rows.filter((row) => row.System).length;
+  const canGoPrev = history.length > 0 && !busy;
+  const canGoNext = Boolean(data?.has_more) && !busy;
 
   return (
     <PageFrame
       title={"Bots"}
       eyebrow={data?.listing === false ? "Search results" : "Recently created bots"}
       actions={
-        <button className="btn" type="button" onClick={() => load(false)} disabled={busy}>
+        <button className="btn" type="button" onClick={() => void loadFresh()} disabled={busy}>
           <RefreshCw size={15} /> {"Refresh"}
         </button>
       }
@@ -104,29 +145,35 @@ export function BotsPage({ navigate }: { navigate: Navigate }) {
               name: botName.trim(),
               username: botUsername.trim().replace(/^@/, "")
             })}
-            onDone={() => load(false)}
+            onDone={() => void loadFresh()}
           />
         </div>
       </section>
 
       <QueryPanel>
-        <form className="toolbar" onSubmit={(event) => { event.preventDefault(); void load(false); }}>
+        <form className="toolbar" onSubmit={(event) => { event.preventDefault(); void loadFresh(); }}>
           <label className="searchbox">
             <Search size={15} />
             <input value={q} onChange={(event) => setQ(event.target.value)} placeholder={"Bot ID / username"} />
           </label>
-          <label className="field-inline">
+          <label className="gift-page-size">
             <span>{"Limit"}</span>
-            <input className="small-input" value={limit} onChange={(event) => setLimit(event.target.value)} type="number" min="1" max="100" />
+            <select value={String(limit)} onChange={(event) => setLimit(Number(event.target.value) as BotPageSize)}>
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
           </label>
           <button className="btn primary icon-text" type="submit" disabled={busy}>
             {busy ? <Loader2 size={15} className="spin" /> : <Search size={15} />} {"Search"}
           </button>
-          {data?.listing && data.has_more && (
-            <button className="btn icon-text" type="button" onClick={() => load(true)} disabled={busy}>
-              <ChevronRight size={15} /> {"Next page"}
-            </button>
-          )}
+          <button className="btn icon-text" type="button" onClick={() => void loadPrev()} disabled={!canGoPrev}>
+            <ChevronLeft size={15} /> {"Previous page"}
+          </button>
+          <button className="btn icon-text" type="button" onClick={() => void loadNext()} disabled={!canGoNext}>
+            <ChevronRight size={15} /> {"Next page"}
+          </button>
         </form>
       </QueryPanel>
 
@@ -134,6 +181,7 @@ export function BotsPage({ navigate }: { navigate: Navigate }) {
         <table className="data-table">
           <thead>
             <tr>
+              <th className="avatar-col"></th>
               <th>{"Bot ID"}</th>
               <th>{"Username"}</th>
               <th>{"Name"}</th>
@@ -147,6 +195,7 @@ export function BotsPage({ navigate }: { navigate: Navigate }) {
           <tbody>
             {rows.map((row) => (
               <tr key={row.ID}>
+                <td className="avatar-col"><Avatar id={row.ID} firstName={row.FirstName} username={row.Username} /></td>
                 <td className="mono">{row.ID}</td>
                 <td>{displayUsername(row.Username) || "-"}</td>
                 <td>{row.FirstName || "-"}</td>
@@ -157,7 +206,7 @@ export function BotsPage({ navigate }: { navigate: Navigate }) {
                 <td><button className="row-link" onClick={() => navigate(`/bots/${row.ID}`)}><Bot size={14} /> {"Details"} <ChevronRight size={14} /></button></td>
               </tr>
             ))}
-            {rows.length === 0 && <EmptyRow colSpan={8} />}
+            {rows.length === 0 && <EmptyRow colSpan={9} />}
           </tbody>
         </table>
       </div>

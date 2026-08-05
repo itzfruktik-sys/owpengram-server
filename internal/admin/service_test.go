@@ -1034,6 +1034,16 @@ func (f *fakeChannelsService) AdminSetEmojiStatus(_ context.Context, channelID i
 	return ch, nil
 }
 
+func (f *fakeChannelsService) AdminSetPhoto(_ context.Context, channelID int64, photo domain.Photo) (domain.Channel, error) {
+	ch, ok := f.channels[channelID]
+	if !ok {
+		return domain.Channel{}, domain.ErrChannelInvalid
+	}
+	ch.PhotoID = photo.ID
+	f.channels[channelID] = ch
+	return ch, nil
+}
+
 type fakeChannelNotifier struct {
 	channels []int64
 }

@@ -34,18 +34,29 @@ function avatarInitials(firstName: string, lastName: string, username: string): 
   return out.toUpperCase();
 }
 
+type AvatarKind = "user" | "channel";
+
+// Avatar renders a user's or channel's current photo, reading through the
+// admin console's proxy (/api/accounts/{id}/avatar or /api/channels/{id}/avatar).
+// It falls back to a gradient-tinted initials tile — identical to the public
+// preview cards — when there's no photo or the fetch fails.
 export function Avatar({
-  userID,
-  firstName,
-  lastName,
+  id,
+  kind = "user",
+  firstName = "",
+  lastName = "",
   username = "",
+  title = "",
   size = 34,
   refreshKey
 }: {
-  userID: number;
-  firstName: string;
-  lastName: string;
+  id: number;
+  kind?: AvatarKind;
+  firstName?: string;
+  lastName?: string;
   username?: string;
+  // title is the channel/supergroup name, used for initials when kind="channel".
+  title?: string;
   size?: number;
   // refreshKey busts the browser's cached image (Cache-Control: max-age=300)
   // right after an admin-driven avatar change, so the new photo shows up
@@ -56,24 +67,25 @@ export function Avatar({
 
   useEffect(() => {
     setFailed(false);
-  }, [userID, refreshKey]);
+  }, [id, kind, refreshKey]);
 
   if (failed) {
-    const [from, to] = avatarGradient(userID);
+    const [from, to] = avatarGradient(id);
     return (
       <div
         className="avatar-fallback"
         style={{ width: size, height: size, background: `linear-gradient(135deg, ${from}, ${to})`, fontSize: Math.round(size * 0.42) }}
       >
-        {avatarInitials(firstName, lastName, username)}
+        {kind === "channel" ? avatarInitials(title, "", username) : avatarInitials(firstName, lastName, username)}
       </div>
     );
   }
 
+  const basePath = kind === "channel" ? `/api/channels/${id}/avatar` : `/api/accounts/${id}/avatar`;
   return (
     <img
       className="avatar-photo-img"
-      src={`/api/accounts/${userID}/avatar${refreshKey !== undefined ? `?v=${encodeURIComponent(String(refreshKey))}` : ""}`}
+      src={`${basePath}${refreshKey !== undefined ? `?v=${encodeURIComponent(String(refreshKey))}` : ""}`}
       alt=""
       loading="lazy"
       style={{ width: size, height: size }}
