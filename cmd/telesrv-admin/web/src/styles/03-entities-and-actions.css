@@ -21,6 +21,18 @@
   border-radius: var(--radius);
 }
 
+.entity-head-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.entity-head-main .avatar-photo-img,
+.entity-head-main .avatar-fallback {
+  flex-shrink: 0;
+}
+
 .entity-title {
   color: var(--heading);
   font-size: 20px;
@@ -46,6 +58,13 @@
   background: var(--panel-subtle);
   border: 1px solid var(--line);
   border-radius: var(--radius);
+}
+
+.action-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  align-items: start;
 }
 
 .section-block,
@@ -702,6 +721,10 @@
   background: var(--panel-subtle);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
+}
+
+.attr-block + .attr-block {
+  margin-top: 10px;
 }
 
 .attr-block .duration-field input,
