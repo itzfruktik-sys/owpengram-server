@@ -1,11 +1,11 @@
 import { BadgeCheck, Bot, ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
-import { ActionButton } from "../components/ActionButton";
 import { Avatar } from "../components/Avatar";
+import { CreateBotModal } from "../components/CreateBotModal";
 import { Alert, Badge, EmptyRow, Metric, PageFrame, QueryPanel } from "../components/ui";
 import { ScamFakeBadges } from "../components/flags";
-import { displayUsername, formatDate, toInt } from "../lib/format";
+import { displayUsername, formatDate } from "../lib/format";
 import type { Navigate } from "../routing";
 import type { BotListResponse } from "../types";
 
@@ -25,10 +25,7 @@ export function BotsPage({ navigate }: { navigate: Navigate }) {
   const [cursor, setCursor] = useState<Cursor>(zeroCursor);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-
-  const [ownerID, setOwnerID] = useState("");
-  const [botName, setBotName] = useState("");
-  const [botUsername, setBotUsername] = useState("");
+  const [createModalOpen, setCreateModalOpen] = useState(false);
 
   async function fetchPage(query: string, at: Cursor) {
     setBusy(true);
@@ -94,9 +91,14 @@ export function BotsPage({ navigate }: { navigate: Navigate }) {
       title={"Bots"}
       eyebrow={data?.listing === false ? "Search results" : "Recently created bots"}
       actions={
-        <button className="btn" type="button" onClick={() => void loadFresh()} disabled={busy}>
-          <RefreshCw size={15} /> {"Refresh"}
-        </button>
+        <>
+          <button className="btn primary icon-text" type="button" onClick={() => setCreateModalOpen(true)}>
+            <Plus size={15} /> {"Create bot"}
+          </button>
+          <button className="btn" type="button" onClick={() => void loadFresh()} disabled={busy}>
+            <RefreshCw size={15} /> {"Refresh"}
+          </button>
+        </>
       }
     >
       {error && <Alert>{error}</Alert>}
@@ -105,50 +107,6 @@ export function BotsPage({ navigate }: { navigate: Navigate }) {
         <Metric label={"Verified"} value={String(verified)} tone="good" />
         <Metric label={"System"} value={String(systemCount)} />
       </div>
-
-      <section className="section-block">
-        <div className="section-head">
-          <div>
-            <h2>{"Create a system bot"}</h2>
-            <p>{"Provision a bot account owned by the given user. The token is shown once after confirmation."}</p>
-          </div>
-        </div>
-        <div className="bot-create-fields">
-          <label className="duration-field">
-            <span>{"Owner user ID"}</span>
-            <input
-              value={ownerID}
-              onChange={(event) => setOwnerID(event.target.value)}
-              type="number"
-              min="1"
-              placeholder="123456789"
-            />
-          </label>
-          <label className="duration-field">
-            <span>{"Display name"}</span>
-            <input value={botName} onChange={(event) => setBotName(event.target.value)} placeholder={"e.g. Service Bot"} maxLength={64} />
-          </label>
-          <label className="duration-field">
-            <span>{"Username"}</span>
-            <input value={botUsername} onChange={(event) => setBotUsername(event.target.value)} placeholder="my_service_bot" />
-          </label>
-        </div>
-        <div className="bot-create-actions">
-          <span className="bot-create-note">{"Username must be 5-32 characters and end with 'bot'."}</span>
-          <ActionButton
-            label={"Create bot"}
-            icon={<Plus size={15} />}
-            tone="neutral"
-            path="/api/actions/create-bot"
-            payload={() => ({
-              owner_user_id: toInt(ownerID),
-              name: botName.trim(),
-              username: botUsername.trim().replace(/^@/, "")
-            })}
-            onDone={() => void loadFresh()}
-          />
-        </div>
-      </section>
 
       <QueryPanel>
         <form className="toolbar" onSubmit={(event) => { event.preventDefault(); void loadFresh(); }}>
@@ -210,6 +168,16 @@ export function BotsPage({ navigate }: { navigate: Navigate }) {
           </tbody>
         </table>
       </div>
+
+      {createModalOpen && (
+        <CreateBotModal
+          onClose={() => setCreateModalOpen(false)}
+          onCreated={() => {
+            setCreateModalOpen(false);
+            void loadFresh();
+          }}
+        />
+      )}
     </PageFrame>
   );
 }
