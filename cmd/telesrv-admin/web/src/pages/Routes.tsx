@@ -3,6 +3,7 @@ import { AccountDetailPage } from "./AccountDetailPage";
 import { AccountRatingDetailPage } from "./AccountRatingDetailPage";
 import { AccountRatingsPage } from "./AccountRatingsPage";
 import { AccountsPage } from "./AccountsPage";
+import { SharedDevicesPage } from "./SharedDevicesPage";
 import { CollectibleUsernameDetailPage } from "./CollectibleUsernameDetailPage";
 import { CollectibleUsernamesPage } from "./CollectibleUsernamesPage";
 import { ChannelDetailPage } from "./ChannelDetailPage";
@@ -99,6 +100,9 @@ export function Routes({ route, navigate }: { route: RouteState; navigate: Navig
   }
   if (moderationCaseID) {
     return <ModerationCaseDetailPage id={Number(moderationCaseID)} navigate={navigate} />;
+  }
+  if (route.path === "/accounts/shared-devices") {
+    return <SharedDevicesPage navigate={navigate} />;
   }
   if (route.path === "/accounts") {
     return <AccountsPage navigate={navigate} />;

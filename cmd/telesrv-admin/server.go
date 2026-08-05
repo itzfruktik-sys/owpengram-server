@@ -54,6 +54,7 @@ func (s *server) routes() http.Handler {
 	mux.Handle("GET /api/session", s.requireAuthAPI(http.HandlerFunc(s.handleSession)))
 	mux.Handle("GET /api/accounts", s.requireAuthAPI(http.HandlerFunc(s.handleAccountsAPI)))
 	mux.Handle("GET /api/accounts/stats", s.requireAuthAPI(http.HandlerFunc(s.handleAccountsStatsAPI)))
+	mux.Handle("GET /api/accounts/shared-devices", s.requireAuthAPI(http.HandlerFunc(s.handleSharedDeviceGroupsAPI)))
 	mux.Handle("GET /api/accounts/{id}", s.requireAuthAPI(http.HandlerFunc(s.handleAccountDetailAPI)))
 	mux.Handle("GET /api/accounts/{id}/avatar", s.requireAuthAPI(http.HandlerFunc(s.handleAccountAvatarAPI)))
 	mux.Handle("GET /api/channels", s.requireAuthAPI(http.HandlerFunc(s.handleChannelsAPI)))
@@ -629,6 +630,33 @@ func (s *server) handleAccountsAPI(w http.ResponseWriter, r *http.Request) {
 		"next_before_id":        nextBeforeID,
 		"next_before_active_us": nextBeforeActiveUS,
 		"listing":               strings.TrimSpace(q) == "",
+	})
+}
+
+func (s *server) handleSharedDeviceGroupsAPI(w http.ResponseWriter, r *http.Request) {
+	if s.read == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "read store is not configured")
+		return
+	}
+	offset, _ := parseInt(r.URL.Query().Get("offset"))
+	limit, _ := parseInt(r.URL.Query().Get("limit"))
+	groups, hasMore, err := s.read.ListSharedDeviceGroups(r.Context(), offset, limit)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if limit <= 0 {
+		limit = accountListDefaultLimit
+	}
+	if limit > accountListMaxLimit {
+		limit = accountListMaxLimit
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"limit":       limit,
+		"offset":      offset,
+		"rows":        groups,
+		"has_more":    hasMore,
+		"next_offset": offset + limit,
 	})
 }
 

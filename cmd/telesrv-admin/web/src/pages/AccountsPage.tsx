@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, RefreshCw, Search, Smartphone } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { Avatar } from "../components/Avatar";
@@ -99,17 +99,22 @@ export function AccountsPage({ navigate }: { navigate: Navigate }) {
       title={"Accounts"}
       eyebrow={data?.listing === false ? "Search results" : "Recently active accounts"}
       actions={
-        <button
-          className="btn"
-          type="button"
-          onClick={() => {
-            void loadFresh();
-            void loadStats();
-          }}
-          disabled={busy}
-        >
-          <RefreshCw size={15} /> {"Refresh"}
-        </button>
+        <>
+          <button className="btn icon-text" type="button" onClick={() => navigate("/accounts/shared-devices")}>
+            <Smartphone size={15} /> {"Shared devices"}
+          </button>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => {
+              void loadFresh();
+              void loadStats();
+            }}
+            disabled={busy}
+          >
+            <RefreshCw size={15} /> {"Refresh"}
+          </button>
+        </>
       }
     >
       {error && <Alert>{error}</Alert>}

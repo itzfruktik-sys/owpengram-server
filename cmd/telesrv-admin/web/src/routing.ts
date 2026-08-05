@@ -22,6 +22,7 @@ export function routeTitle(pathname: string): string {
   if (pathname.startsWith("/collectible-usernames")) return "Collectible Usernames";
   if (pathname.startsWith("/account-ratings")) return "Account Rating";
   if (pathname.startsWith("/storage")) return "Storage";
+  if (pathname.startsWith("/accounts/shared-devices")) return "Shared Devices";
   if (pathname.startsWith("/accounts")) return "Accounts";
   if (pathname.startsWith("/channels")) return "Supergroups and Channels";
   if (pathname.startsWith("/bots")) return "Bots";
