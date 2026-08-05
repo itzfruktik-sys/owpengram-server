@@ -73,9 +73,15 @@ services:
     image: minio/minio:latest
     container_name: ${TELESRV_DOCKER_PREFIX:-owpengram}-minio
     command: ["server", "/data", "--console-address", ":9001"]
+    # Reuses the same TELESRV_S3_* vars the app itself reads (single source
+    # of truth), with the documented local-dev defaults as a fallback so a
+    # fresh clone still works with no .env at all. Run docker compose with
+    # --env-file pointed at your real .env (or export the vars into the
+    # shell) so a production deployment gets real credentials here instead
+    # of silently falling back to the checked-in defaults.
     environment:
-      MINIO_ROOT_USER: owpengram
-      MINIO_ROOT_PASSWORD: owpengram123
+      MINIO_ROOT_USER: ${TELESRV_S3_ACCESS_KEY_ID:-owpengram}
+      MINIO_ROOT_PASSWORD: ${TELESRV_S3_SECRET_ACCESS_KEY:-owpengram123}
     ports:
       - "9000:9000"   # S3 API（对应 .env.example 的 TELESRV_S3_ENDPOINT=localhost:9000）
       - "9001:9001"   # Web 控制台，浏览器打开 http://localhost:9001 查看存储内容
