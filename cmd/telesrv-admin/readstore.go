@@ -392,6 +392,7 @@ WHERE NOT u.is_bot
 		OR lower((u.username)::text) LIKE $3
 		OR p.username_lower = $4
 		OR lower(TRIM(BOTH FROM ((u.first_name)::text || ' '::text || (u.last_name)::text))) LIKE $3
+		OR lower(COALESCE(ap.login_email, '')) LIKE $3
 	)
 	AND ($5::bigint = 0 OR (COALESCE(a.last_active_at, '0001-01-01 00:00:00+00'::timestamptz), u.id) < (to_timestamp(($5::double precision) / 1000000.0), $6::bigint))
 ORDER BY COALESCE(a.last_active_at, '0001-01-01 00:00:00+00'::timestamptz) DESC, u.id DESC

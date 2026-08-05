@@ -122,7 +122,7 @@ export function AccountsPage({ navigate }: { navigate: Navigate }) {
         <form className="toolbar" onSubmit={(event) => { event.preventDefault(); void loadFresh(); }}>
           <label className="searchbox">
             <Search size={15} />
-            <input value={q} onChange={(event) => setQ(event.target.value)} placeholder={"User ID / phone / username"} />
+            <input value={q} onChange={(event) => setQ(event.target.value)} placeholder={"User ID / phone / username / email / name"} />
           </label>
           <label className="gift-page-size">
             <span>{"Limit"}</span>

@@ -7,8 +7,6 @@ import {
   LayoutDashboard,
   LogOut,
   MessageSquareText,
-  Server,
-  Shield,
   ShieldAlert,
   ShieldCheck,
   Smile,
@@ -22,7 +20,7 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { permissionBotVerificationReview, permissionVerificationReview, useCan } from "../permissions";
-import { type Navigate, type RouteState, routeSubtitle, routeTitle } from "../routing";
+import { type Navigate, type RouteState, routeTitle } from "../routing";
 import { ThemeSwitch } from "../theme";
 import { AppLink } from "./AppLink";
 
@@ -137,17 +135,10 @@ export function Shell({
             )}
           </div>
         </nav>
-        <div className="sidebar-status">
-          <div className="sidebar-label">{"Runtime"}</div>
-          <div className="runtime-row"><Server size={14} /><span>{"Admin backend"}</span><strong>{"Ready"}</strong></div>
-          <div className="runtime-row"><Database size={14} /><span>{"PG read"}</span><strong>{"Read-only"}</strong></div>
-          <div className="runtime-row"><Shield size={14} /><span>{"Write operations"}</span><strong>{"Dry-run"}</strong></div>
-        </div>
       </aside>
       <div className="workspace">
         <header className="topbar">
           <div>
-            <div className="eyebrow">{routeSubtitle(route.path)}</div>
             <h1>{routeTitle(route.path)}</h1>
           </div>
           <div className="topbar-actions">

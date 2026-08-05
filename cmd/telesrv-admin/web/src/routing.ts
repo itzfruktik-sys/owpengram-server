@@ -34,22 +34,3 @@ export function routeTitle(pathname: string): string {
 	if (pathname.startsWith("/emoji")) return "Emoji";
   return "Operations Console";
 }
-
-export function routeSubtitle(pathname: string): string {
-  if (pathname.startsWith("/bot-verification")) return "Console / Third-party verification";
-  if (pathname.startsWith("/verification")) return "Console / Verification";
-  if (pathname.startsWith("/collectible-usernames")) return "Console / Collectible usernames";
-  if (pathname.startsWith("/account-ratings")) return "Console / Account rating";
-  if (pathname.startsWith("/storage")) return "Console / Storage";
-  if (pathname.startsWith("/accounts")) return "Console / Accounts";
-  if (pathname.startsWith("/channels")) return "Console / Channels";
-  if (pathname.startsWith("/bots")) return "Console / Bots";
-  if (pathname.startsWith("/moderation")) return "Console / Moderation";
-  if (pathname.startsWith("/emoji")) return "Console / Emoji";
-  if (pathname.startsWith("/messages")) return "Console / Messages";
-	if (pathname.startsWith("/give-gifts")) return "Console / Give Gifts";
-	if (pathname.startsWith("/gifts")) return "Console / Star Gifts";
-	if (pathname.startsWith("/stickers")) return "Console / Stickers";
-	if (pathname.startsWith("/emoji")) return "Console / Emoji";
-  return "Console / Overview";
-}
