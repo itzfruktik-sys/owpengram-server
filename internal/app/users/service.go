@@ -253,6 +253,35 @@ func (s *Service) UpdateUsername(ctx context.Context, userID int64, username str
 	return s.projectOne(ctx, self.ID, u)
 }
 
+// SetPhone force-sets a user's phone number (admin use -- no code
+// verification, unlike the user-facing verified change-phone flow in
+// internal/app/account). Pre-checks availability via ByPhone before writing,
+// on top of the store's own unique-constraint backstop.
+func (s *Service) SetPhone(ctx context.Context, userID int64, phone string) (domain.User, error) {
+	self, err := s.loadSelf(ctx, userID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	phone = domain.NormalizePhone(strings.TrimSpace(phone))
+	if !domain.ValidPhone(phone) {
+		return domain.User{}, domain.ErrPhoneNumberInvalid
+	}
+	if phone == self.Phone {
+		return s.projectOne(ctx, self.ID, self)
+	}
+	if existing, found, err := s.users.ByPhone(ctx, phone); err != nil {
+		return domain.User{}, err
+	} else if found && existing.ID != self.ID {
+		return domain.User{}, domain.ErrPhoneNumberOccupied
+	}
+	u, err := s.users.UpdatePhone(ctx, self.ID, phone)
+	if err != nil {
+		return domain.User{}, err
+	}
+	s.refreshCachedUsers(ctx, u)
+	return s.projectOne(ctx, self.ID, u)
+}
+
 // UpdateProfile 修改当前用户的基础资料。未设置的字段保持原值。
 func (s *Service) UpdateProfile(ctx context.Context, userID int64, update domain.UserProfileUpdate) (domain.User, error) {
 	self, err := s.loadSelf(ctx, userID)

@@ -33,6 +33,25 @@
   flex-shrink: 0;
 }
 
+.avatar-edit-slot {
+  position: relative;
+  flex-shrink: 0;
+}
+.avatar-edit-btn {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--brand);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .2);
+}
+.avatar-edit-btn:hover { background: var(--brand-tint); border-color: var(--brand); }
+
 .entity-title {
   color: var(--heading);
   font-size: 20px;

@@ -1,12 +1,13 @@
-import { ArrowLeft, BadgeCheck, CircleAlert, MonitorSmartphone, ScrollText, Settings2, Sparkles, Star, UserRound } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CircleAlert, ImagePlus, MonitorSmartphone, ScrollText, Settings2, Sparkles, Star, UserRound } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, errorMessage } from "../api";
+import { AccountAvatarModal } from "../components/AccountAvatarModal";
 import { ActionButton } from "../components/ActionButton";
 import { Avatar } from "../components/Avatar";
 import { AuthorizationTable } from "../components/AuthorizationTable";
 import { Alert, AuditTable, Badge, LoadingSurface, PageFrame, SectionHead, Summary, UsernameCell } from "../components/ui";
 import { ScamFakeActions, ScamFakeBadges } from "../components/flags";
-import { ColorAction, EmojiStatusAction, SupportAction, UsernameAction } from "../components/attributes";
+import { ColorAction, EmojiStatusAction, LoginEmailAction, PhoneAction, ProfileNameAction, SupportAction, UsernameAction } from "../components/attributes";
 import { displayName, displayPhone, displayUsername, formatDate, formatUnix, toInt } from "../lib/format";
 import type { Navigate } from "../routing";
 import type { AccountDetail } from "../types";
@@ -22,6 +23,8 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
   const [starsAmount, setStarsAmount] = useState("1000");
   const [freezeUntil, setFreezeUntil] = useState(() => toDateTimeLocal(new Date(Date.now() + 7 * 86400_000)));
   const [freezeAppealURL, setFreezeAppealURL] = useState("");
+  const [avatarModalOpen, setAvatarModalOpen] = useState(false);
+  const [avatarVersion, setAvatarVersion] = useState(0);
 
   async function load() {
     setBusy(true);
@@ -70,7 +73,18 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
     >
       <section className="entity-head">
         <div className="entity-head-main">
-          <Avatar userID={account.ID} firstName={account.FirstName} lastName={account.LastName} username={account.Username} size={64} />
+          <div className="avatar-edit-slot">
+            <Avatar userID={account.ID} firstName={account.FirstName} lastName={account.LastName} username={account.Username} size={64} refreshKey={avatarVersion || undefined} />
+            <button
+              className="icon-btn avatar-edit-btn"
+              type="button"
+              aria-label={"Change avatar"}
+              title={"Change avatar"}
+              onClick={() => setAvatarModalOpen(true)}
+            >
+              <ImagePlus size={13} />
+            </button>
+          </div>
           <div>
             <div className="entity-title">{displayName(account)}</div>
             <div className="entity-subtitle">{displayUsername(account.Username) || "No username"} · {displayPhone(account.Phone) || "No phone"}</div>
@@ -258,6 +272,21 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
             </section>
 
             <section className="section-block">
+              <SectionHead title={"Name"} />
+              <ProfileNameAction id={account.ID} path="/api/actions/set-account-profile" currentFirstName={account.FirstName} currentLastName={account.LastName} onDone={load} />
+            </section>
+
+            <section className="section-block">
+              <SectionHead title={"Phone Number"} />
+              <PhoneAction id={account.ID} path="/api/actions/set-account-phone" current={account.Phone} onDone={load} />
+            </section>
+
+            <section className="section-block">
+              <SectionHead title={"Login Email"} text={"The email used for sign-in / password-recovery, not a contact address."} />
+              <LoginEmailAction id={account.ID} path="/api/actions/set-account-login-email" current={account.LoginEmail} onDone={load} />
+            </section>
+
+            <section className="section-block">
               <SectionHead title={"Profile Color"} />
               <ColorAction idKey="user_id" id={account.ID} path="/api/actions/set-account-color" onDone={load} />
             </section>
@@ -273,6 +302,17 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
             <AuditTable rows={detail.AuditLogs} />
           </section>
         </div>
+      )}
+
+      {avatarModalOpen && (
+        <AccountAvatarModal
+          userID={account.ID}
+          onClose={() => setAvatarModalOpen(false)}
+          onDone={() => {
+            setAvatarVersion((v) => v + 1);
+            void load();
+          }}
+        />
       )}
     </PageFrame>
   );

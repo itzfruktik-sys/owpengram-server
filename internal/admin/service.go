@@ -33,6 +33,10 @@ const (
 	ActionSetUsername                = "account.set_username"
 	ActionSetUserColor               = "account.set_color"
 	ActionSetUserEmojiStatus         = "account.set_emoji_status"
+	ActionSetProfile                 = "account.set_profile"
+	ActionSetPhone                   = "account.set_phone"
+	ActionSetLoginEmail              = "account.set_login_email"
+	ActionSetAccountAvatar           = "account.set_avatar"
 	ActionSetChannelUsername         = "channel.set_username"
 	ActionSetChannelSettings         = "channel.set_settings"
 	ActionSetChannelColor            = "channel.set_color"
@@ -209,6 +213,18 @@ type UsersService interface {
 	UpdateUsername(ctx context.Context, userID int64, username string) (domain.User, error)
 	UpdateColor(ctx context.Context, userID int64, forProfile bool, color domain.PeerColor) (domain.User, error)
 	UpdateEmojiStatus(ctx context.Context, userID int64, status domain.UserEmojiStatus) (domain.User, error)
+	UpdateProfile(ctx context.Context, userID int64, update domain.UserProfileUpdate) (domain.User, error)
+	// SetPhone force-sets a user's phone number (no code verification).
+	SetPhone(ctx context.Context, userID int64, phone string) (domain.User, error)
+}
+
+// AccountService carries the login-email factor (account_passwords table),
+// a separate concern from UsersService's users-table fields.
+type AccountService interface {
+	// SetLoginEmail force-sets a user's login/signup email, no OTP required.
+	SetLoginEmail(ctx context.Context, userID int64, email string) error
+	// ClearLoginEmail removes the login email factor entirely.
+	ClearLoginEmail(ctx context.Context, userID int64) error
 }
 
 type StarsService interface {
@@ -281,6 +297,11 @@ type OfficialGiftsSource interface {
 type AvatarResolver interface {
 	CurrentProfilePhotoKind(ctx context.Context, ownerType domain.PeerType, ownerID int64, kind domain.ProfilePhotoKind) (domain.Photo, bool, error)
 	GetFile(ctx context.Context, req domain.FileDownloadRequest) (domain.FileChunk, bool, error)
+	// ValidateAvatarUpload is a pure check (no store writes), used by a dry-run
+	// preview before CreateAvatarFromBytes actually materializes the avatar.
+	ValidateAvatarUpload(data []byte) bool
+	CreateAvatarFromBytes(ctx context.Context, data []byte, ownerUserID int64) (domain.Photo, error)
+	SetCurrentProfilePhotoKind(ctx context.Context, ownerType domain.PeerType, ownerID int64, kind domain.ProfilePhotoKind, photoID int64, date int) (domain.Photo, bool, error)
 }
 
 // StickerSetsService is the admin-console management surface over sticker/custom-emoji
@@ -393,7 +414,10 @@ type Dependencies struct {
 	// BotVerification is the third-party mechanism, wired separately from
 	// Verification: the two never read each other's state.
 	BotVerification BotVerificationService
-	Now             func() time.Time
+	// Account carries the login-email factor -- a separate app service from
+	// Users, since login email lives in account_passwords, not users.
+	Account AccountService
+	Now     func() time.Time
 }
 
 type Service struct {
@@ -422,6 +446,7 @@ type Service struct {
 	rating                 AccountRatingService
 	verification           VerificationService
 	botVerification        BotVerificationService
+	account                AccountService
 	now                    func() time.Time
 }
 
@@ -505,6 +530,9 @@ func (s *Service) Configure(deps Dependencies) *Service {
 	}
 	if deps.BotVerification != nil {
 		s.botVerification = deps.BotVerification
+	}
+	if deps.Account != nil {
+		s.account = deps.Account
 	}
 	if deps.Now != nil {
 		s.now = deps.Now
@@ -887,6 +915,37 @@ type SetUsernameRequest struct {
 	CommandMeta
 	UserID   int64  `json:"user_id"`
 	Username string `json:"username"`
+}
+
+// SetProfileRequest updates first/last name. Both are always sent (not
+// pointer/omitempty): the admin form always shows and submits both fields
+// together, so there is no "leave unset" case to represent here.
+type SetProfileRequest struct {
+	CommandMeta
+	UserID    int64  `json:"user_id"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+}
+
+type SetPhoneRequest struct {
+	CommandMeta
+	UserID int64  `json:"user_id"`
+	Phone  string `json:"phone"`
+}
+
+// SetLoginEmailRequest force-sets (or, if Email is empty, clears) a user's
+// login/signup email.
+type SetLoginEmailRequest struct {
+	CommandMeta
+	UserID int64  `json:"user_id"`
+	Email  string `json:"email"`
+}
+
+type SetAccountAvatarRequest struct {
+	CommandMeta
+	UserID   int64  `json:"user_id"`
+	FileName string `json:"file_name"`
+	Data     []byte `json:"-"`
 }
 
 type SetChannelUsernameRequest struct {
@@ -1591,6 +1650,151 @@ func (s *Service) SetUsername(ctx context.Context, req SetUsernameRequest) (Comm
 			details["notify_error"] = err.Error()
 		}
 		return CommandResult{Message: "username updated", Details: details}, nil
+	})
+}
+
+// SetProfile force-sets a user's first and last name.
+func (s *Service) SetProfile(ctx context.Context, req SetProfileRequest) (CommandResult, error) {
+	if req.UserID <= 0 {
+		return CommandResult{}, fmt.Errorf("user_id is required")
+	}
+	if s == nil || s.users == nil {
+		return CommandResult{}, fmt.Errorf("admin user dependency is not configured")
+	}
+	firstName := strings.TrimSpace(req.FirstName)
+	lastName := strings.TrimSpace(req.LastName)
+	return s.runCommand(ctx, req.CommandMeta, ActionSetProfile, req.UserID, domain.Peer{}, req, func() (CommandResult, error) {
+		u, found, err := s.users.AdminUser(ctx, req.UserID)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		if !found {
+			return CommandResult{}, domain.ErrUserNotFound
+		}
+		details := map[string]any{
+			"previous_first_name": u.FirstName, "previous_last_name": u.LastName,
+			"new_first_name": firstName, "new_last_name": lastName,
+		}
+		if req.DryRun {
+			return CommandResult{Message: "dry-run completed", Details: details}, nil
+		}
+		updated, err := s.users.UpdateProfile(ctx, req.UserID, domain.UserProfileUpdate{
+			FirstName: firstName, HasFirstName: true,
+			LastName: lastName, HasLastName: true,
+		})
+		if err != nil {
+			return CommandResult{}, err
+		}
+		if err := s.notifyUserChanged(ctx, updated); err != nil {
+			details["notify_error"] = err.Error()
+		}
+		return CommandResult{Message: "profile updated", Details: details}, nil
+	})
+}
+
+// SetPhone force-sets a user's phone number. Rejects a collision with
+// another account's phone (checked by the users service before writing,
+// backed by the users_phone_unique_idx constraint as well).
+func (s *Service) SetPhone(ctx context.Context, req SetPhoneRequest) (CommandResult, error) {
+	if req.UserID <= 0 {
+		return CommandResult{}, fmt.Errorf("user_id is required")
+	}
+	if s == nil || s.users == nil {
+		return CommandResult{}, fmt.Errorf("admin user dependency is not configured")
+	}
+	phone := strings.TrimSpace(req.Phone)
+	return s.runCommand(ctx, req.CommandMeta, ActionSetPhone, req.UserID, domain.Peer{}, req, func() (CommandResult, error) {
+		u, found, err := s.users.AdminUser(ctx, req.UserID)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		if !found {
+			return CommandResult{}, domain.ErrUserNotFound
+		}
+		details := map[string]any{"previous_phone": u.Phone, "new_phone": phone}
+		if req.DryRun {
+			return CommandResult{Message: "dry-run completed", Details: details}, nil
+		}
+		updated, err := s.users.SetPhone(ctx, req.UserID, phone)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		details["updated_phone"] = updated.Phone
+		if err := s.notifyUserChanged(ctx, updated); err != nil {
+			details["notify_error"] = err.Error()
+		}
+		return CommandResult{Message: "phone updated", Details: details}, nil
+	})
+}
+
+// SetLoginEmail force-sets (or, if Email is empty, clears) a user's
+// login/signup email. Rejects a collision with another account's login
+// email (checked by the account service before writing, backed by the
+// account_passwords_login_email_lower_unique_idx constraint as well).
+func (s *Service) SetLoginEmail(ctx context.Context, req SetLoginEmailRequest) (CommandResult, error) {
+	if req.UserID <= 0 {
+		return CommandResult{}, fmt.Errorf("user_id is required")
+	}
+	if s == nil || s.account == nil {
+		return CommandResult{}, fmt.Errorf("admin account dependency is not configured")
+	}
+	email := strings.TrimSpace(req.Email)
+	return s.runCommand(ctx, req.CommandMeta, ActionSetLoginEmail, req.UserID, domain.Peer{}, req, func() (CommandResult, error) {
+		details := map[string]any{"new_login_email": email}
+		if req.DryRun {
+			return CommandResult{Message: "dry-run completed", Details: details}, nil
+		}
+		var err error
+		if email == "" {
+			err = s.account.ClearLoginEmail(ctx, req.UserID)
+		} else {
+			err = s.account.SetLoginEmail(ctx, req.UserID, email)
+		}
+		if err != nil {
+			return CommandResult{}, err
+		}
+		message := "login email updated"
+		if email == "" {
+			message = "login email cleared"
+		}
+		return CommandResult{Message: message, Details: details}, nil
+	})
+}
+
+// SetAccountAvatar force-sets a user's current profile photo from raw
+// uploaded image bytes, reusing the same avatar rendition pipeline
+// (s/a/c sizes) as photos.uploadProfilePhoto.
+func (s *Service) SetAccountAvatar(ctx context.Context, req SetAccountAvatarRequest) (CommandResult, error) {
+	if req.UserID <= 0 {
+		return CommandResult{}, fmt.Errorf("user_id is required")
+	}
+	if s == nil || s.photos == nil {
+		return CommandResult{}, fmt.Errorf("admin photos dependency is not configured")
+	}
+	if len(req.Data) == 0 || len(req.Data) > MaxAccountAvatarBytes || !s.photos.ValidateAvatarUpload(req.Data) {
+		return CommandResult{}, domain.ErrPhotoInvalid
+	}
+	return s.runCommand(ctx, req.CommandMeta, ActionSetAccountAvatar, req.UserID, domain.Peer{}, req, func() (CommandResult, error) {
+		details := map[string]any{"file_name": req.FileName, "bytes": len(req.Data)}
+		if req.DryRun {
+			return CommandResult{Message: "avatar validated", Details: details}, nil
+		}
+		photo, err := s.photos.CreateAvatarFromBytes(ctx, req.Data, req.UserID)
+		if err != nil {
+			return CommandResult{Details: details}, err
+		}
+		if _, _, err := s.photos.SetCurrentProfilePhotoKind(ctx, domain.PeerTypeUser, req.UserID, domain.ProfilePhotoKindProfile, photo.ID, int(time.Now().Unix())); err != nil {
+			return CommandResult{Details: details}, err
+		}
+		details["photo_id"] = photo.ID
+		if s.users != nil {
+			if u, found, uerr := s.users.AdminUser(ctx, req.UserID); uerr == nil && found {
+				if nerr := s.notifyUserChanged(ctx, u); nerr != nil {
+					details["notify_error"] = nerr.Error()
+				}
+			}
+		}
+		return CommandResult{Message: "avatar updated", Details: details}, nil
 	})
 }
 
@@ -2649,7 +2853,9 @@ func (s *Service) OfficialStarGifts(ctx context.Context) ([]officialgifts.GiftSu
 	return s.officialGifts.List(ctx)
 }
 
-const maxAccountAvatarBytes = 4 << 20
+// MaxAccountAvatarBytes bounds both reading (AccountAvatar) and writing
+// (SetAccountAvatar) a user's profile photo through the admin console.
+const MaxAccountAvatarBytes = 4 << 20
 
 // AccountAvatar returns an account's current profile photo bytes and detected
 // MIME type, mirroring internal/web's public avatar serving (same size
@@ -2674,17 +2880,17 @@ func (s *Service) AccountAvatar(ctx context.Context, userID int64) ([]byte, stri
 	if len(data) == 0 {
 		chunk, found, err := s.photos.GetFile(ctx, domain.FileDownloadRequest{
 			LocationKey: fmt.Sprintf("photo:%d:%s", photo.ID, size.Type),
-			Limit:       maxAccountAvatarBytes + 1,
+			Limit:       MaxAccountAvatarBytes + 1,
 		})
 		if err != nil {
 			return nil, "", false, err
 		}
-		if !found || chunk.Total <= 0 || chunk.Total > maxAccountAvatarBytes || int64(len(chunk.Bytes)) != chunk.Total {
+		if !found || chunk.Total <= 0 || chunk.Total > MaxAccountAvatarBytes || int64(len(chunk.Bytes)) != chunk.Total {
 			return nil, "", false, nil
 		}
 		data = chunk.Bytes
 	}
-	if len(data) == 0 || len(data) > maxAccountAvatarBytes {
+	if len(data) == 0 || len(data) > MaxAccountAvatarBytes {
 		return nil, "", false, nil
 	}
 	detected := http.DetectContentType(data)
@@ -2707,7 +2913,7 @@ func bestAccountPhotoSize(sizes []domain.PhotoSize) (domain.PhotoSize, []byte, b
 		var inline []byte
 		switch size.Kind {
 		case domain.PhotoSizeKindCached:
-			if len(size.Bytes) == 0 || len(size.Bytes) > maxAccountAvatarBytes {
+			if len(size.Bytes) == 0 || len(size.Bytes) > MaxAccountAvatarBytes {
 				continue
 			}
 			inline = size.Bytes

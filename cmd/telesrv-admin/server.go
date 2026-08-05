@@ -94,6 +94,10 @@ func (s *server) routes() http.Handler {
 	mux.Handle("POST /api/actions/set-channel-flags", s.requireAuthAPI(http.HandlerFunc(s.handleSetChannelFlagsAPI)))
 	mux.Handle("POST /api/actions/set-support", s.requireAuthAPI(http.HandlerFunc(s.handleSetSupportAPI)))
 	mux.Handle("POST /api/actions/set-account-username", s.requireAuthAPI(http.HandlerFunc(s.handleSetUsernameAPI)))
+	mux.Handle("POST /api/actions/set-account-profile", s.requireAuthAPI(http.HandlerFunc(s.handleSetProfileAPI)))
+	mux.Handle("POST /api/actions/set-account-phone", s.requireAuthAPI(http.HandlerFunc(s.handleSetPhoneAPI)))
+	mux.Handle("POST /api/actions/set-account-avatar", s.requireAuthAPI(http.HandlerFunc(s.handleSetAccountAvatarAPI)))
+	mux.Handle("POST /api/actions/set-account-login-email", s.requireAuthAPI(http.HandlerFunc(s.handleSetLoginEmailAPI)))
 	mux.Handle("POST /api/actions/set-account-color", s.requireAuthAPI(http.HandlerFunc(s.handleSetUserColorAPI)))
 	mux.Handle("POST /api/actions/set-account-emoji-status", s.requireAuthAPI(http.HandlerFunc(s.handleSetUserEmojiStatusAPI)))
 	mux.Handle("POST /api/actions/set-channel-settings", s.requireAuthAPI(http.HandlerFunc(s.handleSetChannelSettingsAPI)))
@@ -1150,6 +1154,118 @@ func (s *server) handleSetUsernameAPI(w http.ResponseWriter, r *http.Request) {
 		Username:    body.Username,
 	}
 	result, err := s.callAdminAPI(r.Context(), "/v1/accounts/set-username", req)
+	writeCommandResultAPI(w, result, err)
+}
+
+type setProfileAPIRequest struct {
+	CommandID string `json:"command_id"`
+	Reason    string `json:"reason"`
+	Confirm   bool   `json:"confirm"`
+	UserID    int64  `json:"user_id"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+}
+
+func (s *server) handleSetProfileAPI(w http.ResponseWriter, r *http.Request) {
+	var body setProfileAPIRequest
+	if !decodeAction(w, r, &body) {
+		return
+	}
+	req := admin.SetProfileRequest{
+		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "set-profile"),
+		UserID:      body.UserID,
+		FirstName:   body.FirstName,
+		LastName:    body.LastName,
+	}
+	result, err := s.callAdminAPI(r.Context(), "/v1/accounts/set-profile", req)
+	writeCommandResultAPI(w, result, err)
+}
+
+type setPhoneAPIRequest struct {
+	CommandID string `json:"command_id"`
+	Reason    string `json:"reason"`
+	Confirm   bool   `json:"confirm"`
+	UserID    int64  `json:"user_id"`
+	Phone     string `json:"phone"`
+}
+
+func (s *server) handleSetPhoneAPI(w http.ResponseWriter, r *http.Request) {
+	var body setPhoneAPIRequest
+	if !decodeAction(w, r, &body) {
+		return
+	}
+	req := admin.SetPhoneRequest{
+		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "set-phone"),
+		UserID:      body.UserID,
+		Phone:       body.Phone,
+	}
+	result, err := s.callAdminAPI(r.Context(), "/v1/accounts/set-phone", req)
+	writeCommandResultAPI(w, result, err)
+}
+
+type setLoginEmailAPIRequest struct {
+	CommandID string `json:"command_id"`
+	Reason    string `json:"reason"`
+	Confirm   bool   `json:"confirm"`
+	UserID    int64  `json:"user_id"`
+	Email     string `json:"email"`
+}
+
+func (s *server) handleSetLoginEmailAPI(w http.ResponseWriter, r *http.Request) {
+	var body setLoginEmailAPIRequest
+	if !decodeAction(w, r, &body) {
+		return
+	}
+	req := admin.SetLoginEmailRequest{
+		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "set-login-email"),
+		UserID:      body.UserID,
+		Email:       body.Email,
+	}
+	result, err := s.callAdminAPI(r.Context(), "/v1/accounts/set-login-email", req)
+	writeCommandResultAPI(w, result, err)
+}
+
+type setAccountAvatarAPIRequest struct {
+	CommandID string `json:"command_id"`
+	Reason    string `json:"reason"`
+	Confirm   bool   `json:"confirm"`
+	UserID    int64  `json:"user_id"`
+}
+
+func (s *server) handleSetAccountAvatarAPI(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, admin.MaxAccountAvatarBytes+(1<<20))
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid multipart form: "+err.Error())
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	var body setAccountAvatarAPIRequest
+	dec := json.NewDecoder(strings.NewReader(r.FormValue("metadata")))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid metadata: "+err.Error())
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "avatar file is required")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, admin.MaxAccountAvatarBytes+1))
+	if err != nil || len(data) == 0 || int64(len(data)) > admin.MaxAccountAvatarBytes {
+		writeAPIError(w, http.StatusBadRequest, "avatar file is empty or too large")
+		return
+	}
+	req := admin.SetAccountAvatarRequest{
+		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "set-avatar"),
+		UserID:      body.UserID,
+		FileName:    header.Filename,
+	}
+	result, err := s.callAdminMultipart(r.Context(), "/v1/accounts/set-avatar", req, header.Filename, data)
 	writeCommandResultAPI(w, result, err)
 }
 

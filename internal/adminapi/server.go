@@ -53,6 +53,10 @@ type Service interface {
 	DeleteBot(ctx context.Context, req admin.DeleteBotRequest) (admin.CommandResult, error)
 	SetSupport(ctx context.Context, req admin.SetSupportRequest) (admin.CommandResult, error)
 	SetUsername(ctx context.Context, req admin.SetUsernameRequest) (admin.CommandResult, error)
+	SetProfile(ctx context.Context, req admin.SetProfileRequest) (admin.CommandResult, error)
+	SetPhone(ctx context.Context, req admin.SetPhoneRequest) (admin.CommandResult, error)
+	SetLoginEmail(ctx context.Context, req admin.SetLoginEmailRequest) (admin.CommandResult, error)
+	SetAccountAvatar(ctx context.Context, req admin.SetAccountAvatarRequest) (admin.CommandResult, error)
 	SetUserColor(ctx context.Context, req admin.SetUserColorRequest) (admin.CommandResult, error)
 	SetUserEmojiStatus(ctx context.Context, req admin.SetUserEmojiStatusRequest) (admin.CommandResult, error)
 	SetChannelSettings(ctx context.Context, req admin.SetChannelSettingsRequest) (admin.CommandResult, error)
@@ -192,6 +196,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/accounts/set-flags", s.authenticated(s.handleSetUserFlags))
 	mux.HandleFunc("POST /v1/accounts/set-support", s.authenticated(s.handleSetSupport))
 	mux.HandleFunc("POST /v1/accounts/set-username", s.authenticated(s.handleSetUsername))
+	mux.HandleFunc("POST /v1/accounts/set-profile", s.authenticated(s.handleSetProfile))
+	mux.HandleFunc("POST /v1/accounts/set-phone", s.authenticated(s.handleSetPhone))
+	mux.HandleFunc("POST /v1/accounts/set-login-email", s.authenticated(s.handleSetLoginEmail))
+	mux.HandleFunc("POST /v1/accounts/set-avatar", s.authenticated(s.handleSetAccountAvatar))
 	mux.HandleFunc("POST /v1/accounts/set-color", s.authenticated(s.handleSetUserColor))
 	mux.HandleFunc("POST /v1/accounts/set-emoji-status", s.authenticated(s.handleSetUserEmojiStatus))
 	mux.HandleFunc("POST /v1/accounts/revoke-sessions", s.authenticated(s.handleRevokeSessions))
@@ -381,6 +389,67 @@ func (s *Server) handleSetUsername(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.svc.SetUsername(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleSetProfile(w http.ResponseWriter, r *http.Request) {
+	var req admin.SetProfileRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	result, err := s.svc.SetProfile(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleSetPhone(w http.ResponseWriter, r *http.Request) {
+	var req admin.SetPhoneRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	result, err := s.svc.SetPhone(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleSetLoginEmail(w http.ResponseWriter, r *http.Request) {
+	var req admin.SetLoginEmailRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	result, err := s.svc.SetLoginEmail(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleSetAccountAvatar(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, admin.MaxAccountAvatarBytes+(1<<20))
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid multipart form: "+err.Error())
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	var req admin.SetAccountAvatarRequest
+	dec := json.NewDecoder(strings.NewReader(r.FormValue("metadata")))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid metadata: "+err.Error())
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "avatar file is required")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, admin.MaxAccountAvatarBytes+1))
+	if err != nil || len(data) == 0 || int64(len(data)) > admin.MaxAccountAvatarBytes {
+		writeError(w, http.StatusBadRequest, "avatar file is empty or too large")
+		return
+	}
+	req.FileName = header.Filename
+	req.Data = data
+	result, err := s.svc.SetAccountAvatar(r.Context(), req)
 	writeCommandResult(w, result, err)
 }
 

@@ -835,6 +835,39 @@ func (f *fakeUsersService) UpdateUsername(_ context.Context, userID int64, usern
 	return u, nil
 }
 
+func (f *fakeUsersService) UpdateProfile(_ context.Context, userID int64, update domain.UserProfileUpdate) (domain.User, error) {
+	u, ok := f.users[userID]
+	if !ok {
+		return domain.User{}, domain.ErrUserNotFound
+	}
+	if update.HasFirstName {
+		u.FirstName = update.FirstName
+	}
+	if update.HasLastName {
+		u.LastName = update.LastName
+	}
+	if update.HasAbout {
+		u.About = update.About
+	}
+	f.users[userID] = u
+	return u, nil
+}
+
+func (f *fakeUsersService) SetPhone(_ context.Context, userID int64, phone string) (domain.User, error) {
+	u, ok := f.users[userID]
+	if !ok {
+		return domain.User{}, domain.ErrUserNotFound
+	}
+	for id, existing := range f.users {
+		if id != userID && existing.Phone == phone {
+			return domain.User{}, domain.ErrPhoneNumberOccupied
+		}
+	}
+	u.Phone = phone
+	f.users[userID] = u
+	return u, nil
+}
+
 func (f *fakeUsersService) UpdateColor(_ context.Context, userID int64, forProfile bool, color domain.PeerColor) (domain.User, error) {
 	u, ok := f.users[userID]
 	if !ok {

@@ -1,4 +1,4 @@
-import { AtSign, LifeBuoy, Palette, Settings2, Smile } from "lucide-react";
+import { AtSign, LifeBuoy, Mail, Palette, Phone, Settings2, Smile, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ActionButton } from "./ActionButton";
 import { toInt } from "../lib/format";
@@ -41,6 +41,92 @@ export function UsernameAction({ idKey, id, path, current, onDone }: {
         tone="neutral"
         path={path}
         payload={() => ({ [idKey]: id, username: username.trim().replace(/^@/, "") })}
+        onDone={onDone}
+      />
+    </div>
+  );
+}
+
+// ProfileNameAction force-sets a user's first and last name.
+export function ProfileNameAction({ id, path, currentFirstName, currentLastName, onDone }: {
+  id: number;
+  path: string;
+  currentFirstName: string;
+  currentLastName: string;
+  onDone: () => void;
+}) {
+  const [firstName, setFirstName] = useState(currentFirstName);
+  const [lastName, setLastName] = useState(currentLastName);
+  return (
+    <div className="attr-block">
+      <label className="duration-field">
+        <span>{"First name"}</span>
+        <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="First name" />
+      </label>
+      <label className="duration-field">
+        <span>{"Last name"}</span>
+        <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Last name" />
+      </label>
+      <ActionButton
+        label={"Set name"}
+        icon={<UserRound size={15} />}
+        tone="neutral"
+        path={path}
+        payload={() => ({ user_id: id, first_name: firstName.trim(), last_name: lastName.trim() })}
+        onDone={onDone}
+      />
+    </div>
+  );
+}
+
+// PhoneAction force-sets a user's phone number. The backend rejects a value
+// already tied to another account.
+export function PhoneAction({ id, path, current, onDone }: {
+  id: number;
+  path: string;
+  current: string;
+  onDone: () => void;
+}) {
+  const [phone, setPhone] = useState(current);
+  return (
+    <div className="attr-block">
+      <label className="duration-field">
+        <span>{"Phone number"}</span>
+        <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="15551234567" />
+      </label>
+      <ActionButton
+        label={"Set phone"}
+        icon={<Phone size={15} />}
+        tone="warn"
+        path={path}
+        payload={() => ({ user_id: id, phone: phone.trim() })}
+        onDone={onDone}
+      />
+    </div>
+  );
+}
+
+// LoginEmailAction sets, or (left empty) clears, the login/signup email
+// factor. The backend rejects an email already tied to another account.
+export function LoginEmailAction({ id, path, current, onDone }: {
+  id: number;
+  path: string;
+  current: string;
+  onDone: () => void;
+}) {
+  const [email, setEmail] = useState(current);
+  return (
+    <div className="attr-block">
+      <label className="duration-field">
+        <span>{"Login email"}</span>
+        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com (empty clears it)" type="email" />
+      </label>
+      <ActionButton
+        label={email.trim() ? "Set login email" : "Clear login email"}
+        icon={<Mail size={15} />}
+        tone="warn"
+        path={path}
+        payload={() => ({ user_id: id, email: email.trim() })}
         onDone={onDone}
       />
     </div>

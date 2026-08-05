@@ -140,6 +140,28 @@ func (s *Service) GetDocument(ctx context.Context, id int64) (domain.Document, b
 	return s.media.GetDocument(ctx, id)
 }
 
+// ValidateAvatarUpload is a pure check (decodes only the image header) so a
+// dry-run preview can validate bytes before SetAccountAvatar/CreateAvatarFromBytes
+// actually renders and stores the avatar's s/a/c size set.
+func (s *Service) ValidateAvatarUpload(data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	return err == nil && cfg.Width > 0 && cfg.Height > 0
+}
+
+// CreateAvatarFromBytes stores already-in-hand image bytes as an avatar Photo
+// ('s'/'a'/'c' sizes), for callers that skip the chunked upload.saveFilePart
+// transfer regular clients use (e.g. the admin console, which already has the
+// full file from a browser upload).
+func (s *Service) CreateAvatarFromBytes(ctx context.Context, data []byte, ownerUserID int64) (domain.Photo, error) {
+	if len(data) == 0 {
+		return domain.Photo{}, domain.ErrPhotoInvalid
+	}
+	return s.createAvatarPhoto(ctx, data, ownerUserID)
+}
+
 // CreateAvatarFromUpload 把已上传文件组装成头像 Photo（'s'/'a'/'c' 尺寸，'a'/'c' 匹配
 // InputPeerPhotoFileLocation big/small 与 channelFull 下载路径），不绑定 profile_photos。用于频道 editPhoto。
 func (s *Service) CreateAvatarFromUpload(ctx context.Context, file domain.UploadedFileRef) (domain.Photo, error) {

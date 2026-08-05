@@ -39,19 +39,24 @@ export function Avatar({
   firstName,
   lastName,
   username = "",
-  size = 34
+  size = 34,
+  refreshKey
 }: {
   userID: number;
   firstName: string;
   lastName: string;
   username?: string;
   size?: number;
+  // refreshKey busts the browser's cached image (Cache-Control: max-age=300)
+  // right after an admin-driven avatar change, so the new photo shows up
+  // immediately instead of the stale cached one.
+  refreshKey?: number | string;
 }) {
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     setFailed(false);
-  }, [userID]);
+  }, [userID, refreshKey]);
 
   if (failed) {
     const [from, to] = avatarGradient(userID);
@@ -68,7 +73,7 @@ export function Avatar({
   return (
     <img
       className="avatar-photo-img"
-      src={`/api/accounts/${userID}/avatar`}
+      src={`/api/accounts/${userID}/avatar${refreshKey !== undefined ? `?v=${encodeURIComponent(String(refreshKey))}` : ""}`}
       alt=""
       loading="lazy"
       style={{ width: size, height: size }}

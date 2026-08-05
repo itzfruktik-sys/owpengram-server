@@ -220,6 +220,26 @@ func (s *UserStore) UpdateProfile(ctx context.Context, userID int64, firstName, 
 	return userFromModel(row), nil
 }
 
+// UpdatePhone force-sets a user's phone number. Used only by the admin
+// panel -- the user-facing change-phone flow (internal/app/account) requires
+// a verified code and lives in internal/store/postgres/phone_change.go.
+func (s *UserStore) UpdatePhone(ctx context.Context, userID int64, phone string) (domain.User, error) {
+	row, err := s.q.UpdateUserPhone(ctx, sqlcgen.UpdateUserPhoneParams{
+		ID:    userID,
+		Phone: phone,
+	})
+	if err != nil {
+		if isUniqueConstraint(err, "users_phone_unique_idx") {
+			return domain.User{}, domain.ErrPhoneNumberOccupied
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.User{}, domain.ErrUserNotFound
+		}
+		return domain.User{}, fmt.Errorf("update user phone: %w", err)
+	}
+	return userFromModel(row), nil
+}
+
 func (s *UserStore) UpdateUsername(ctx context.Context, userID int64, username string) (domain.User, error) {
 	username = strings.TrimSpace(strings.TrimPrefix(username, "@"))
 	usernameLower := strings.ToLower(username)

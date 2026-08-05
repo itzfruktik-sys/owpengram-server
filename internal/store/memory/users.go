@@ -245,6 +245,25 @@ func (s *UserStore) UpdateProfile(_ context.Context, userID int64, firstName, la
 	return u, nil
 }
 
+func (s *UserStore) UpdatePhone(_ context.Context, userID int64, phone string) (domain.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.byID[userID]
+	if !ok || u.Deleted {
+		return domain.User{}, domain.ErrUserNotFound
+	}
+	if phone != "" {
+		for id, existing := range s.byID {
+			if id != userID && existing.Phone == phone {
+				return domain.User{}, domain.ErrPhoneNumberOccupied
+			}
+		}
+	}
+	u.Phone = phone
+	s.byID[userID] = u
+	return u, nil
+}
+
 func (s *UserStore) UpdateBirthday(_ context.Context, userID int64, birthday domain.Birthday) (domain.User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
