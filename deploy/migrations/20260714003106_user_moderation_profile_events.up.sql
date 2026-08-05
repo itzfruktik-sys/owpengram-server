@@ -1,13 +1,20 @@
 -- Reserved development migration version.
 -- SCAM/FAKE is authoritative peer profile state. updateUser/updateChannel have
 -- no pts/pts_count, so this migration must not admit a moderation-only account
--- PTS event type. The earlier development definition was corrected in place
--- because no user/production database can contain that unpublished shape.
+-- PTS event type.
+--
+-- 'message_reactions' is kept in the allow-list even though current code
+-- never writes it (message reactions are delivered live, not logged to this
+-- durable table -- see message_saved_reactions_integration_test.go, which
+-- asserts zero such rows after reacting). A prior release did write it, so a
+-- production database can still carry old rows of that type; dropping it
+-- from the allow-list breaks this ALTER TABLE against that real data (the
+-- CHECK applies to every existing row, not just new ones).
 ALTER TABLE public.user_update_events DROP CONSTRAINT IF EXISTS user_update_events_type_check;
 ALTER TABLE public.user_update_events ADD CONSTRAINT user_update_events_type_check CHECK (
   (event_type)::text = ANY (ARRAY[
     'new_message', 'read_history_inbox', 'read_history_outbox', 'read_message_contents',
-    'edit_message', 'web_page', 'message_poll', 'draft_message', 'quick_replies',
+    'edit_message', 'web_page', 'message_reactions', 'message_poll', 'draft_message', 'quick_replies',
     'new_quick_reply', 'delete_quick_reply', 'quick_reply_message', 'delete_quick_reply_messages',
     'contacts_reset', 'dialog_pinned', 'pinned_dialogs', 'pinned_messages', 'dialog_unread_mark',
     'peer_settings', 'peer_story_blocked', 'user_phone', 'user_emoji_status',
