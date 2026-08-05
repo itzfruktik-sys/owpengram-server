@@ -168,6 +168,41 @@
   color: var(--text-soft);
 }
 
+.secret-reveal {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  background: var(--warn-tint);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius);
+}
+
+.secret-reveal-label {
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.secret-reveal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.secret-reveal-value {
+  overflow: hidden;
+  flex: 1 1 auto;
+  padding: 6px 10px;
+  color: var(--text-soft);
+  letter-spacing: .12em;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .modal-actions {
   justify-content: flex-end;
   padding: 12px 18px;

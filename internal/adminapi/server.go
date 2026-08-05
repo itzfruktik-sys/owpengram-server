@@ -51,6 +51,7 @@ type Service interface {
 	SetChannelFlags(ctx context.Context, req admin.SetChannelFlagsRequest) (admin.CommandResult, error)
 	CreateBot(ctx context.Context, req admin.CreateBotRequest) (admin.CommandResult, error)
 	DeleteBot(ctx context.Context, req admin.DeleteBotRequest) (admin.CommandResult, error)
+	ExportBotToken(ctx context.Context, req admin.ExportBotTokenRequest) (admin.CommandResult, error)
 	SetSupport(ctx context.Context, req admin.SetSupportRequest) (admin.CommandResult, error)
 	SetUsername(ctx context.Context, req admin.SetUsernameRequest) (admin.CommandResult, error)
 	SetProfile(ctx context.Context, req admin.SetProfileRequest) (admin.CommandResult, error)
@@ -215,6 +216,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/channels/set-emoji-status", s.authenticated(s.handleSetChannelEmojiStatus))
 	mux.HandleFunc("POST /v1/bots/create", s.authenticated(s.handleCreateBot))
 	mux.HandleFunc("POST /v1/bots/delete", s.authenticated(s.handleDeleteBot))
+	mux.HandleFunc("POST /v1/bots/export-token", s.authenticated(s.handleExportBotToken))
 	mux.HandleFunc("POST /v1/messages/delete", s.authenticated(s.handleDeleteMessages))
 	mux.HandleFunc("POST /v1/messages/delete-history", s.authenticated(s.handleDeleteHistory))
 	mux.HandleFunc("POST /v1/gifts/import", s.authenticated(s.handleImportStarGift))
@@ -582,6 +584,15 @@ func (s *Server) handleDeleteBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.svc.DeleteBot(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleExportBotToken(w http.ResponseWriter, r *http.Request) {
+	var req admin.ExportBotTokenRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	result, err := s.svc.ExportBotToken(r.Context(), req)
 	writeCommandResult(w, result, err)
 }
 

@@ -108,6 +108,7 @@ func (s *server) routes() http.Handler {
 	mux.Handle("POST /api/actions/set-channel-emoji-status", s.requireAuthAPI(http.HandlerFunc(s.handleSetChannelEmojiStatusAPI)))
 	mux.Handle("POST /api/actions/create-bot", s.requireAuthAPI(http.HandlerFunc(s.handleCreateBotAPI)))
 	mux.Handle("POST /api/actions/delete-bot", s.requireAuthAPI(http.HandlerFunc(s.handleDeleteBotAPI)))
+	mux.Handle("POST /api/actions/export-bot-token", s.requireAuthAPI(http.HandlerFunc(s.handleExportBotTokenAPI)))
 	mux.Handle("POST /api/actions/set-channel-verified", s.requireAuthAPI(http.HandlerFunc(s.handleSetChannelVerifiedAPI)))
 	mux.Handle("POST /api/actions/revoke-sessions", s.requireAuthAPI(http.HandlerFunc(s.handleRevokeSessionsAPI)))
 	mux.Handle("POST /api/actions/delete-messages", s.requireAuthAPI(http.HandlerFunc(s.handleDeleteMessagesAPI)))
@@ -894,6 +895,26 @@ func (s *server) handleDeleteBotAPI(w http.ResponseWriter, r *http.Request) {
 		BotUserID:   body.BotUserID,
 	}
 	result, err := s.callAdminAPI(r.Context(), "/v1/bots/delete", req)
+	writeCommandResultAPI(w, result, err)
+}
+
+type exportBotTokenAPIRequest struct {
+	CommandID string `json:"command_id"`
+	Reason    string `json:"reason"`
+	Confirm   bool   `json:"confirm"`
+	BotUserID int64  `json:"bot_user_id"`
+}
+
+func (s *server) handleExportBotTokenAPI(w http.ResponseWriter, r *http.Request) {
+	var body exportBotTokenAPIRequest
+	if !decodeAction(w, r, &body) {
+		return
+	}
+	req := admin.ExportBotTokenRequest{
+		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "export-bot-token"),
+		BotUserID:   body.BotUserID,
+	}
+	result, err := s.callAdminAPI(r.Context(), "/v1/bots/export-token", req)
 	writeCommandResultAPI(w, result, err)
 }
 

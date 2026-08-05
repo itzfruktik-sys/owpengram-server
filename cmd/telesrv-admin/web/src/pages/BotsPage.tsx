@@ -172,10 +172,11 @@ export function BotsPage({ navigate }: { navigate: Navigate }) {
       {createModalOpen && (
         <CreateBotModal
           onClose={() => setCreateModalOpen(false)}
-          onCreated={() => {
-            setCreateModalOpen(false);
-            void loadFresh();
-          }}
+          // Deliberately does not close the modal -- the token is only ever
+          // shown once, inside ActionButton's own result panel, and closing
+          // immediately would yank it away before it can be copied. The
+          // operator closes both modals manually once they're done with it.
+          onCreated={() => void loadFresh()}
         />
       )}
     </PageFrame>

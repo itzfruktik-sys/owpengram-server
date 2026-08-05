@@ -613,6 +613,26 @@ func (s *Service) ExportBotToken(ctx context.Context, ownerUserID, botUserID int
 	return domain.FormatBotToken(botUserID, profile.TokenSecret), nil
 }
 
+// AdminExportBotToken returns a non-system bot's current token through the
+// admin path (no owner check), without rotating it. System bots (built-in,
+// seeded at reserved ids) have no exportable token.
+func (s *Service) AdminExportBotToken(ctx context.Context, botUserID int64) (string, error) {
+	if s == nil || s.bots == nil || botUserID <= 0 {
+		return "", domain.ErrBotNotFound
+	}
+	if domain.IsSystemUserID(botUserID) || botUserID == domain.BotFatherUserID {
+		return "", fmt.Errorf("system bots have no exportable token")
+	}
+	profile, found, err := s.botProfile(ctx, botUserID)
+	if err != nil {
+		return "", err
+	}
+	if !found || profile.TokenSecret == "" {
+		return "", domain.ErrBotNotFound
+	}
+	return domain.FormatBotToken(botUserID, profile.TokenSecret), nil
+}
+
 // RevokeBotToken 生成新 token 随机段并落库；旧 token 立即不可登录，并踢掉所有
 // 已凭旧 token 登录的 session（经注入的 SessionRevoker）。
 func (s *Service) RevokeBotToken(ctx context.Context, ownerUserID, botUserID int64) (string, error) {

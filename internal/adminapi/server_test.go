@@ -463,6 +463,10 @@ func (fakeService) DeleteBot(_ context.Context, req admin.DeleteBotRequest) (adm
 	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
 }
 
+func (fakeService) ExportBotToken(_ context.Context, req admin.ExportBotTokenRequest) (admin.CommandResult, error) {
+	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
+}
+
 func (fakeService) SetUserFlags(_ context.Context, req admin.SetUserFlagsRequest) (admin.CommandResult, error) {
 	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
 }

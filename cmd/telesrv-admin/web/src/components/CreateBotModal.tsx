@@ -14,11 +14,11 @@ export function CreateBotModal({ onClose, onCreated }: { onClose: () => void; on
 
   return createPortal(
     <div className="modal-backdrop" role="presentation">
-      <section className="modal command-modal" role="dialog" aria-modal="true" aria-label={"Create a system bot"}>
+      <section className="modal command-modal" role="dialog" aria-modal="true" aria-label={"Create bot"}>
         <div className="modal-head">
           <div>
             <div className="eyebrow">{"Bots"}</div>
-            <h2>{"Create a system bot"}</h2>
+            <h2>{"Create bot"}</h2>
           </div>
           <button className="icon-btn" type="button" onClick={onClose} aria-label={"Close"}><X size={15} /></button>
         </div>
@@ -58,6 +58,7 @@ export function CreateBotModal({ onClose, onCreated }: { onClose: () => void; on
               name: botName.trim(),
               username: botUsername.trim().replace(/^@/, "")
             })}
+            secretField="token"
             onDone={onCreated}
           />
         </div>

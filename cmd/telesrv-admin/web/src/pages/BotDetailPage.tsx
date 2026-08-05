@@ -1,9 +1,10 @@
-import { ArrowLeft, BadgeCheck, ImagePlus, ScrollText, Settings2, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Copy, ImagePlus, ScrollText, Settings2, Trash2, UserRound } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, errorMessage } from "../api";
 import { ActionButton } from "../components/ActionButton";
 import { Avatar } from "../components/Avatar";
 import { AvatarModal } from "../components/AvatarModal";
+import { CopyBotTokenModal } from "../components/CopyBotTokenModal";
 import { Alert, AuditTable, Badge, LoadingSurface, PageFrame, SectionHead, Summary } from "../components/ui";
 import { ScamFakeActions, ScamFakeBadges } from "../components/flags";
 import { ColorAction, EmojiStatusAction, UsernameAction } from "../components/attributes";
@@ -20,6 +21,7 @@ export function BotDetailPage({ id, navigate }: { id: number; navigate: Navigate
   const [tab, setTab] = useState<Tab>("profile");
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [avatarVersion, setAvatarVersion] = useState(0);
+  const [copyTokenModalOpen, setCopyTokenModalOpen] = useState(false);
 
   async function load() {
     setBusy(true);
@@ -145,6 +147,18 @@ export function BotDetailPage({ id, navigate }: { id: number; navigate: Navigate
               <EmojiStatusAction idKey="user_id" id={bot.ID} path="/api/actions/set-account-emoji-status" onDone={load} />
             </section>
 
+            {!bot.System && (
+              <section className="section-block">
+                <SectionHead title={"Credentials"} />
+                <div className="action-stack">
+                  <button className="btn icon-text" type="button" onClick={() => setCopyTokenModalOpen(true)}>
+                    <Copy size={15} /> {"Copy token"}
+                  </button>
+                </div>
+                <p className="bot-create-note">{"Copies straight to the clipboard through a dedicated confirmation step -- the token itself is never shown on this page."}</p>
+              </section>
+            )}
+
             <section className="section-block">
               <SectionHead title={"Danger Zone"} />
               {bot.System ? (
@@ -182,6 +196,10 @@ export function BotDetailPage({ id, navigate }: { id: number; navigate: Navigate
             void load();
           }}
         />
+      )}
+
+      {copyTokenModalOpen && (
+        <CopyBotTokenModal botID={bot.ID} onClose={() => setCopyTokenModalOpen(false)} />
       )}
     </PageFrame>
   );

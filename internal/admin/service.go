@@ -58,6 +58,7 @@ const (
 	ActionGiveGift                   = "gifts.give"
 	ActionCreateBot                  = "bot.create"
 	ActionDeleteBot                  = "bot.delete"
+	ActionExportBotToken             = "bot.export_token"
 	ActionSetStickerSetArchived      = "stickers.set_archived"
 	ActionSetStickerSetSortOrder     = "stickers.set_sort_order"
 	ActionRenameStickerSet           = "stickers.rename"
@@ -333,6 +334,10 @@ type StickerSetsService interface {
 type BotService interface {
 	CreateBot(ctx context.Context, ownerUserID int64, name, username string) (domain.User, string, error)
 	DeleteBot(ctx context.Context, botUserID int64) (domain.User, error)
+	// AdminExportBotToken returns a non-system bot's current token with no
+	// ownership check. Used by ExportBotToken; the token never enters the
+	// audit/replay record (see CommandResult.transientDetails).
+	AdminExportBotToken(ctx context.Context, botUserID int64) (string, error)
 }
 
 // EmojiService renders custom-emoji document animations for the admin emoji
@@ -1023,6 +1028,11 @@ type CreateBotRequest struct {
 }
 
 type DeleteBotRequest struct {
+	CommandMeta
+	BotUserID int64 `json:"bot_user_id"`
+}
+
+type ExportBotTokenRequest struct {
 	CommandMeta
 	BotUserID int64 `json:"bot_user_id"`
 }
@@ -2036,6 +2046,39 @@ func (s *Service) DeleteBot(ctx context.Context, req DeleteBotRequest) (CommandR
 			details["notify_error"] = err.Error()
 		}
 		return CommandResult{Message: "bot deleted", Details: details}, nil
+	})
+}
+
+// ExportBotToken returns a non-system bot's current token (unrotated) via the
+// audited runCommand wrapper. Like CreateBot's token, it travels only in
+// transientDetails -- excluded from the stored/replayed command JSON so it
+// never lands in audit storage. The admin console's own UI additionally never
+// renders this token on screen; it copies the response straight to the
+// clipboard.
+func (s *Service) ExportBotToken(ctx context.Context, req ExportBotTokenRequest) (CommandResult, error) {
+	if s == nil || s.bots == nil {
+		return CommandResult{}, fmt.Errorf("admin bot dependency is not configured")
+	}
+	if req.BotUserID <= 0 {
+		return CommandResult{}, fmt.Errorf("bot_user_id is required")
+	}
+	if domain.IsSystemUserID(req.BotUserID) {
+		return CommandResult{}, fmt.Errorf("system bots have no exportable token")
+	}
+	return s.runCommand(ctx, req.CommandMeta, ActionExportBotToken, req.BotUserID, domain.Peer{}, req, func() (CommandResult, error) {
+		details := map[string]any{"bot_user_id": req.BotUserID}
+		if req.DryRun {
+			return CommandResult{Message: "token export validated", Details: details}, nil
+		}
+		token, err := s.bots.AdminExportBotToken(ctx, req.BotUserID)
+		if err != nil {
+			return CommandResult{Details: details}, err
+		}
+		return CommandResult{
+			Message:          "token exported",
+			Details:          details,
+			transientDetails: map[string]any{"token": token},
+		}, nil
 	})
 }
 

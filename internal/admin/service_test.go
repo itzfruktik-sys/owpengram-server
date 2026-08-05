@@ -617,6 +617,7 @@ type fakeBotService struct {
 	token       string
 	createCalls int
 	deleteCalls int
+	exportCalls int
 }
 
 func (f *fakeBotService) CreateBot(_ context.Context, _ int64, name, username string) (domain.User, string, error) {
@@ -627,6 +628,11 @@ func (f *fakeBotService) CreateBot(_ context.Context, _ int64, name, username st
 func (f *fakeBotService) DeleteBot(_ context.Context, botUserID int64) (domain.User, error) {
 	f.deleteCalls++
 	return domain.User{ID: botUserID, Bot: true, Deleted: true}, nil
+}
+
+func (f *fakeBotService) AdminExportBotToken(_ context.Context, botUserID int64) (string, error) {
+	f.exportCalls++
+	return f.token, nil
 }
 
 type fakeRestrictionStore struct {
