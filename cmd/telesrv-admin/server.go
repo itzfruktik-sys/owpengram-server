@@ -251,9 +251,10 @@ func (s *server) handleAPILogin(w http.ResponseWriter, r *http.Request) {
 	})
 	setCSRFCookie(w, csrfToken, sessionTTL)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"actor":       "admin",
-		"permissions": permissions.List(),
-		"csrf_token":  csrfToken,
+		"actor":                         "admin",
+		"permissions":                   permissions.List(),
+		"csrf_token":                    csrfToken,
+		"hide_third_party_verification": s.cfg.HideThirdPartyVerification,
 	})
 }
 
@@ -277,8 +278,9 @@ func (s *server) handleAPILogout(w http.ResponseWriter, _ *http.Request) {
 // than letting them walk into a 403.
 func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"actor":       actorFromContext(r.Context()),
-		"permissions": permissionsFromContext(r.Context()).List(),
+		"actor":                         actorFromContext(r.Context()),
+		"permissions":                   permissionsFromContext(r.Context()).List(),
+		"hide_third_party_verification": s.cfg.HideThirdPartyVerification,
 	})
 }
 

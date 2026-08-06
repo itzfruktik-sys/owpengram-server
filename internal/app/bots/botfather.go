@@ -88,8 +88,14 @@ func (s *Service) HandlesBot(botUserID int64) bool {
 		return false
 	}
 	switch botUserID {
+	case domain.VerifierBotUserID:
+		// @marksbot fronts THIRD-PARTY verification, which is hidden by default
+		// (config.HideThirdPartyVerification) because the feature is not fully
+		// finished -- while hidden, the bot doesn't exist as far as the message
+		// pipeline is concerned.
+		return !s.hideThirdPartyVerification
 	case domain.BotFatherUserID, domain.StickersBotUserID, domain.ChatBotUserID,
-		domain.VerifyBotUserID, domain.VerifierBotUserID:
+		domain.VerifyBotUserID:
 		return true
 	default:
 		return false

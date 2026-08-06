@@ -1006,7 +1006,8 @@ func run(logger *zap.Logger) error {
 		botsapp.WithUserStickerSets(accountService),
 		botsapp.WithTelegramLogin(telegramLoginService),
 		botsapp.WithDialogRateLimiter(rateLimiter, cfg.VerificationBotRateLimit, cfg.VerificationBotRateWindow),
-		botsapp.WithPublicBaseURL(cfg.PublicBaseURL))
+		botsapp.WithPublicBaseURL(cfg.PublicBaseURL),
+		botsapp.WithHideThirdPartyVerification(cfg.HideThirdPartyVerification))
 	groupCallStore := postgres.NewGroupCallStore(pool)
 	groupCallsService := groupcallsapp.NewService(groupCallStore, groupcallsapp.WithPublicBaseURL(cfg.PublicBaseURL))
 	// 群通话媒体面：内嵌 pion SFU（M1+）。SFU 的 liveness reporter 把媒体面存活

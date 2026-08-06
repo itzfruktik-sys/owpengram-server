@@ -76,6 +76,12 @@ type uiConfig struct {
 	// entry, so introducing the permission model never locks an operator out of a
 	// panel that worked before.
 	Permissions []string
+	// HideThirdPartyVerification mirrors config.HideThirdPartyVerification
+	// (TELESRV_HIDE_THIRD_PARTY_VERIFICATION, default true): while true, every
+	// botverification.* route refuses with 404 regardless of session
+	// permissions, and the session/login response tells the frontend to hide
+	// the "Third-party marks" nav entry and its routes.
+	HideThirdPartyVerification bool
 }
 
 // loadConfig 通过 internal/config.Load() 加载 .env 配置文件与环境变量，
@@ -103,14 +109,15 @@ func loadConfig() (uiConfig, error) {
 	sum := sha256.Sum256([]byte(appCfg.AdminSessionKey))
 
 	return uiConfig{
-		Addr:          appCfg.AdminUIAddr,
-		PostgresDSN:   appCfg.PostgresDSN,
-		AdminAPIURL:   adminAPIURL(adminAPIAddr),
-		AdminAPIToken: appCfg.AdminAPIToken,
-		Password:      appCfg.AdminUIPassword,
-		Token:         appCfg.AdminUIToken,
-		SessionKey:    sum[:],
-		Permissions:   appCfg.AdminUIPermissions,
+		Addr:                       appCfg.AdminUIAddr,
+		PostgresDSN:                appCfg.PostgresDSN,
+		AdminAPIURL:                adminAPIURL(adminAPIAddr),
+		AdminAPIToken:              appCfg.AdminAPIToken,
+		Password:                   appCfg.AdminUIPassword,
+		Token:                      appCfg.AdminUIToken,
+		SessionKey:                 sum[:],
+		Permissions:                appCfg.AdminUIPermissions,
+		HideThirdPartyVerification: appCfg.HideThirdPartyVerification,
 	}, nil
 }
 

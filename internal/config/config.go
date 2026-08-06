@@ -548,6 +548,15 @@ type Config struct {
 	// verifier bots. 0 for either disables the budget.
 	BotVerificationRequestRateLimit  int
 	BotVerificationRequestRateWindow time.Duration
+	// HideThirdPartyVerification hides third-party bot verification instead of
+	// removing it: the admin panel drops its "Third-party marks" nav entry and
+	// refuses every botverification.* route with 404 (regardless of session
+	// permissions), and the built-in @marksbot service bot stops responding to
+	// messages entirely. Defaults to true because this feature is NOT FULLY
+	// FINISHED and may cause unstable server behavior -- it stays wired up
+	// (nothing is deleted) so it can be re-enabled later, but it should not be
+	// exposed on a deployment that isn't specifically testing it.
+	HideThirdPartyVerification bool
 
 	// CollectibleUsernameURLTemplate is the landing URL recorded on a minted
 	// collectible username when the mint request carries no explicit URL.
@@ -766,35 +775,35 @@ func Load() (Config, error) {
 		RedisPassword:    envOr("TELESRV_REDIS_PASSWORD", ""),
 		RedisDB:          envIntOr("TELESRV_REDIS_DB", 0),
 
-		DevAuthCode:                   envOr("TELESRV_DEV_AUTH_CODE", "12345"),
-		AuthCodeTTL:                   envDurationOr("TELESRV_AUTH_CODE_TTL", 5*time.Minute),
-		PhoneCodeLength:               envIntOr("TELESRV_PHONE_CODE_LENGTH", 5),
-		AuthCodeMaxAttempts:           envIntOr("TELESRV_AUTH_CODE_MAX_ATTEMPTS", 5),
-		AuthCodePhoneRateLimit:        envIntOr("TELESRV_AUTH_CODE_PHONE_RATE_LIMIT", 5),
-		AuthCodeAuthKeyRateLimit:      envIntOr("TELESRV_AUTH_CODE_AUTH_KEY_RATE_LIMIT", 20),
-		AuthCodeRateWindow:            envDurationOr("TELESRV_AUTH_CODE_RATE_WINDOW", 10*time.Minute),
-		LoginEmailEnable:              envBoolOr("TELESRV_LOGIN_EMAIL_ENABLE", false),
-		LoginEmailRequireSetup:        envBoolOr("TELESRV_LOGIN_EMAIL_REQUIRE_SETUP", false),
-		EmailSignupEnable:             envBoolOr("TELESRV_EMAIL_SIGNUP_ENABLE", false),
-		EmailSignupPhonePrefixes:      envListOr("TELESRV_EMAIL_SIGNUP_PHONE_PREFIXES", []string{"888"}),
-		LoginEmailCodeLength:          envIntOr("TELESRV_LOGIN_EMAIL_CODE_LENGTH", 6),
-		PhoneCodeDeliveryProvider:     strings.ToLower(strings.TrimSpace(envOr("TELESRV_PHONE_CODE_DELIVERY_PROVIDER", "development"))),
-		EmailCodeDeliveryProvider:     strings.ToLower(strings.TrimSpace(envOr("TELESRV_EMAIL_CODE_DELIVERY_PROVIDER", "smtp"))),
-		OTPWebhookURL:                 envOr("TELESRV_OTP_WEBHOOK_URL", ""),
-		OTPWebhookSecret:              envOr("TELESRV_OTP_WEBHOOK_SECRET", ""),
-		OTPWebhookTimeout:             envDurationOr("TELESRV_OTP_WEBHOOK_TIMEOUT", 5*time.Second),
-		SMTPHost:                      envOr("TELESRV_SMTP_HOST", ""),
-		SMTPPort:                      envIntOr("TELESRV_SMTP_PORT", 587),
-		SMTPUsername:                  envOr("TELESRV_SMTP_USERNAME", ""),
-		SMTPPassword:                  envOr("TELESRV_SMTP_PASSWORD", ""),
-		SMTPFrom:                      envOr("TELESRV_SMTP_FROM", ""),
-		SMTPFromName:                  envOr("TELESRV_SMTP_FROM_NAME", "OwpenGram"),
-		SMTPTLSMode:                   strings.ToLower(strings.TrimSpace(envOr("TELESRV_SMTP_TLS", "starttls"))),
-		SMTPTimeout:                   envDurationOr("TELESRV_SMTP_TIMEOUT", 10*time.Second),
-		LangPackSeedDir:               envOr("TELESRV_LANGPACK_SEED_DIR", "data/langpack"),
-		OfficialGiftsDir:              envOr("TELESRV_OFFICIAL_GIFTS_DIR", "data/official-gifts"),
-		StarGiftTONStartingGrant:      envInt64Or("TELESRV_STARGIFT_TON_STARTING_GRANT", 10_000_000_000),
-		BlobDir:                       envOr("TELESRV_BLOB_DIR", "data/blobs"),
+		DevAuthCode:               envOr("TELESRV_DEV_AUTH_CODE", "12345"),
+		AuthCodeTTL:               envDurationOr("TELESRV_AUTH_CODE_TTL", 5*time.Minute),
+		PhoneCodeLength:           envIntOr("TELESRV_PHONE_CODE_LENGTH", 5),
+		AuthCodeMaxAttempts:       envIntOr("TELESRV_AUTH_CODE_MAX_ATTEMPTS", 5),
+		AuthCodePhoneRateLimit:    envIntOr("TELESRV_AUTH_CODE_PHONE_RATE_LIMIT", 5),
+		AuthCodeAuthKeyRateLimit:  envIntOr("TELESRV_AUTH_CODE_AUTH_KEY_RATE_LIMIT", 20),
+		AuthCodeRateWindow:        envDurationOr("TELESRV_AUTH_CODE_RATE_WINDOW", 10*time.Minute),
+		LoginEmailEnable:          envBoolOr("TELESRV_LOGIN_EMAIL_ENABLE", false),
+		LoginEmailRequireSetup:    envBoolOr("TELESRV_LOGIN_EMAIL_REQUIRE_SETUP", false),
+		EmailSignupEnable:         envBoolOr("TELESRV_EMAIL_SIGNUP_ENABLE", false),
+		EmailSignupPhonePrefixes:  envListOr("TELESRV_EMAIL_SIGNUP_PHONE_PREFIXES", []string{"888"}),
+		LoginEmailCodeLength:      envIntOr("TELESRV_LOGIN_EMAIL_CODE_LENGTH", 6),
+		PhoneCodeDeliveryProvider: strings.ToLower(strings.TrimSpace(envOr("TELESRV_PHONE_CODE_DELIVERY_PROVIDER", "development"))),
+		EmailCodeDeliveryProvider: strings.ToLower(strings.TrimSpace(envOr("TELESRV_EMAIL_CODE_DELIVERY_PROVIDER", "smtp"))),
+		OTPWebhookURL:             envOr("TELESRV_OTP_WEBHOOK_URL", ""),
+		OTPWebhookSecret:          envOr("TELESRV_OTP_WEBHOOK_SECRET", ""),
+		OTPWebhookTimeout:         envDurationOr("TELESRV_OTP_WEBHOOK_TIMEOUT", 5*time.Second),
+		SMTPHost:                  envOr("TELESRV_SMTP_HOST", ""),
+		SMTPPort:                  envIntOr("TELESRV_SMTP_PORT", 587),
+		SMTPUsername:              envOr("TELESRV_SMTP_USERNAME", ""),
+		SMTPPassword:              envOr("TELESRV_SMTP_PASSWORD", ""),
+		SMTPFrom:                  envOr("TELESRV_SMTP_FROM", ""),
+		SMTPFromName:              envOr("TELESRV_SMTP_FROM_NAME", "OwpenGram"),
+		SMTPTLSMode:               strings.ToLower(strings.TrimSpace(envOr("TELESRV_SMTP_TLS", "starttls"))),
+		SMTPTimeout:               envDurationOr("TELESRV_SMTP_TIMEOUT", 10*time.Second),
+		LangPackSeedDir:           envOr("TELESRV_LANGPACK_SEED_DIR", "data/langpack"),
+		OfficialGiftsDir:          envOr("TELESRV_OFFICIAL_GIFTS_DIR", "data/official-gifts"),
+		StarGiftTONStartingGrant:  envInt64Or("TELESRV_STARGIFT_TON_STARTING_GRANT", 10_000_000_000),
+		BlobDir:                   envOr("TELESRV_BLOB_DIR", "data/blobs"),
 		// s3 (MinIO by default, see deploy/docker-compose.yml's minio service) is
 		// the default blob backend; localfs remains fully supported as an
 		// explicit opt-in (TELESRV_BLOB_BACKEND=localfs).
@@ -937,6 +946,7 @@ func Load() (Config, error) {
 		// verifier bots, and filing with a second company is not a retry of the first.
 		BotVerificationRequestRateLimit:  envIntOr("TELESRV_BOT_VERIFICATION_REQUEST_RATE_LIMIT", 5),
 		BotVerificationRequestRateWindow: envDurationOr("TELESRV_BOT_VERIFICATION_REQUEST_RATE_WINDOW", 24*time.Hour),
+		HideThirdPartyVerification:       envBoolOr("TELESRV_HIDE_THIRD_PARTY_VERIFICATION", true),
 
 		GroupCallCheckTTL:        envDurationOr("TELESRV_GROUPCALL_CHECK_TTL", 45*time.Second),
 		GroupCallSweepInterval:   envDurationOr("TELESRV_GROUPCALL_SWEEP_INTERVAL", 10*time.Second),

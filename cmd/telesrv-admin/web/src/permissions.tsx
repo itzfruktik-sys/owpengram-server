@@ -17,20 +17,32 @@ export const permissionBotVerificationManage = "botverification.manage";
 // section the session may not use is hidden instead of rendered into a 403. This
 // is a convenience for the operator, not a security boundary: every route is
 // checked again server-side.
-const PermissionsContext = createContext<readonly string[]>([]);
+type SessionFlags = {
+  permissions: readonly string[];
+  // Mirrors AdminSession.hide_third_party_verification. Deliberately NOT folded
+  // into the permission list: it applies regardless of what the session was
+  // granted (even "*"), because the feature is not fully finished rather than
+  // merely restricted.
+  hideThirdPartyVerification: boolean;
+};
+
+const PermissionsContext = createContext<SessionFlags>({ permissions: [], hideThirdPartyVerification: true });
 
 export function PermissionsProvider({
   permissions,
+  hideThirdPartyVerification = true,
   children
 }: {
   permissions: readonly string[];
+  hideThirdPartyVerification?: boolean;
   children: ReactNode;
 }) {
-  return <PermissionsContext.Provider value={permissions}>{children}</PermissionsContext.Provider>;
+  const value = useMemo(() => ({ permissions, hideThirdPartyVerification }), [permissions, hideThirdPartyVerification]);
+  return <PermissionsContext.Provider value={value}>{children}</PermissionsContext.Provider>;
 }
 
 export function usePermissions(): { permissions: readonly string[]; can: (permission: string) => boolean } {
-  const permissions = useContext(PermissionsContext);
+  const { permissions } = useContext(PermissionsContext);
   return useMemo(
     () => ({
       permissions,
@@ -42,6 +54,13 @@ export function usePermissions(): { permissions: readonly string[]; can: (permis
 
 export function useCan(permission: string): boolean {
   return usePermissions().can(permission);
+}
+
+// useThirdPartyVerificationHidden reports the server's
+// TELESRV_HIDE_THIRD_PARTY_VERIFICATION setting (default true). Unlike
+// useCan, this is never overridden by a "*" session -- see SessionFlags.
+export function useThirdPartyVerificationHidden(): boolean {
+  return useContext(PermissionsContext).hideThirdPartyVerification;
 }
 
 // PermissionGate is what a direct URL hits: without the right the operator gets
@@ -64,6 +83,29 @@ export function PermissionDenied({ permission }: { permission: string }) {
           <div>
             <div className="entity-title"><ShieldOff size={16} /> {"Section unavailable"}</div>
             <div className="entity-subtitle">{"Ask an operator to add the permission to TELESRV_ADMIN_UI_PERMISSIONS and sign in again."}</div>
+          </div>
+        </div>
+      </section>
+    </PageFrame>
+  );
+}
+
+// ThirdPartyVerificationHiddenGate is what a direct URL to a third-party
+// verification page hits while the feature is hidden -- distinct from
+// PermissionGate because no permission grant (not even "*") changes this.
+export function ThirdPartyVerificationHiddenGate({ children }: { children: ReactNode }) {
+  const hidden = useThirdPartyVerificationHidden();
+  if (!hidden) {
+    return <>{children}</>;
+  }
+  return (
+    <PageFrame title={"Feature hidden"} eyebrow={"Console / Third-party marks"}>
+      <Alert>{"Third-party bot verification is hidden on this server (TELESRV_HIDE_THIRD_PARTY_VERIFICATION=true)."}</Alert>
+      <section className="section-block">
+        <div className="entity-head">
+          <div>
+            <div className="entity-title"><ShieldOff size={16} /> {"Not fully finished"}</div>
+            <div className="entity-subtitle">{"This feature may cause unstable server behavior and is hidden by default. Set TELESRV_HIDE_THIRD_PARTY_VERIFICATION=false to re-enable it."}</div>
           </div>
         </div>
       </section>

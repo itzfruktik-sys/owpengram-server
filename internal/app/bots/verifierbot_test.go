@@ -415,6 +415,28 @@ func TestVerifierBotStartWithoutVerifierStatusIsHonest(t *testing.T) {
 	}
 }
 
+// TestVerifierBotHiddenByThirdPartyVerificationFlag proves
+// config.HideThirdPartyVerification actually silences @marksbot: with the
+// option set, HandlesBot must refuse the bot's id entirely, so
+// OnPrivateMessage never even reaches the dialog logic -- not just an error
+// reply, no reply at all, matching every other unhandled bot id.
+func TestVerifierBotHiddenByThirdPartyVerificationFlag(t *testing.T) {
+	cv := newFakeCustomVerification()
+	svc, users, messages := newVerifierBotTestService(t, cv, WithHideThirdPartyVerification(true))
+	owner := newOwner(t, users, "+7201")
+
+	if svc.HandlesBot(domain.VerifierBotUserID) {
+		t.Fatal("service should refuse @verifierbot while third-party verification is hidden")
+	}
+	svc.OnPrivateMessage(context.Background(), domain.VerifierBotUserID, domain.Message{
+		From: domain.Peer{Type: domain.PeerTypeUser, ID: owner.ID},
+		Body: "/start",
+	})
+	if replies := verifierReplies(t, messages, owner.ID); len(replies) != 0 {
+		t.Fatalf("hidden @verifierbot replied: %+v", replies)
+	}
+}
+
 func TestVerifierBotStartWithActiveVerifierShowsCompanyAndMark(t *testing.T) {
 	cv := newFakeCustomVerification().activated()
 	svc, users, messages := newVerifierBotTestService(t, cv)

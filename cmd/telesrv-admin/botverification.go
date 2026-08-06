@@ -27,9 +27,24 @@ import (
 // journal, the status machine and the optimistic lock are enforced in one place and
 // a panel action is indistinguishable from an API one in the audit trail.
 
+// requireThirdPartyVerificationVisible refuses every third-party verification
+// route while the feature is hidden (TELESRV_HIDE_THIRD_PARTY_VERIFICATION,
+// default true), regardless of session permissions -- the feature is not
+// fully finished and may cause unstable server behavior, so hiding it is
+// enforced here, not just by the panel dropping its nav entry.
+func (s *server) requireThirdPartyVerificationVisible(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.HideThirdPartyVerification {
+			http.NotFound(w, r)
+			return
+		}
+		handler(w, r)
+	}
+}
+
 // botVerificationRead mounts a route behind a session and botverification.review.
 func (s *server) botVerificationRead(handler http.HandlerFunc) http.Handler {
-	return s.requireAuthAPI(s.requirePermission(permissionBotVerificationReview, handler))
+	return s.requireAuthAPI(s.requirePermission(permissionBotVerificationReview, s.requireThirdPartyVerificationVisible(handler)))
 }
 
 // botVerificationManage mounts a route behind a session and botverification.manage.
@@ -38,7 +53,7 @@ func (s *server) botVerificationRead(handler http.HandlerFunc) http.Handler {
 // a verifier and working its queue are different jobs, so an operator may hold
 // either without the other.
 func (s *server) botVerificationManage(handler http.HandlerFunc) http.Handler {
-	return s.requireAuthAPI(s.requirePermission(permissionBotVerificationManage, handler))
+	return s.requireAuthAPI(s.requirePermission(permissionBotVerificationManage, s.requireThirdPartyVerificationVisible(handler)))
 }
 
 // ---------------------------------------------------------------------------

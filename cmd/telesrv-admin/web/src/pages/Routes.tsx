@@ -27,6 +27,7 @@ import { VerificationDetailPage } from "./VerificationDetailPage";
 import { VerificationPage } from "./VerificationPage";
 import {
   PermissionGate,
+  ThirdPartyVerificationHiddenGate,
   permissionBotVerificationReview,
   permissionVerificationReview
 } from "../permissions";
@@ -45,16 +46,20 @@ export function Routes({ route, navigate }: { route: RouteState; navigate: Navig
   const botVerificationRequestID = route.path.match(/^\/bot-verification\/(\d+)$/)?.[1];
   if (botVerificationRequestID) {
     return (
-      <PermissionGate permission={permissionBotVerificationReview}>
-        <BotVerificationRequestPage id={botVerificationRequestID} navigate={navigate} />
-      </PermissionGate>
+      <ThirdPartyVerificationHiddenGate>
+        <PermissionGate permission={permissionBotVerificationReview}>
+          <BotVerificationRequestPage id={botVerificationRequestID} navigate={navigate} />
+        </PermissionGate>
+      </ThirdPartyVerificationHiddenGate>
     );
   }
   if (route.path === "/bot-verification") {
     return (
-      <PermissionGate permission={permissionBotVerificationReview}>
-        <BotVerificationPage navigate={navigate} />
-      </PermissionGate>
+      <ThirdPartyVerificationHiddenGate>
+        <PermissionGate permission={permissionBotVerificationReview}>
+          <BotVerificationPage navigate={navigate} />
+        </PermissionGate>
+      </ThirdPartyVerificationHiddenGate>
     );
   }
   // The detail match has to be tested before the exact "/verification" branch, and

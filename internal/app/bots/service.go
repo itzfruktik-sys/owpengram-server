@@ -119,6 +119,11 @@ type Service struct {
 	now                   func() time.Time
 	chatBotStreamThrottle time.Duration
 	publicBaseURL         string
+	// hideThirdPartyVerification mirrors config.HideThirdPartyVerification: while
+	// true, HandlesBot refuses VerifierBotUserID so @marksbot never answers a
+	// message. The feature is not fully finished and defaults to hidden; see the
+	// config field's doc comment.
+	hideThirdPartyVerification bool
 	// dialogLimiter bounds how often one applicant can drive a service-bot dialog.
 	// The verification service already rate-limits application creation; this is the
 	// separate bound on dialog traffic itself, so a script cannot spin the state
@@ -231,6 +236,15 @@ func WithCustomVerification(v customVerifications) Option {
 		if v != nil {
 			s.customVerification = v
 		}
+	}
+}
+
+// WithHideThirdPartyVerification mirrors config.HideThirdPartyVerification:
+// while true, HandlesBot refuses VerifierBotUserID, so @marksbot never
+// receives or answers a message.
+func WithHideThirdPartyVerification(hidden bool) Option {
+	return func(s *Service) {
+		s.hideThirdPartyVerification = hidden
 	}
 }
 

@@ -718,6 +718,13 @@ export type AdminSession = {
   actor: string;
   // The right set the signed session was issued with; ["*"] means everything.
   permissions?: string[] | null;
+  // Mirrors the server's TELESRV_HIDE_THIRD_PARTY_VERIFICATION (default true):
+  // while true, the panel drops the "Third-party marks" nav entry and its
+  // routes, regardless of what permissions the session carries -- the feature
+  // is not fully finished. The server also refuses the underlying routes with
+  // 404, so this is a UI convenience on top of a real enforcement, not the
+  // enforcement itself.
+  hide_third_party_verification?: boolean;
 };
 
 export type AdminLoginResult = AdminSession & {

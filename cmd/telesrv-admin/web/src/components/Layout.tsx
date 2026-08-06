@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
-import { permissionBotVerificationReview, permissionVerificationReview, useCan } from "../permissions";
+import { permissionBotVerificationReview, permissionVerificationReview, useCan, useThirdPartyVerificationHidden } from "../permissions";
 import { type Navigate, type RouteState, routeTitle } from "../routing";
 import { ThemeSwitch } from "../theme";
 import { AppLink } from "./AppLink";
@@ -58,6 +58,9 @@ export function Shell({
   // Same reasoning for the third-party queue, which has its own right: the two
   // sections are granted independently, so one entry can be visible without the other.
   const canReviewBotVerification = useCan(permissionBotVerificationReview);
+  // Third-party verification is additionally hidden by default (not fully
+  // finished) regardless of what the session was granted -- see permissions.tsx.
+  const thirdPartyVerificationHidden = useThirdPartyVerificationHidden();
   const messagesActive = route.path.startsWith("/messages");
   const [messagesOpen, setMessagesOpen] = useState(messagesActive);
 
@@ -92,7 +95,7 @@ export function Shell({
           {canReviewVerification && (
             <NavLink icon={<BadgeCheck size={16} />} href="/verification" route={route} navigate={navigate}>{"Verification"}</NavLink>
           )}
-          {canReviewBotVerification && (
+          {canReviewBotVerification && !thirdPartyVerificationHidden && (
             <NavLink icon={<Stamp size={16} />} href="/bot-verification" route={route} navigate={navigate}>{"Third-party marks"}</NavLink>
           )}
           <NavLink icon={<AtSign size={16} />} href="/collectible-usernames" route={route} navigate={navigate}>{"NFT Usernames"}</NavLink>
