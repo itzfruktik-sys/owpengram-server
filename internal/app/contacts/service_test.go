@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	privacyapp "telesrv/internal/app/privacy"
@@ -641,6 +642,46 @@ func TestAcceptContactRequiresExistingContactRequest(t *testing.T) {
 
 	if _, err := svc.AcceptContact(ctx, alice.ID, bob.ID); !errors.Is(err, ErrContactReqMissing) {
 		t.Fatalf("AcceptContact without contact err = %v, want ErrContactReqMissing", err)
+	}
+}
+
+// marksbotSearchStore wraps memory.UserStore to fold domain.VerifierBotUser()
+// into a matching Search result, since memory.UserStore.Create always assigns
+// an id from its own auto-increment sequence and can never produce the fixed
+// domain.VerifierBotUserID a real deployment seeds it under.
+type marksbotSearchStore struct {
+	*memory.UserStore
+}
+
+func (s *marksbotSearchStore) Search(ctx context.Context, currentUserID int64, query, phoneQuery string, limit int) (domain.UserSearchResult, error) {
+	res, err := s.UserStore.Search(ctx, currentUserID, query, phoneQuery, limit)
+	if err != nil {
+		return res, err
+	}
+	if strings.Contains(strings.ToLower(query), "marks") {
+		res.Results = append(res.Results, domain.VerifierBotUser())
+	}
+	return res, nil
+}
+
+func TestSearchHidesMarksbotWhenThirdPartyVerificationHidden(t *testing.T) {
+	ctx := context.Background()
+	users := &marksbotSearchStore{UserStore: memory.NewUserStore()}
+	viewer, err := users.Create(ctx, domain.User{Phone: "15550000201", FirstName: "Viewer"})
+	if err != nil {
+		t.Fatalf("create viewer: %v", err)
+	}
+
+	visible := NewService(memory.NewContactStore(), users).Configure(WithHideThirdPartyVerification(false))
+	found, err := visible.Search(ctx, viewer.ID, "marksbot", 10)
+	if err != nil || len(found.Results) != 1 || found.Results[0].ID != domain.VerifierBotUserID {
+		t.Fatalf("Search (visible) = %+v err=%v, want @marksbot", found, err)
+	}
+
+	hidden := NewService(memory.NewContactStore(), users).Configure(WithHideThirdPartyVerification(true))
+	found, err = hidden.Search(ctx, viewer.ID, "marksbot", 10)
+	if err != nil || len(found.Results) != 0 {
+		t.Fatalf("Search (hidden) = %+v err=%v, want no results", found, err)
 	}
 }
 

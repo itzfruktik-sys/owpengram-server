@@ -909,6 +909,7 @@ func run(logger *zap.Logger) error {
 		contacts.WithPrivacyEvaluator(privacyService),
 		contacts.WithAccountFreezeProvider(adminService),
 		contacts.WithReadModelVersions(readModelVersionStore),
+		contacts.WithHideThirdPartyVerification(cfg.HideThirdPartyVerification),
 	)
 	if seeded, err := langPackService.SeedDirectory(ctx, cfg.LangPackSeedDir); err != nil {
 		return fmt.Errorf("seed langpack: %w", err)
@@ -1128,7 +1129,7 @@ func run(logger *zap.Logger) error {
 		passkeyapp.WithAllowedOrigins(cfg.PasskeyAllowedOrigins))
 	// 自定义云主题(Create a New Theme):主题目录与每用户已安装列表均持久化到 postgres。
 	themeService := themesapp.NewService(postgres.NewThemeStore(pool))
-	usersService := users.NewService(userStore, users.WithBaseUserCache(userCache), users.WithContactStore(contactStore), users.WithPhotoProvider(cachedPhotos), users.WithPrivacyEvaluator(privacyService), users.WithAccountFreezeProvider(adminService))
+	usersService := users.NewService(userStore, users.WithBaseUserCache(userCache), users.WithContactStore(contactStore), users.WithPhotoProvider(cachedPhotos), users.WithPrivacyEvaluator(privacyService), users.WithAccountFreezeProvider(adminService), users.WithHideThirdPartyVerification(cfg.HideThirdPartyVerification))
 	privacyService.ConfigureReadModels(usersService, channelStore)
 	aiComposeService := aiapp.NewService(aiComposeStore, newAIComposeOptions(cfg, rateLimiter, usersService.PremiumActive, logger)...)
 	botsService.SetAIChatGenerator(aiComposeService)

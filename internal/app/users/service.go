@@ -27,6 +27,10 @@ type Service struct {
 	privacy   userprojection.PrivacyEvaluator
 	freezes   userprojection.AccountFreezeProvider
 	projector *userprojection.Projector
+	// hideThirdPartyVerification mirrors config.HideThirdPartyVerification:
+	// while true, ResolveUsername never resolves @marksbot
+	// (domain.VerifierBotUserID), so a client cannot discover it by username.
+	hideThirdPartyVerification bool
 }
 
 type usernameAvailabilityStore interface {
@@ -62,6 +66,12 @@ func WithPrivacyEvaluator(p userprojection.PrivacyEvaluator) Option {
 
 func WithAccountFreezeProvider(p userprojection.AccountFreezeProvider) Option {
 	return func(s *Service) { s.freezes = p }
+}
+
+// WithHideThirdPartyVerification mirrors config.HideThirdPartyVerification:
+// while true, ResolveUsername treats @marksbot as not found.
+func WithHideThirdPartyVerification(hidden bool) Option {
+	return func(s *Service) { s.hideThirdPartyVerification = hidden }
 }
 
 const (
@@ -616,6 +626,9 @@ func (s *Service) ResolveUsername(ctx context.Context, currentUserID int64, user
 	u, found, err := s.users.ByUsername(ctx, username)
 	if err != nil || !found {
 		return u, found, err
+	}
+	if s.hideThirdPartyVerification && u.ID == domain.VerifierBotUserID {
+		return domain.User{}, false, nil
 	}
 	s.putCachedUsers(ctx, u)
 	u, err = s.projectOne(ctx, currentUserID, u)

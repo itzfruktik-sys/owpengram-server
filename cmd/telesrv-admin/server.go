@@ -858,6 +858,19 @@ func (s *server) handleSetChannelAvatarAPI(w http.ResponseWriter, r *http.Reques
 	writeCommandResultAPI(w, result, err)
 }
 
+// filterOutBot drops the given bot id from a row slice in place, preserving
+// order. Used to keep a hidden built-in bot out of admin listings without
+// touching the underlying SQL projection.
+func filterOutBot(rows []BotRow, excludeID int64) []BotRow {
+	out := rows[:0]
+	for _, row := range rows {
+		if row.ID != excludeID {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 func (s *server) handleBotsAPI(w http.ResponseWriter, r *http.Request) {
 	if s.read == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "read store is not configured")
@@ -877,6 +890,12 @@ func (s *server) handleBotsAPI(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	// @marksbot is not fully finished (see requireThirdPartyVerificationVisible):
+	// while third-party verification is hidden, it must not be discoverable in
+	// the bot list either, not just unreachable at /api/botverification/*.
+	if s.cfg.HideThirdPartyVerification {
+		rows = filterOutBot(rows, domain.VerifierBotUserID)
 	}
 	nextBeforeID := int64(0)
 	if hasMore && len(rows) > 0 {
@@ -906,6 +925,10 @@ func (s *server) handleBotDetailAPI(w http.ResponseWriter, r *http.Request) {
 	botID, err := parseInt64(r.PathValue("id"))
 	if err != nil || botID <= 0 {
 		writeAPIError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if s.cfg.HideThirdPartyVerification && botID == domain.VerifierBotUserID {
+		writeAPIError(w, http.StatusNotFound, "bot not found")
 		return
 	}
 	detail, err := s.read.BotDetail(r.Context(), botID)

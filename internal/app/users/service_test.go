@@ -89,6 +89,40 @@ func TestServiceUsernameLifecycle(t *testing.T) {
 	}
 }
 
+// marksbotOverrideStore wraps memory.UserStore to serve domain.VerifierBotUser()
+// for a fixed username lookup, since memory.UserStore.Create always assigns an
+// id from its own auto-increment sequence and can never produce the fixed
+// domain.VerifierBotUserID a real deployment seeds it under.
+type marksbotOverrideStore struct {
+	*memory.UserStore
+}
+
+func (s *marksbotOverrideStore) ByUsername(ctx context.Context, username string) (domain.User, bool, error) {
+	if strings.EqualFold(username, "marksbot") {
+		return domain.VerifierBotUser(), true, nil
+	}
+	return s.UserStore.ByUsername(ctx, username)
+}
+
+func TestResolveUsernameHidesMarksbotWhenThirdPartyVerificationHidden(t *testing.T) {
+	ctx := context.Background()
+	store := &marksbotOverrideStore{UserStore: memory.NewUserStore()}
+	viewer, err := store.Create(ctx, domain.User{AccessHash: 1, Phone: "15550002001", FirstName: "Viewer"})
+	if err != nil {
+		t.Fatalf("create viewer: %v", err)
+	}
+
+	visible := NewService(store, WithHideThirdPartyVerification(false))
+	if u, found, err := visible.ResolveUsername(ctx, viewer.ID, "marksbot"); err != nil || !found || u.ID != domain.VerifierBotUserID {
+		t.Fatalf("ResolveUsername (visible) = user %+v found %v err %v, want @marksbot", u, found, err)
+	}
+
+	hidden := NewService(store, WithHideThirdPartyVerification(true))
+	if _, found, err := hidden.ResolveUsername(ctx, viewer.ID, "marksbot"); err != nil || found {
+		t.Fatalf("ResolveUsername (hidden) found=%v err=%v, want not found", found, err)
+	}
+}
+
 func TestResolvePhoneHonorsAddedByPhone(t *testing.T) {
 	ctx := context.Background()
 	users := memory.NewUserStore()

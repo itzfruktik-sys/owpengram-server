@@ -36,6 +36,10 @@ type Service struct {
 	projector *userprojection.Projector
 	versions  store.ReadModelVersionStore
 	cache     *contactListReadModelCache
+	// hideThirdPartyVerification mirrors config.HideThirdPartyVerification:
+	// while true, Search never returns @marksbot (domain.VerifierBotUserID),
+	// so the account is unreachable for a client that doesn't already know it.
+	hideThirdPartyVerification bool
 }
 
 // Option adjusts optional contacts service dependencies.
@@ -53,6 +57,12 @@ func WithPrivacyEvaluator(p phonePrivacyService) Option {
 
 func WithAccountFreezeProvider(p userprojection.AccountFreezeProvider) Option {
 	return func(s *Service) { s.freezes = p }
+}
+
+// WithHideThirdPartyVerification mirrors config.HideThirdPartyVerification:
+// while true, Search filters @marksbot out of every result set.
+func WithHideThirdPartyVerification(hidden bool) Option {
+	return func(s *Service) { s.hideThirdPartyVerification = hidden }
 }
 
 // WithReadModelVersions enables durable hash-token fast paths for NotModified RPCs.
@@ -317,6 +327,18 @@ func (s *Service) ImportContacts(ctx context.Context, userID int64, inputs []dom
 	return out, nil
 }
 
+// filterOutUserID drops the given user id from a result slice in place,
+// preserving order.
+func filterOutUserID(users []domain.User, excludeID int64) []domain.User {
+	out := users[:0]
+	for _, u := range users {
+		if u.ID != excludeID {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
 func (s *Service) Search(ctx context.Context, userID int64, query string, limit int) (domain.UserSearchResult, error) {
 	if s == nil || s.users == nil || userID == 0 {
 		return domain.UserSearchResult{}, nil
@@ -337,6 +359,10 @@ func (s *Service) Search(ctx context.Context, userID int64, query string, limit 
 	res, err := s.users.Search(ctx, userID, query, phoneQuery, limit)
 	if err != nil {
 		return domain.UserSearchResult{}, err
+	}
+	if s.hideThirdPartyVerification {
+		res.MyResults = filterOutUserID(res.MyResults, domain.VerifierBotUserID)
+		res.Results = filterOutUserID(res.Results, domain.VerifierBotUserID)
 	}
 	if s.privacy != nil && phoneQuery != "" && len(res.MyResults)+len(res.Results) > 0 {
 		targetIDs := make([]int64, 0, len(res.MyResults)+len(res.Results))
