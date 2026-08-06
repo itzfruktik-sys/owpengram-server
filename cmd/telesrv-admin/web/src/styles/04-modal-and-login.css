@@ -72,6 +72,26 @@
   padding: 14px 18px;
 }
 
+/* Groups a long form (e.g. minting a collectible username) into clearly
+   labeled steps instead of one flat wall of fields, so it's obvious what's
+   required (username, owner, price) versus optional (marketplace record). */
+.mint-field-group {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.mint-field-group-label {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
 .command-step {
   display: flex;
   min-height: 38px;
