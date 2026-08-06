@@ -147,7 +147,11 @@ export function ChannelsPage({ navigate }: { navigate: Navigate }) {
           <tbody>
             {data?.rows.map((row) => (
               <tr key={row.ID}>
-                <td className="avatar-col"><Avatar id={row.ID} kind="channel" title={row.Title} /></td>
+                <td className="avatar-col">
+                  <button className="avatar-link" type="button" onClick={() => navigate(`/channels/${row.ID}`)} aria-label={`Open channel ${row.ID}`}>
+                    <Avatar id={row.ID} kind="channel" title={row.Title} />
+                  </button>
+                </td>
                 <td className="mono">{row.ID}</td>
                 <td>{channelKind(row)}</td>
                 <td>{displayUsername(row.Username)}</td>

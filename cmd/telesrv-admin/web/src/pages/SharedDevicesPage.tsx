@@ -94,7 +94,11 @@ export function SharedDevicesPage({ navigate }: { navigate: Navigate }) {
                 <tbody>
                   {group.Accounts.map((account) => (
                     <tr key={account.UserID}>
-                      <td className="avatar-col"><Avatar id={account.UserID} firstName={account.FirstName} lastName={account.LastName} username={account.Username} /></td>
+                      <td className="avatar-col">
+                        <button className="avatar-link" type="button" onClick={() => navigate(`/accounts/${account.UserID}`)} aria-label={`Open account ${account.UserID}`}>
+                          <Avatar id={account.UserID} firstName={account.FirstName} lastName={account.LastName} username={account.Username} />
+                        </button>
+                      </td>
                       <td className="mono">{account.UserID}</td>
                       <td>{displayPhone(account.Phone)}</td>
                       <td>{displayUsername(account.Username) || "-"}</td>

@@ -548,6 +548,21 @@ textarea:focus {
   cursor: pointer;
 }
 
+.avatar-link {
+  display: block;
+  padding: 0;
+  line-height: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.avatar-link:hover,
+.avatar-link:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
 .table-wrap {
   width: 100%;
   overflow-x: auto;

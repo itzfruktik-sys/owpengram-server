@@ -153,7 +153,11 @@ export function BotsPage({ navigate }: { navigate: Navigate }) {
           <tbody>
             {rows.map((row) => (
               <tr key={row.ID}>
-                <td className="avatar-col"><Avatar id={row.ID} firstName={row.FirstName} username={row.Username} /></td>
+                <td className="avatar-col">
+                  <button className="avatar-link" type="button" onClick={() => navigate(`/bots/${row.ID}`)} aria-label={`Open bot ${row.ID}`}>
+                    <Avatar id={row.ID} firstName={row.FirstName} username={row.Username} />
+                  </button>
+                </td>
                 <td className="mono">{row.ID}</td>
                 <td>{displayUsername(row.Username) || "-"}</td>
                 <td>{row.FirstName || "-"}</td>
