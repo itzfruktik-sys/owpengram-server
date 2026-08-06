@@ -838,6 +838,11 @@ func run(logger *zap.Logger) error {
 	} else if seeded {
 		logger.Info("@ChatBot avatar seed import complete", zap.Int64("photo_id", domain.ChatBotUserPhotoID))
 	}
+	if seeded, err := filesService.SeedVerifyBotAvatar(ctx); err != nil {
+		return fmt.Errorf("seed verifybot avatar: %w", err)
+	} else if seeded {
+		logger.Info("@verifybot avatar seed import complete", zap.Int64("photo_id", domain.VerifyBotUserPhotoID))
+	}
 	if stats, err := filesService.WarmCaches(ctx); err != nil {
 		logger.Warn("media resource cache warmup failed", zap.Error(err))
 	} else if stats.StickerSets > 0 || stats.Documents > 0 || stats.Blobs > 0 {

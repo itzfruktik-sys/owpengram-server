@@ -47,6 +47,10 @@ const (
 	// VerifyBotAccessHash is fixed and double-written with the seed row in
 	// migration 0153; the two must never drift.
 	VerifyBotAccessHash int64 = 7802113947355620887
+	// VerifyBotUserPhotoID/AccessHash are the fixed id of @verifybot's avatar
+	// photo, matching the row files.Service.SeedVerifyBotAvatar seeds.
+	VerifyBotUserPhotoID         int64 = 12500000110001
+	VerifyBotUserPhotoAccessHash int64 = 975869468725402752
 
 	// VerifierBotUserID is the built-in @marksbot: the first THIRD-PARTY
 	// verifier of a deployment (core.telegram.org/api/bots/verification). It
@@ -130,6 +134,23 @@ func SetChatBotAvatar(dcID int, stripped []byte) {
 	chatBotPhotoStripped = stripped
 }
 
+// verifyBotPhotoDCID/Stripped are written once at startup by
+// files.Service.SeedVerifyBotAvatar via SetVerifyBotAvatar; before that,
+// VerifyBotUser() carries no photo (PhotoID==0), same as every other
+// not-yet-seeded built-in account.
+var (
+	verifyBotPhotoDCID     int
+	verifyBotPhotoStripped []byte
+)
+
+// SetVerifyBotAvatar records the DC and inline thumbnail bytes for
+// @verifybot's avatar. Should only be called once, at startup, after the
+// avatar seed completes.
+func SetVerifyBotAvatar(dcID int, stripped []byte) {
+	verifyBotPhotoDCID = dcID
+	verifyBotPhotoStripped = stripped
+}
+
 // OfficialSystemUser 返回第一阶段内置的官方系统账号。
 func OfficialSystemUser() User {
 	u := User{
@@ -209,7 +230,7 @@ func ChatBotUser() User {
 // VerifyBotUser returns the built-in @verifybot account. It is verified itself,
 // so the applicant sees the same badge on the account that grants it.
 func VerifyBotUser() User {
-	return User{
+	u := User{
 		ID:             VerifyBotUserID,
 		AccessHash:     VerifyBotAccessHash,
 		FirstName:      "Verify Bot",
@@ -218,6 +239,12 @@ func VerifyBotUser() User {
 		Bot:            true,
 		BotInfoVersion: 1,
 	}
+	if verifyBotPhotoDCID != 0 {
+		u.PhotoID = VerifyBotUserPhotoID
+		u.PhotoDCID = verifyBotPhotoDCID
+		u.PhotoStripped = verifyBotPhotoStripped
+	}
+	return u
 }
 
 // VerifierBotUser returns the built-in @marksbot account.
