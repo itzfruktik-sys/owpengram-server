@@ -43,10 +43,14 @@ or sponsored by Telegram or the official Telegram team.
 - 💬 Private chats, groups, supergroups & channels
 - 📞 Voice & group calls, live streams, SFU/TURN building blocks
 - 🖼️ Media & files — photos, videos, documents, stickers, reactions
+- 🪣 Media storage on local disk **or** an S3/MinIO-compatible object store
 - 🤖 Bots and mini apps, with a minimal Bot API gateway
+- 🏷️ Fragment-style NFT/collectible usernames and bot verification marks
+- 📢 Admin-panel broadcasts — announce to every user, or a picked list
+- 🔑 Self-hosted "Log in with Telegram" (OpenID Connect) and passkey sign-in
 - 🌐 Message translation and AI-assisted compose
 - 📇 Contacts, dialogs sync, chat folders, public link landing pages
-- 🖥️ Admin API and web UI for operations
+- 🖥️ Admin API and web UI for operations, plus a TUI server panel to run it all
 
 <details>
 <summary><b>📋 Full feature checklist (click to expand)</b></summary>
@@ -54,7 +58,7 @@ or sponsored by Telegram or the official Telegram team.
 | Status | Feature | What works today |
 |---|---|---|
 | ✅ | MTProto server edge | TCP transport, RSA key exchange, auth keys, encrypted sessions, salts, ack/resend, bad messages, RPC dispatch, canonical Layer 228, and sparse exact Layer 225-228 compatibility profiles. |
-| ✅ | Login and accounts | Development login code, configurable external code delivery (SMS webhook or SMTP), login email as a second factor, email-as-identity sign-up (no phone number needed), sign-in, sign-up, log-out, authorizations, account settings, SRP/password state, passkey-oriented paths. |
+| ✅ | Login and accounts | Development login code, configurable external code delivery (SMS webhook or SMTP), login email as a second factor, email-as-identity sign-up (no phone number needed), sign-in, sign-up, log-out, authorizations, account settings, SRP/password state, WebAuthn passkey sign-in, and a self-hosted Telegram Login (OpenID Connect) provider for third-party sites. |
 | ✅ | Users and contacts | User profiles, usernames, profile photos, contact import/search, blocked/privacy state, presence, and last-seen style status. |
 | ✅ | Dialogs and sync | Dialog list, pinned dialogs, manual unread, folders/filters, drafts, read boundaries, durable updates, online fan-out, and offline difference recovery. |
 | ✅ | Chatlists and public links | Chat folder sharing, exported chatlist invite links, join/import flows, revoked invite handling, public username landing pages, and shared public link landing pages. |
@@ -63,12 +67,14 @@ or sponsored by Telegram or the official Telegram team.
 | ✅ | AI compose and ChatBot | Input-box rewrite/polish, default and custom tones, addstyle previews, local and external provider chains, streamed `@ChatBot` draft replies, and Business AI reply hooks. |
 | ✅ | Message translation | Telegram `messages.translateText`, provider-backed batch translation, peer language settings, per-account rate limits, and privacy-conscious logging defaults. |
 | ✅ | Supergroups and channels | Create, join, leave, invite links, participants, admins, forum topics, linked discussion guests, history, send/edit/delete/read, reactions, public search, and previews. |
-| ✅ | Media and files | Upload, download, local blob storage, photos, documents, thumbnails, canonical GIFv conversion, external media fetch, web page previews, map tile cache hooks, profile/channel photos. |
+| ✅ | Media and files | Upload, download, local-disk **or** S3/MinIO-compatible object storage (switchable per deployment, existing files stay reachable after a switch), low-space upload guard, automatic stale-media cleanup, photos, documents, thumbnails, canonical GIFv conversion, external media fetch, web page previews, map tile cache hooks, profile/channel photos. |
 | ✅ | Stickers and reactions | Sticker/reaction catalog, seed support, saved GIFs, recent reactions, top reactions, default reactions, and moderation-oriented reaction paths. |
 | ✅ | Gifts and stars | Dynamic star gift catalog, admin import tools, collectible/unique gift upgrade flows, prepaid upgrade tracking, and local stars ledger foundations. |
+| ✅ | Collectible usernames and verification | Fragment-style NFT/collectible usernames (mint, transfer, activate/deactivate), the official platform-checkmark flow (`@verifybot`), and a third-party bot-verification mark mechanism (`@marksbot`, icon + description before a name) — the latter is experimental and hidden by default. |
+| ✅ | Account rating | Local composite reputation score (stars, activity, moderation history), exposed to every viewer via `userFull.stars_rating`. |
 | ✅ | Bots and mini apps | Bot service foundations, callbacks, inline helpers, webview/mini-app paths, a minimal Bot API gateway for libraries such as `python-telegram-bot`, persistent `getUpdates` delivery, and demo tools. |
 | ✅ | Calls and live streams | Private call signaling foundations, group call state, RTMP live streaming, scheduled video chats, channel `join_as`, SFU/TURN building blocks, liveness, and expiry workers. |
-| ✅ | Admin and operations | Admin API/UI backend, per-account freeze (admin-set read-only restriction, advertised to the client via appConfig), PostgreSQL migrations, Redis volatile state, retention workers, pprof/debug hooks, and load-test helpers. |
+| ✅ | Admin and operations | Admin API/UI backend, per-account freeze (admin-set read-only restriction, advertised to the client via appConfig), broadcast messaging (announce from the official account to every user or a picked list), shared-device detection across accounts, RBAC-scoped admin API tokens, PostgreSQL migrations, Redis volatile state, retention workers, pprof/debug hooks, load-test helpers, and a bundled TUI server panel (setup wizard, start/stop/restart, live logs, `.env` editor) as an alternative to manual builds. |
 | ✅ | Desktop, Android, iOS, and Web focus | Telegram Desktop is the primary target, with Android, iOS, and Web compatibility paths actively covered by the same server. |
 
 Some items are compatibility-first or experimental, but they are real open
@@ -118,6 +124,39 @@ starts MTProto on `0.0.0.0:2398`, and brings up the update/media/background
 workers in the same process.
 
 > **Default local login code:** `12345` — change it before any real use!
+
+> 💡 **Prefer a menu over the command line?** Steps 2 and 3 above (Docker
+> infrastructure, build, run) can be done through the bundled **TUI server
+> panel** instead — see "🖥️ Server Panel" right below.
+
+### 🖥️ Server Panel (optional)
+
+A cross-platform interactive TUI wraps the steps above — Docker naming
+migration, `docker compose up`, `go build`, and launching both
+`owpengram-server` and `owpengram-admin-panel` — behind a menu, so you don't
+re-run commands from scratch every time.
+
+```bash
+./owpengram-server.sh     # Linux/macOS
+```
+```powershell
+.\owpengram-server.bat    # Windows
+```
+
+Both launchers check prerequisites first (Go, Python 3, and the panel's own
+dependencies via `tui-panel/requirements-panel.txt`), then start the panel.
+
+What it does:
+
+- 🧙 **First-run setup wizard** — walks through the required `.env` values
+  before the first start.
+- ▶️ **Start / Stop / Restart** — launches `owpengram-server` and
+  `owpengram-admin-panel` as detached background processes; closing the panel
+  does **not** stop them, only "Stop" does. Reopening the panel later picks
+  the same processes back up and reports live status.
+- 📜 **Live log viewer** — tail either binary's log, or both in a split view.
+- ⚙️ **`.env` editor** — edit configuration from inside the panel, grouped by
+  feature, without hand-editing the file.
 
 ### ⚙️ Configuration
 
@@ -188,6 +227,34 @@ code — so admins can make freshly signed-up accounts look locally flavored
 | `TELESRV_EMAIL_SIGNUP_ENABLE` | `false` | turn the feature on (requires the email delivery channel above to be configured) |
 | `TELESRV_EMAIL_SIGNUP_PHONE_PREFIXES` | `888` | comma-separated prefixes for the account's cosmetic display number |
 
+### 🪣 Media storage: local disk or S3/MinIO
+
+Uploaded media (photos, documents, stickers) can live on this machine's disk,
+or in an S3-compatible object store. `deploy/docker-compose.yml` bundles a
+self-hosted **MinIO** container, pre-wired to the defaults below, so `s3` (the
+default) works out of the box with no extra setup — point the same variables
+at AWS S3 instead if you'd rather not self-host it.
+
+| Variable | Default | Meaning |
+|---|---:|---|
+| `TELESRV_BLOB_BACKEND` | `s3` | `s3` for MinIO/AWS S3, `localfs` to write to `TELESRV_BLOB_DIR` on disk instead |
+| `TELESRV_S3_ENDPOINT` | `127.0.0.1:9000` | S3 API endpoint (MinIO's default) |
+| `TELESRV_S3_REGION` | `us-east-1` | S3 region |
+| `TELESRV_S3_BUCKET` | `owpengram-media` | bucket name |
+| `TELESRV_S3_ACCESS_KEY_ID` / `TELESRV_S3_SECRET_ACCESS_KEY` | `owpengram` / `owpengram123` | credentials — also what seeds MinIO's root user in `docker-compose.yml`; change both before any real use |
+| `TELESRV_S3_USE_SSL` | `false` | `true` for AWS S3 or a MinIO behind TLS; local MinIO runs plain HTTP |
+| `TELESRV_S3_PATH_STYLE` | `true` | required for MinIO (bucket in the URL path); leave `false` for AWS S3 |
+
+Switching backends only affects new uploads — existing files stay wherever
+they were written and remain reachable as long as that backend's settings
+stay filled in. MinIO's own web console is reachable at
+`http://localhost:9001` (`docker compose -f deploy/docker-compose.yml up -d`
+also starts it) using the same access key/secret as above.
+
+Related toggles (defaults in `.env.example`'s Advanced section): a low-space
+guard that rejects new uploads once storage nears full, and automatic
+cleanup of media no longer referenced by any message.
+
 ## 🔌 Ports to open
 
 When deploying on a public server, open the following according to the
@@ -224,6 +291,8 @@ features you enable.
 | 6060 | `127.0.0.1:6060` | pprof debugging endpoint |
 | 5432 | `127.0.0.1:5432` | PostgreSQL |
 | 6399 | `127.0.0.1:6399` | Redis |
+| 9000 | `127.0.0.1:9000` | MinIO S3 API (only when `TELESRV_BLOB_BACKEND=s3` and self-hosting MinIO) |
+| 9001 | `127.0.0.1:9001` | MinIO web console |
 
 Make sure `TELESRV_LISTEN=0.0.0.0:2398` is set, and `TELESRV_ADVERTISE_IP`
 points to your public IP so clients can connect.
@@ -306,7 +375,8 @@ you changed `TELESRV_DEV_AUTH_CODE`. Recommended checks:
 ```text
 cmd/telesrv/              server entrypoint
 cmd/telesrv-admin/        admin backend and web UI
-deploy/                   docker-compose, migrations, deploy helpers
+tui-panel/                interactive TUI server panel (setup, start/stop, logs, .env editor)
+deploy/                   docker-compose (incl. MinIO), migrations, deploy helpers
 data/                     bundled language packs and optional seed data
 internal/mtprotoedge/     MTProto transport, auth key, session, ack/resend
 internal/rpc/             TL router and client compatibility handlers
