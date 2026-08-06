@@ -242,88 +242,9 @@ func tgMessageServiceAction(msg domain.Message) tg.MessageActionClass {
 			ButtonID: shared.ButtonID,
 			Peers:    tgPeerList(shared.Peers),
 		}
-	case domain.MessageServiceActionStarGift:
-		return tgMessageActionStarGiftForViewer(m.ServiceAction.StarGift, msg.OwnerUserID)
-	case domain.MessageServiceActionGiftStars:
-		action := m.ServiceAction.GiftStars
-		if action == nil || action.Currency == "" || action.Amount <= 0 || action.Stars <= 0 {
-			return &tg.MessageActionEmpty{}
-		}
-		out := &tg.MessageActionGiftStars{
-			Currency: action.Currency,
-			Amount:   action.Amount,
-			Stars:    action.Stars,
-		}
-		// Telegram only exposes the provider transaction id to the receiver.
-		if !msg.Out && action.TransactionID != "" {
-			out.SetTransactionID(action.TransactionID)
-		}
-		return out
-	case domain.MessageServiceActionStarGiftUnique:
-		return tgMessageActionStarGiftUnique(m.ServiceAction.StarGiftUnique)
-	case domain.MessageServiceActionStarGiftOffer:
-		action := m.ServiceAction.StarGiftOffer
-		if action == nil {
-			return &tg.MessageActionEmpty{}
-		}
-		return &tg.MessageActionStarGiftPurchaseOffer{Accepted: action.Accepted, Declined: action.Declined,
-			Gift: tgUniqueStarGift(action.Gift), Price: tgStarGiftAmount(action.Price), ExpiresAt: action.ExpiresAt}
-	case domain.MessageServiceActionStarGiftOfferDeclined:
-		action := m.ServiceAction.StarGiftOfferDeclined
-		if action == nil {
-			return &tg.MessageActionEmpty{}
-		}
-		return &tg.MessageActionStarGiftPurchaseOfferDeclined{Expired: action.Expired,
-			Gift: tgUniqueStarGift(action.Gift), Price: tgStarGiftAmount(action.Price)}
 	default:
 		return &tg.MessageActionEmpty{}
 	}
-}
-
-func tgMessageActionStarGiftUnique(action *domain.MessageStarGiftUniqueAction) tg.MessageActionClass {
-	if action == nil {
-		return &tg.MessageActionEmpty{}
-	}
-	out := &tg.MessageActionStarGiftUnique{
-		Upgrade: action.Upgrade, Saved: action.Saved, PrepaidUpgrade: action.PrepaidUpgrade,
-		Transferred: action.Transferred, Refunded: action.Refunded, Assigned: action.Assigned,
-		FromOffer: action.FromOffer, Craft: action.Craft,
-		Gift: tgUniqueStarGift(action.Gift),
-	}
-	if action.CanExportAt > 0 {
-		out.SetCanExportAt(action.CanExportAt)
-	}
-	if action.TransferStars > 0 {
-		out.SetTransferStars(action.TransferStars)
-	}
-	if action.ResaleAmount != nil {
-		out.SetResaleAmount(tgStarGiftAmount(*action.ResaleAmount))
-	}
-	if action.CanTransferAt > 0 {
-		out.SetCanTransferAt(action.CanTransferAt)
-	}
-	if action.CanResellAt > 0 {
-		out.SetCanResellAt(action.CanResellAt)
-	}
-	if action.DropOriginalDetailsStars > 0 {
-		out.SetDropOriginalDetailsStars(action.DropOriginalDetailsStars)
-	}
-	// Channel Craft is not executable yet. Gate on the authoritative gift owner
-	// as a final wire boundary so historical JSON/admin-log actions or a future
-	// constructor cannot accidentally expose Android's Craft entry marker.
-	if action.Gift.Owner.Type == domain.PeerTypeUser && action.CanCraftAt > 0 {
-		out.SetCanCraftAt(action.CanCraftAt)
-	}
-	if action.FromUserID != 0 {
-		out.SetFromID(&tg.PeerUser{UserID: action.FromUserID})
-	}
-	if peer := tgPeer(action.Peer); peer != nil {
-		out.SetPeer(peer)
-	}
-	if action.SavedID != 0 {
-		out.SetSavedID(action.SavedID)
-	}
-	return out
 }
 
 func tgPeerList(peers []domain.Peer) []tg.PeerClass {
@@ -510,11 +431,6 @@ func tgMessageReactions(viewerUserID int64, in *domain.ChannelMessageReactions) 
 		if len(recent) > 0 {
 			out.SetRecentReactions(recent)
 		}
-	}
-	// 付费 reaction：注入 ReactionPaid 计数 + top reactors（My/chosen 由 in.Paid 的视角数据驱动，
-	// 调用方对他人视角已抹除 My/MyStars）。统一在此注入，覆盖所有频道消息读路径。
-	if in.Paid != nil {
-		injectPaidReaction(out, *in.Paid)
 	}
 	if out.Results == nil {
 		out.Results = []tg.ReactionCount{}

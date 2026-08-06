@@ -33,8 +33,6 @@ type Config struct {
 	Channels          PublicChannelResolver
 	Privacy           AnonymousPrivacyResolver
 	Photos            ProfilePhotoResolver
-	UniqueGifts       UniqueStarGiftResolver
-	GiftWithdrawals   StarGiftWithdrawalResolver
 	ModerationAppeals ModerationAppealResolver
 	// TelegramLogin is the optional OIDC/Login HTTP adapter. Public Web owns
 	// the listener so discovery/auth/token and public links share the exact
@@ -67,15 +65,6 @@ type ProfilePhotoResolver interface {
 	CurrentProfilePhotoKind(ctx context.Context, ownerType domain.PeerType, ownerID int64, kind domain.ProfilePhotoKind) (domain.Photo, bool, error)
 	GetPhoto(ctx context.Context, id int64) (domain.Photo, bool, error)
 	GetFile(ctx context.Context, req domain.FileDownloadRequest) (domain.FileChunk, bool, error)
-}
-
-type UniqueStarGiftResolver interface {
-	UniqueBySlug(ctx context.Context, slug string) (domain.UniqueStarGift, bool, error)
-}
-
-type StarGiftWithdrawalResolver interface {
-	ResolveWithdrawal(ctx context.Context, providerRequestID string) (domain.StarGiftWithdrawal, bool, error)
-	CompleteWithdrawal(ctx context.Context, providerRequestID string, date int) (domain.StarGiftWithdrawal, error)
 }
 
 type ModerationAppealResolver interface {
@@ -186,37 +175,30 @@ func newHandler(cfg Config, logger *zap.Logger) (http.Handler, error) {
 		publicHost = u.Host
 	}
 	h := &handler{
-		stickerSets:     cfg.StickerSets,
-		users:           cfg.Users,
-		channels:        cfg.Channels,
-		privacy:         cfg.Privacy,
-		photos:          cfg.Photos,
-		uniqueGifts:     cfg.UniqueGifts,
-		giftWithdrawals: cfg.GiftWithdrawals,
-		appeals:         cfg.ModerationAppeals,
-		publicBaseURL:   cfg.PublicBaseURL,
-		publicHost:      publicHost,
-		appScheme:       cfg.AppScheme,
-		appLinks:        appLinks,
-		webBaseURL:      cfg.WebBaseURL,
-		appName:         cfg.AppName,
-		downloadURL:     cfg.DownloadURL,
-		logger:          logger,
+		stickerSets:   cfg.StickerSets,
+		users:         cfg.Users,
+		channels:      cfg.Channels,
+		privacy:       cfg.Privacy,
+		photos:        cfg.Photos,
+		appeals:       cfg.ModerationAppeals,
+		publicBaseURL: cfg.PublicBaseURL,
+		publicHost:    publicHost,
+		appScheme:     cfg.AppScheme,
+		appLinks:      appLinks,
+		webBaseURL:    cfg.WebBaseURL,
+		appName:       cfg.AppName,
+		downloadURL:   cfg.DownloadURL,
+		logger:        logger,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", h.healthz)
 	mux.HandleFunc("GET /_public/assets/logo.png", h.brandLogo)
 	mux.HandleFunc("GET /_public/assets/fonts/{file}", h.brandFont)
-	mux.HandleFunc("GET /payments/dev-stars", h.devStarsCheckout)
 	mux.HandleFunc("GET /_public/avatar/{username}/{photoID}", h.publicAvatar)
 	mux.HandleFunc("GET /_public/invite-avatar/{hash}/{photoID}", h.publicInviteAvatar)
 	mux.HandleFunc("GET /addstickers/{shortName}", h.addStickers)
 	mux.HandleFunc("GET /addemoji/{shortName}", h.addEmoji)
 	mux.HandleFunc("GET /addlist/{slug}", h.addList)
-	mux.HandleFunc("GET /nft/{slug}", h.uniqueGift)
-	mux.HandleFunc("GET /nft/{slug}/{$}", h.uniqueGift)
-	mux.HandleFunc("GET /gift-withdrawal/{requestID}", h.starGiftWithdrawal)
-	mux.HandleFunc("POST /gift-withdrawal/{requestID}", h.completeStarGiftWithdrawal)
 	if cfg.ModerationAppeals != nil {
 		mux.HandleFunc("GET /appeal/{token}", h.moderationAppeal)
 		mux.HandleFunc("POST /appeal/{token}", h.moderationAppeal)
@@ -238,22 +220,20 @@ func newHandler(cfg Config, logger *zap.Logger) (http.Handler, error) {
 }
 
 type handler struct {
-	stickerSets     StickerSetResolver
-	users           UsernameResolver
-	channels        PublicChannelResolver
-	privacy         AnonymousPrivacyResolver
-	photos          ProfilePhotoResolver
-	uniqueGifts     UniqueStarGiftResolver
-	giftWithdrawals StarGiftWithdrawalResolver
-	appeals         ModerationAppealResolver
-	publicBaseURL   string
-	publicHost      string
-	appScheme       string
-	appLinks        links.AppLinkBuilder
-	webBaseURL      string
-	appName         string
-	downloadURL     string
-	logger          *zap.Logger
+	stickerSets   StickerSetResolver
+	users         UsernameResolver
+	channels      PublicChannelResolver
+	privacy       AnonymousPrivacyResolver
+	photos        ProfilePhotoResolver
+	appeals       ModerationAppealResolver
+	publicBaseURL string
+	publicHost    string
+	appScheme     string
+	appLinks      links.AppLinkBuilder
+	webBaseURL    string
+	appName       string
+	downloadURL   string
+	logger        *zap.Logger
 }
 
 type moderationAppealPage struct {
@@ -266,43 +246,6 @@ type moderationAppealPage struct {
 	Error        string
 	AppealText   string
 	CanSubmit    bool
-}
-
-type devStarsCheckoutPage struct {
-	AppName string
-	FormID  string
-}
-
-var devStarsCheckoutTemplate = template.Must(template.New("dev-stars-checkout").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="referrer" content="no-referrer"><meta name="robots" content="noindex,nofollow">
-<title>Dev Stars checkout · {{.AppName}}</title><style>
-body{font:16px/1.5 system-ui,sans-serif;background:#f4f6f8;color:#17212b;margin:0;padding:24px}.card{max-width:520px;margin:9vh auto;background:#fff;border-radius:16px;padding:28px;box-shadow:0 8px 32px #0002}h1{margin-top:0}.note{color:#53606d}.status{min-height:24px;color:#b42318}button{width:100%;border:0;border-radius:10px;padding:13px 18px;background:#2481cc;color:#fff;font:inherit;font-weight:650;cursor:pointer}button:disabled{opacity:.55;cursor:default}
-</style></head><body><main class="card"><h1>Complete dev purchase</h1>
-<p>This is a local telesrv test checkout. No card, Google Play, App Store, or external payment provider will be charged.</p>
-<p class="note">The package and fiat amount shown by the client are bound to form {{.FormID}}.</p>
-<button id="complete" type="button">Complete test purchase</button><p id="status" class="status" role="status"></p>
-</main><script>
-(() => { const button=document.getElementById('complete'), status=document.getElementById('status');
-button.addEventListener('click', () => { const proxy=window.TelegramWebviewProxy;
-if(!proxy || typeof proxy.postEvent !== 'function'){status.textContent='Open this checkout inside Telegram.';return;}
-button.disabled=true;status.textContent='Submitting…';
-proxy.postEvent('payment_form_submit', JSON.stringify({title:'telesrv dev payment',credentials:{type:'telesrv_dev',form_id:'{{.FormID}}'}}));
-}); })();
-</script></body></html>`))
-
-func (h *handler) devStarsCheckout(w http.ResponseWriter, r *http.Request) {
-	raw := strings.TrimSpace(r.URL.Query().Get("form_id"))
-	formID, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || formID == 0 || raw != strconv.FormatInt(formID, 10) {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := devStarsCheckoutTemplate.Execute(w, devStarsCheckoutPage{AppName: h.appName, FormID: raw}); err != nil {
-		h.logger.Warn("render dev Stars checkout failed", zap.Error(err))
-	}
 }
 
 var moderationAppealTemplate = template.Must(template.New("moderation-appeal").Parse(`<!doctype html>
@@ -389,65 +332,6 @@ func (h *handler) moderationAppeal(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type starGiftWithdrawalPage struct {
-	AppName      string
-	Title        string
-	Slug         string
-	Status       string
-	OwnerAddress string
-	GiftAddress  string
-	ExpiresAt    string
-	CanComplete  bool
-}
-
-var starGiftWithdrawalTemplate = template.Must(template.New("star-gift-withdrawal").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.Title}} · {{.AppName}}</title><style>
-body{font:16px/1.5 system-ui,sans-serif;background:#f4f6f8;color:#17212b;margin:0;padding:32px}.card{max-width:560px;margin:8vh auto;background:#fff;border-radius:16px;padding:28px;box-shadow:0 8px 32px #0002}h1{margin-top:0}.meta{overflow-wrap:anywhere;color:#53606d}button{border:0;border-radius:10px;padding:12px 18px;background:#2481cc;color:#fff;font-weight:600;cursor:pointer}.done{color:#18864b;font-weight:600}
-</style></head><body><main class="card"><h1>{{.Title}}</h1><p class="meta">Collectible: {{.Slug}}</p>
-{{if .CanComplete}}<p>This export is handled only by {{.AppName}}'s internal ledger. No external blockchain or wallet is contacted.</p><form method="post"><button type="submit">Complete local export</button></form><p class="meta">Expires: {{.ExpiresAt}}</p>{{else}}<p class="done">Status: {{.Status}}</p>{{if .OwnerAddress}}<p class="meta">Owner address: {{.OwnerAddress}}</p><p class="meta">Gift address: {{.GiftAddress}}</p>{{end}}{{end}}
-</main></body></html>`))
-
-func (h *handler) starGiftWithdrawal(w http.ResponseWriter, r *http.Request) {
-	h.renderStarGiftWithdrawal(w, r, false)
-}
-
-func (h *handler) completeStarGiftWithdrawal(w http.ResponseWriter, r *http.Request) {
-	h.renderStarGiftWithdrawal(w, r, true)
-}
-
-func (h *handler) renderStarGiftWithdrawal(w http.ResponseWriter, r *http.Request, complete bool) {
-	requestID := strings.TrimSpace(r.PathValue("requestID"))
-	if h.giftWithdrawals == nil || requestID == "" || len(requestID) > 256 {
-		http.NotFound(w, r)
-		return
-	}
-	var withdrawal domain.StarGiftWithdrawal
-	var found bool
-	var err error
-	if complete {
-		withdrawal, err = h.giftWithdrawals.CompleteWithdrawal(r.Context(), requestID, int(time.Now().Unix()))
-		found = err == nil
-	} else {
-		withdrawal, found, err = h.giftWithdrawals.ResolveWithdrawal(r.Context(), requestID)
-	}
-	if err != nil || !found {
-		http.NotFound(w, r)
-		return
-	}
-	page := starGiftWithdrawalPage{AppName: h.appName, Title: withdrawal.Gift.Title, Slug: withdrawal.Gift.Slug,
-		Status: withdrawal.Status, OwnerAddress: withdrawal.Gift.OwnerAddress, GiftAddress: withdrawal.Gift.GiftAddress,
-		ExpiresAt:   time.Unix(int64(withdrawal.ExpiresAt), 0).UTC().Format(time.RFC3339),
-		CanComplete: withdrawal.Status == "pending" && withdrawal.ExpiresAt > int(time.Now().Unix())}
-	if page.Title == "" {
-		page.Title = "Collectible gift export"
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := starGiftWithdrawalTemplate.Execute(w, page); err != nil {
-		h.logger.Warn("render star gift withdrawal", zap.Error(err))
-	}
-}
-
 func (h *handler) healthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte("ok\n"))
@@ -482,63 +366,6 @@ func (h *handler) addList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "public, max-age=60")
 	if err := landingTemplate.Execute(w, data); err != nil {
 		http.Error(w, "render shared folder page failed", http.StatusInternalServerError)
-	}
-}
-
-func (h *handler) uniqueGift(w http.ResponseWriter, r *http.Request) {
-	slug := r.PathValue("slug")
-	if h.uniqueGifts == nil || !validStarGiftSlugPath(slug) {
-		http.NotFound(w, r)
-		return
-	}
-	unique, found, err := h.uniqueGifts.UniqueBySlug(r.Context(), slug)
-	if err != nil {
-		h.logger.Error("Public unique star gift lookup failed", zap.String("slug", slug), zap.Error(err))
-		http.Error(w, "collectible gift lookup failed", http.StatusInternalServerError)
-		return
-	}
-	if !found {
-		http.NotFound(w, r)
-		return
-	}
-	canonicalSlug := unique.Slug
-	if unique.ID <= 0 || unique.GiftID <= 0 || unique.Num <= 0 ||
-		!validStarGiftSlugPath(canonicalSlug) || !strings.EqualFold(slug, canonicalSlug) ||
-		!utf8.ValidString(unique.Title) || utf8.RuneCountInString(unique.Title) > domain.MaxStarGiftTitleRunes {
-		h.logger.Error("Public unique star gift resolver returned invalid aggregate",
-			zap.String("requested_slug", slug), zap.String("resolved_slug", canonicalSlug),
-			zap.Int64("unique_id", unique.ID), zap.Int64("gift_id", unique.GiftID), zap.Int("num", unique.Num))
-		http.Error(w, "collectible gift lookup failed", http.StatusInternalServerError)
-		return
-	}
-	if slug != canonicalSlug || strings.HasSuffix(r.URL.Path, "/") {
-		http.Redirect(w, r, h.publicURL("nft", canonicalSlug), http.StatusPermanentRedirect)
-		return
-	}
-	title := strings.TrimSpace(unique.Title)
-	if title == "" {
-		title = "Collectible gift"
-	}
-	subtitle := fmt.Sprintf("Collectible #%d", unique.Num)
-	if unique.AvailabilityIssued > 0 && unique.AvailabilityTotal >= unique.AvailabilityIssued {
-		subtitle += fmt.Sprintf(" · %s/%s issued", groupedDecimal(unique.AvailabilityIssued), groupedDecimal(unique.AvailabilityTotal))
-	}
-	app := h.appURL("nft", canonicalSlug)
-	data := pageData{
-		AppName:      h.appName,
-		Title:        title,
-		KindLabel:    "collectible gift",
-		Subtitle:     subtitle,
-		Description:  "This collectible was created from a gift on " + h.appName + ". Open it in the app to view its current details.",
-		CanonicalURL: h.publicURL("nft", canonicalSlug),
-		AppURL:       template.URL(app),
-		LegacyTgURL:  template.URL(legacyTgURL("nft", "slug", canonicalSlug)),
-	}
-	data.AppURLJS = template.JS(strconv.Quote(app))
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=60, must-revalidate")
-	if err := landingTemplate.Execute(w, data); err != nil {
-		h.logger.Error("Render public unique star gift page failed", zap.String("slug", canonicalSlug), zap.Error(err))
 	}
 }
 
@@ -1272,23 +1099,6 @@ func validShortNamePath(shortName string) bool {
 
 func validSlugPath(slug string) bool {
 	return links.ValidChatlistSlug(slug)
-}
-
-func validStarGiftSlugPath(slug string) bool {
-	if slug == "" || len(slug) > domain.MaxStarGiftSlugBytes {
-		return false
-	}
-	for _, r := range slug {
-		switch {
-		case r >= 'a' && r <= 'z':
-		case r >= 'A' && r <= 'Z':
-		case r >= '0' && r <= '9':
-		case r == '.' || r == '_' || r == '-':
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 func validUsernamePath(username string) bool {

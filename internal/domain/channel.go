@@ -611,11 +611,6 @@ const (
 	// ChannelActionPaidMessagesPrice 映射 messageActionPaidMessagesPrice：
 	// 广播频道 Direct Messages 开关/价格变更的服务消息。
 	ChannelActionPaidMessagesPrice ChannelMessageActionType = "paid_messages_price"
-	// ChannelActionStarGift 映射 messageActionStarGift：频道礼物的 admin-log 快照。
-	ChannelActionStarGift ChannelMessageActionType = "star_gift"
-	// ChannelActionStarGiftUnique 映射 messageActionStarGiftUnique：collectible
-	// 升级、转赠等所有权变更只进入 Recent Actions，不伪造频道历史/pts。
-	ChannelActionStarGiftUnique ChannelMessageActionType = "star_gift_unique"
 	// ChannelActionSetChatWallpaper 映射 messageActionSetChatWallPaper：频道外观页设置 wallpaper。
 	ChannelActionSetChatWallpaper ChannelMessageActionType = "set_chat_wallpaper"
 	// ChannelActionChangeCommunity maps messageActionChangeCommunity. A non-zero
@@ -655,9 +650,6 @@ type ChannelMessageAction struct {
 	Completed   []int
 	Incompleted []int
 	TodoItems   []MessageTodoItem
-	// StarGift 仅 star_gift 服务消息使用。
-	StarGift       *MessageStarGiftAction
-	StarGiftUnique *MessageStarGiftUniqueAction
 	// Wallpaper 仅 set_chat_wallpaper 服务消息使用。
 	Wallpaper *Wallpaper
 	// Photo 仅 chat_edit_photo 服务消息使用。
@@ -852,9 +844,6 @@ type ChannelMessageReactions struct {
 	AsTags  bool
 	Results []ChannelMessageReactionCount
 	Recent  []ChannelMessagePeerReaction
-	// Paid 是付费 reaction（Stars）聚合（nil = 无）；读路径从 channel_message_paid_reactions
-	// 填充、tg 转换注入 ReactionPaid 计数 + top reactors。与普通 reaction 分表存储。
-	Paid *ChannelMessagePaidReactions
 }
 
 // SetChannelMessageReactionsRequest replaces the current user's reactions for one message.
@@ -1685,19 +1674,17 @@ func EffectiveSuggestedPostPublishDate(scheduleDate, now int) (int, error) {
 // monoforum; ServiceEvent is the approval/success/refund service message; an
 // optional Published result is the broadcast post.
 type ToggleSuggestedPostApprovalResult struct {
-	Monoforum         Channel
-	Parent            Channel
-	SavedPeer         Peer
-	State             SuggestedPostLifecycleState
-	OriginalMessage   ChannelMessage
-	OriginalEvent     ChannelUpdateEvent
-	ServiceMessage    ChannelMessage
-	ServiceEvent      ChannelUpdateEvent
-	Published         *SendChannelMessageResult
-	Recipients        []int64
-	PayerStarsBalance *StarsBalance
-	PayerTONBalance   *int64
-	Duplicate         bool
+	Monoforum       Channel
+	Parent          Channel
+	SavedPeer       Peer
+	State           SuggestedPostLifecycleState
+	OriginalMessage ChannelMessage
+	OriginalEvent   ChannelUpdateEvent
+	ServiceMessage  ChannelMessage
+	ServiceEvent    ChannelUpdateEvent
+	Published       *SendChannelMessageResult
+	Recipients      []int64
+	Duplicate       bool
 }
 
 // SuggestedPostLifecycleRequest bounds one worker pass; stores must use an
@@ -1824,8 +1811,6 @@ type SendChannelMessageResult struct {
 	Event      ChannelUpdateEvent
 	Recipients []int64
 	Duplicate  bool
-	// SenderStarsBalance 仅在实际发生 paid-message 借记时返回；RPC 只向发件人投影余额更新。
-	SenderStarsBalance *StarsBalance
 	// ReplayDeleteEvent is the existing durable channel delete event paired
 	// with a deleted exact-random_id replay. It must be returned only to the
 	// caller echo and must never be fanned out as a fresh event.

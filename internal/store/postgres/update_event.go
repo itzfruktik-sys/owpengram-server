@@ -996,7 +996,7 @@ func decodeEventReaction(raw string) (*domain.MessageReaction, error) {
 
 func encodeEventEmojiStatus(status domain.UserEmojiStatus) ([]byte, error) {
 	if !status.Valid() {
-		return nil, domain.ErrStarGiftCollectibleInvalid
+		return nil, domain.ErrEmojiStatusCollectibleInvalid
 	}
 	raw, err := json.Marshal(status)
 	if err != nil {
@@ -1014,7 +1014,7 @@ func decodeEventEmojiStatus(raw string) (domain.UserEmojiStatus, error) {
 		return domain.UserEmojiStatus{}, err
 	}
 	if !status.Valid() {
-		return domain.UserEmojiStatus{}, domain.ErrStarGiftCollectibleInvalid
+		return domain.UserEmojiStatus{}, domain.ErrEmojiStatusCollectibleInvalid
 	}
 	return status, nil
 }

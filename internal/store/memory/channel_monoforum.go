@@ -20,9 +20,6 @@ func (s *ChannelStore) SendMonoforumMessage(_ context.Context, req domain.SendMo
 		req.SavedPeer.Type != domain.PeerTypeUser || strings.TrimSpace(req.Message) == "" && req.Media == nil {
 		return domain.SendChannelMessageResult{}, domain.ErrChannelInvalid
 	}
-	if req.AllowPaidStars < 0 {
-		return domain.SendChannelMessageResult{}, domain.ErrStarsInvalidAmount
-	}
 	var fingerprint []byte
 	var err error
 	if req.RandomID != 0 {
@@ -73,27 +70,10 @@ func (s *ChannelStore) SendMonoforumMessage(_ context.Context, req domain.SendMo
 			return domain.SendChannelMessageResult{}, domain.ErrReplyMessageIDInvalid
 		}
 	}
-	var senderBalance *domain.StarsBalance
+	// telesrv has no Stars economy: Direct Messages are always free, so no
+	// balance is ever checked or debited here regardless of any stale
+	// per-channel price.
 	paidMessageStars := int64(0)
-	balanceAfter := int64(0)
-	if !isAdmin && channel.SendPaidMessagesStars > 0 {
-		if channel.SendPaidMessagesStars != parent.SendPaidMessagesStars {
-			return domain.SendChannelMessageResult{}, domain.ErrChannelInvalid
-		}
-		if req.AllowPaidStars < channel.SendPaidMessagesStars {
-			return domain.SendChannelMessageResult{}, &domain.StarsPaymentRequiredError{Stars: channel.SendPaidMessagesStars}
-		}
-		current, ok := s.starsBalances[req.SenderUserID]
-		if !ok {
-			current = domain.DefaultStarsStartingGrant
-		}
-		if current < channel.SendPaidMessagesStars {
-			return domain.SendChannelMessageResult{}, domain.ErrStarsInsufficient
-		}
-		paidMessageStars = channel.SendPaidMessagesStars
-		balanceAfter = current - paidMessageStars
-		senderBalance = &domain.StarsBalance{UserID: req.SenderUserID, Balance: balanceAfter, Granted: true}
-	}
 	from := domain.Peer{Type: domain.PeerTypeUser, ID: req.SenderUserID}
 	if isAdmin {
 		from = domain.Peer{Type: domain.PeerTypeChannel, ID: parent.ID}
@@ -143,10 +123,6 @@ func (s *ChannelStore) SendMonoforumMessage(_ context.Context, req domain.SendMo
 		SenderUserID: req.SenderUserID,
 	}
 	s.messages[req.MonoforumID] = append(s.messages[req.MonoforumID], msg)
-	if paidMessageStars > 0 {
-		s.starsBalances[req.SenderUserID] = balanceAfter
-		s.channelStarsBalances[parent.ID] += paidMessageStars * paidMessageChannelCommissionPermille / 1000
-	}
 	if req.RandomID != 0 {
 		replayKey := channelMessageReplayKey{channelID: req.MonoforumID, messageID: msg.ID}
 		s.sendSnapshots[replayKey] = sendSnapshot
@@ -162,7 +138,7 @@ func (s *ChannelStore) SendMonoforumMessage(_ context.Context, req domain.SendMo
 			recipients = append(recipients, userID)
 		}
 	}
-	return domain.SendChannelMessageResult{Channel: cloneChannel(channel), Message: cloneChannelMessage(msg), Event: cloneChannelEvent(event), Recipients: uniqueNonZero(recipients, 0), SenderStarsBalance: senderBalance}, nil
+	return domain.SendChannelMessageResult{Channel: cloneChannel(channel), Message: cloneChannelMessage(msg), Event: cloneChannelEvent(event), Recipients: uniqueNonZero(recipients, 0)}, nil
 }
 
 // findMonoforumDuplicateLocked 按 (sender, saved_peer, random_id) 查 monoforum 子会话内的重发消息。

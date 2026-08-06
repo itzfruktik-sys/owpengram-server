@@ -24,14 +24,11 @@ const (
 	channelListDefaultLimit = 50
 	channelListMaxLimit     = 100
 	messagePageLimit        = 100
-	// Collectible username and account rating pages. The bounds mirror the
-	// use-case layer, so a table page costs the same whichever surface asks.
+	// Collectible username pages. The bounds mirror the use-case layer, so a
+	// table page costs the same whichever surface asks.
 	collectibleListDefaultLimit = 50
 	collectibleListMaxLimit     = 200
 	collectibleTransferLimit    = 50
-	ratingListDefaultLimit      = 50
-	ratingListMaxLimit          = 200
-	ratingEventLimit            = 50
 	// Verification review queue pages. The bounds mirror app/verification, so the
 	// panel and the admin API page the queue identically.
 	verificationListDefaultLimit = 50
@@ -123,8 +120,6 @@ type AccountDetail struct {
 	Fake           bool
 	Support        bool
 	Bot            bool
-	StarsBalance   int64
-	StarsGranted   bool
 	Restriction    RestrictionRow
 	HasRestriction bool
 	Authorizations []AuthorizationRow
@@ -237,65 +232,10 @@ type ChannelDetail struct {
 	AuditLogs   []AuditLogRow
 }
 
-type StarGiftRow struct {
-	GiftID        int64 `json:"GiftID,string"`
-	RevisionID    int64 `json:"RevisionID,string"`
-	Revision      int
-	Title         string
-	Stars         int64 `json:"Stars,string"`
-	ConvertStars  int64 `json:"ConvertStars,string"`
-	Enabled       bool
-	SortOrder     int
-	DocumentID    int64 `json:"DocumentID,string"`
-	SourceName    string
-	SourceFormat  string
-	AnimationSHA  string
-	AnimationSize int64 `json:"AnimationSize,string"`
-	Width         int
-	Height        int
-	FrameRate     float64
-	ReceivedCount int64 `json:"ReceivedCount,string"`
-	CreatedBy     string
-	UpdatedAt     time.Time
-}
-
-func (s *readStore) ListStarGifts(ctx context.Context) ([]StarGiftRow, error) {
-	rows, err := s.pool.Query(ctx, `
-SELECT c.gift_id, r.id, r.revision, r.title, r.stars, r.convert_stars,
-       c.enabled, c.sort_order, r.document_id, r.source_name, r.source_format,
-       encode(r.animation_sha256, 'hex'), d.size, r.width, r.height, r.frame_rate,
-       (SELECT COUNT(*) FROM peer_star_gifts p WHERE p.gift_id = c.gift_id),
-       r.created_by, c.updated_at
-FROM star_gift_catalog c
-JOIN star_gift_catalog_revisions r ON r.id = c.active_revision_id
-JOIN documents d ON d.id = r.document_id
-ORDER BY c.sort_order, c.gift_id
-LIMIT $1`, domain.MaxStarGiftCatalogSize)
-	if err != nil {
-		return nil, fmt.Errorf("list star gifts: %w", err)
-	}
-	defer rows.Close()
-	out := make([]StarGiftRow, 0)
-	for rows.Next() {
-		var row StarGiftRow
-		if err := rows.Scan(
-			&row.GiftID, &row.RevisionID, &row.Revision, &row.Title, &row.Stars, &row.ConvertStars,
-			&row.Enabled, &row.SortOrder, &row.DocumentID, &row.SourceName, &row.SourceFormat,
-			&row.AnimationSHA, &row.AnimationSize, &row.Width, &row.Height, &row.FrameRate,
-			&row.ReceivedCount, &row.CreatedBy, &row.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		out = append(out, row)
-	}
-	return out, rows.Err()
-}
-
 type StickerSetRow struct {
 	// ID must round-trip through JSON as a string: these are Telegram-style
 	// snowflake ids (18-19 digits), well past JS's 2^53 safe-integer limit, so
-	// a plain JSON number gets silently rounded by the browser (see StarGiftRow
-	// for the same fix applied to gift ids).
+	// a plain JSON number gets silently rounded by the browser.
 	ID        int64 `json:"ID,string"`
 	ShortName string
 	Title     string
@@ -986,17 +926,15 @@ SELECT u.id, u.phone, u.username, u.first_name, u.last_name, u.created_at, u.upd
 	u.about, u.last_seen_at, u.verified, u.scam, u.fake, u.support, u.is_bot,
 	COALESCE(r.frozen, false), COALESCE(r.reason, ''),
 	COALESCE(EXTRACT(EPOCH FROM u.premium_expires_at), 0)::bigint,
-	COALESCE(sb.balance, 0)::bigint, COALESCE(sb.granted, false),
 	COALESCE(NULLIF(u.username, ''), p.username_lower, '') AS display_username,
 	`+accountCollectibleUsernamesColumn+` AS collectibles
 FROM users u
 LEFT JOIN account_restrictions r ON r.user_id = u.id
-LEFT JOIN stars_balances sb ON sb.user_id = u.id
 LEFT JOIN peer_usernames p ON p.peer_type = 'user' AND p.peer_id = u.id AND p.editable
 WHERE u.id = $1`, userID).Scan(
 		&out.Account.ID, &out.Account.Phone, &out.Account.Username, &out.Account.FirstName, &out.Account.LastName,
 		&out.Account.CreatedAt, &out.Account.UpdatedAt, &out.About, &out.LastSeenAt, &out.Verified, &out.Scam, &out.Fake, &out.Support, &out.Bot,
-		&out.Account.Frozen, &out.Account.Reason, &out.Account.PremiumUntil, &out.StarsBalance, &out.StarsGranted, &out.Account.Username,
+		&out.Account.Frozen, &out.Account.Reason, &out.Account.PremiumUntil, &out.Account.Username,
 		&out.Account.Collectibles,
 	)
 	if err != nil {
@@ -1667,246 +1605,6 @@ LIMIT $2`, collectibleID, collectibleTransferLimit)
 			&item.ToPeerType, &item.ToPeerID, &item.ToUsername,
 			&item.Currency, &item.Amount, &item.Actor, &item.Reason, &item.CommandKey, &item.CreatedAt,
 		); err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
-
-// AccountRatingRow is one user's composite rating projection with the account
-// resolved for display. The score and every component are int64 decimal strings
-// for the same exactness reason as the collectible amounts.
-type AccountRatingRow struct {
-	UserID            int64 `json:"UserID,string"`
-	Username          string
-	FirstName         string
-	Level             int
-	Stars             int64 `json:"Stars,string"`
-	CurrentLevelStars int64 `json:"CurrentLevelStars,string"`
-	NextLevelStars    int64 `json:"NextLevelStars,string"`
-	HasNextLevel      bool
-	StarsComponent    int64 `json:"StarsComponent,string"`
-	ActivityComponent int64 `json:"ActivityComponent,string"`
-	PenaltyComponent  int64 `json:"PenaltyComponent,string"`
-	ManualComponent   int64 `json:"ManualComponent,string"`
-	PendingStars      int64 `json:"PendingStars,string"`
-	PendingDate       time.Time
-	ComputedAt        time.Time
-	UpdatedAt         time.Time
-	Version           int64 `json:"Version,string"`
-	// Computed is false for an account that has no stored projection yet. The
-	// detail view still renders it, so the operator can trigger the first
-	// recompute instead of facing a dead end.
-	Computed bool
-}
-
-// AccountRatingEventRow is one contribution ledger entry.
-type AccountRatingEventRow struct {
-	ID         int64 `json:"ID,string"`
-	UserID     int64 `json:"UserID,string"`
-	Kind       string
-	Amount     int64 `json:"Amount,string"`
-	Reason     string
-	Actor      string
-	CommandKey string
-	CreatedAt  time.Time
-}
-
-// AccountRatingDetail is the projection plus the ledger that explains it.
-type AccountRatingDetail struct {
-	Rating AccountRatingRow
-	Events []AccountRatingEventRow
-}
-
-const accountRatingSelectColumns = `r.user_id,
-	COALESCE(NULLIF(u.username, ''), p.username_lower, '') AS display_username,
-	COALESCE(u.first_name, ''),
-	r.level, r.stars, r.current_level_stars, r.next_level_stars,
-	r.stars_component, r.activity_component, r.penalty_component, r.manual_component,
-	r.pending_stars, r.pending_date, r.computed_at, r.updated_at, r.version`
-
-const accountRatingJoins = `
-FROM account_rating r
-LEFT JOIN users u ON u.id = r.user_id
-LEFT JOIN peer_usernames p ON p.peer_type = 'user' AND p.peer_id = r.user_id AND p.editable`
-
-func scanAccountRatingRow(scan func(dest ...any) error, item *AccountRatingRow) error {
-	// next_level_stars and pending_date are nullable: the first is NULL at the top
-	// level, the second whenever no score is parked.
-	var nextLevelStars *int64
-	var pendingDate *time.Time
-	if err := scan(
-		&item.UserID, &item.Username, &item.FirstName,
-		&item.Level, &item.Stars, &item.CurrentLevelStars, &nextLevelStars,
-		&item.StarsComponent, &item.ActivityComponent, &item.PenaltyComponent, &item.ManualComponent,
-		&item.PendingStars, &pendingDate, &item.ComputedAt, &item.UpdatedAt, &item.Version,
-	); err != nil {
-		return err
-	}
-	// A NULL next threshold is the maxed-out level: the TL flag is omitted, so the
-	// panel must render "no next level" instead of a next level of zero.
-	item.HasNextLevel = nextLevelStars != nil
-	if nextLevelStars != nil {
-		item.NextLevelStars = *nextLevelStars
-	}
-	if pendingDate != nil {
-		item.PendingDate = pendingDate.UTC()
-	}
-	item.Computed = true
-	return nil
-}
-
-// ListAccountRatings pages the leaderboard. Ordering and the keyset predicate
-// mirror the rating store exactly -- (level DESC, stars DESC, user_id) with the
-// cursor row resolved from beforeID -- so both surfaces page identically.
-// ListAccountRatings pages the leaderboard. query is a free-text operator search:
-// it matches a username prefix (editable or collectible), a first/last name
-// prefix, and -- when the term is numeric -- the user id, so an operator can find
-// an account the same way they do on the accounts tab.
-func (s *readStore) ListAccountRatings(ctx context.Context, minLevel int, userID, beforeID int64, limit int, query string) ([]AccountRatingRow, bool, error) {
-	if limit <= 0 {
-		limit = ratingListDefaultLimit
-	}
-	if limit > ratingListMaxLimit {
-		limit = ratingListMaxLimit
-	}
-	if minLevel < 0 {
-		minLevel = 0
-	}
-	if minLevel > domain.MaxAccountRatingLevel {
-		minLevel = domain.MaxAccountRatingLevel
-	}
-	query = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(query), "@"))
-	pattern := ""
-	queryUserID := int64(0)
-	if query != "" {
-		pattern = strings.ToLower(escapeLikePattern(query)) + "%"
-		if parsed, err := strconv.ParseInt(query, 10, 64); err == nil && parsed > 0 {
-			queryUserID = parsed
-		}
-	}
-	rows, err := s.pool.Query(ctx, `
-WITH cursor_row AS (
-	SELECT level AS c_level, stars AS c_stars, user_id AS c_user_id
-	FROM account_rating WHERE $3::bigint <> 0 AND user_id = $3
-)
-SELECT `+accountRatingSelectColumns+accountRatingJoins+`
-LEFT JOIN cursor_row c ON true
-WHERE r.level >= $1
-	AND ($2::bigint = 0 OR r.user_id = $2)
-	AND ($5::text = '' OR (
-		($6::bigint <> 0 AND r.user_id = $6)
-		OR lower(COALESCE(u.username, '')) LIKE $5
-		OR lower(COALESCE(u.first_name, '')) LIKE $5
-		OR lower(COALESCE(u.last_name, '')) LIKE $5
-		OR EXISTS (
-			SELECT 1 FROM peer_usernames pu
-			WHERE pu.peer_type = 'user' AND pu.peer_id = r.user_id
-				AND pu.username_lower LIKE $5
-		)
-	))
-	AND (
-		c.c_user_id IS NULL
-		OR r.level < c.c_level
-		OR (r.level = c.c_level AND r.stars < c.c_stars)
-		OR (r.level = c.c_level AND r.stars = c.c_stars AND r.user_id > c.c_user_id)
-	)
-ORDER BY r.level DESC, r.stars DESC, r.user_id
-LIMIT $4`, minLevel, userID, beforeID, limit+1, pattern, queryUserID)
-	if err != nil {
-		return nil, false, fmt.Errorf("list account ratings: %w", err)
-	}
-	defer rows.Close()
-	out := make([]AccountRatingRow, 0, limit+1)
-	for rows.Next() {
-		var item AccountRatingRow
-		if err := scanAccountRatingRow(rows.Scan, &item); err != nil {
-			return nil, false, err
-		}
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, false, err
-	}
-	hasMore := len(out) > limit
-	if hasMore {
-		out = out[:limit]
-	}
-	return out, hasMore, nil
-}
-
-// AccountRatingDetail returns one user's projection with its contribution
-// ledger.
-//
-// An account that exists but was never computed is answered with a zero-valued
-// projection carrying Computed=false, because the recompute command lives on this
-// very page: reporting "not found" for a real account would leave the operator
-// with no way to create the first projection. Only an unknown account is a 404.
-func (s *readStore) AccountRatingDetail(ctx context.Context, userID int64) (AccountRatingDetail, error) {
-	var out AccountRatingDetail
-	row := s.pool.QueryRow(ctx, `
-SELECT `+accountRatingSelectColumns+accountRatingJoins+`
-WHERE r.user_id = $1`, userID)
-	err := scanAccountRatingRow(row.Scan, &out.Rating)
-	switch {
-	case err == nil:
-	case errors.Is(err, pgx.ErrNoRows):
-		placeholder, uncomputedErr := s.uncomputedAccountRating(ctx, userID)
-		if uncomputedErr != nil {
-			return out, uncomputedErr
-		}
-		out.Rating = placeholder
-	default:
-		return out, fmt.Errorf("get account rating: %w", err)
-	}
-	events, err := s.accountRatingEvents(ctx, userID)
-	if err != nil {
-		return out, err
-	}
-	out.Events = events
-	return out, nil
-}
-
-// uncomputedAccountRating renders the projection an account would start from,
-// derived through the same threshold policy the store persists, so the panel's
-// level maths does not have to special-case a missing row.
-func (s *readStore) uncomputedAccountRating(ctx context.Context, userID int64) (AccountRatingRow, error) {
-	var row AccountRatingRow
-	err := s.pool.QueryRow(ctx, `
-SELECT u.id, COALESCE(NULLIF(u.username, ''), p.username_lower, ''), u.first_name
-FROM users u
-LEFT JOIN peer_usernames p ON p.peer_type = 'user' AND p.peer_id = u.id AND p.editable
-WHERE u.id = $1`, userID).Scan(&row.UserID, &row.Username, &row.FirstName)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return row, errReadNotFound
-		}
-		return row, fmt.Errorf("get account for rating: %w", err)
-	}
-	level, current, next, hasNext := domain.AccountRatingLevelForStars(0)
-	row.Level = level
-	row.CurrentLevelStars = current
-	row.NextLevelStars = next
-	row.HasNextLevel = hasNext
-	return row, nil
-}
-
-func (s *readStore) accountRatingEvents(ctx context.Context, userID int64) ([]AccountRatingEventRow, error) {
-	rows, err := s.pool.Query(ctx, `
-SELECT id, user_id, kind, amount, reason, actor, COALESCE(command_key, ''), created_at
-FROM account_rating_events
-WHERE user_id = $1
-ORDER BY id DESC
-LIMIT $2`, userID, ratingEventLimit)
-	if err != nil {
-		return nil, fmt.Errorf("list account rating events: %w", err)
-	}
-	defer rows.Close()
-	out := make([]AccountRatingEventRow, 0)
-	for rows.Next() {
-		var item AccountRatingEventRow
-		if err := rows.Scan(&item.ID, &item.UserID, &item.Kind, &item.Amount, &item.Reason, &item.Actor, &item.CommandKey, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, item)

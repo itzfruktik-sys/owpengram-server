@@ -25,9 +25,6 @@ func (r *Router) suggestedPostApprovalUpdates(ctx context.Context, viewerUserID 
 			updates = append(updates, update)
 		}
 	}
-	if result.PayerStarsBalance != nil && result.PayerStarsBalance.UserID == viewerUserID {
-		updates = append(updates, &tg.UpdateStarsBalance{Balance: &tg.StarsAmount{Amount: result.PayerStarsBalance.Balance}})
-	}
 	chats := r.monoforumChats(ctx, viewerUserID, result.Monoforum)
 	if result.Parent.ID != 0 {
 		chats = appendUniqueTGChats(chats, tgChannelChatMin(viewerUserID, result.Parent))

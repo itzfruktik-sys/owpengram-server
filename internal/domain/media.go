@@ -591,18 +591,6 @@ const (
 	// 状态切换与关闭请求。会话级保护不能写入普通消息的 NoForwards 字段。
 	MessageServiceActionNoForwardsToggle  MessageServiceActionKind = "no_forwards_toggle"
 	MessageServiceActionNoForwardsRequest MessageServiceActionKind = "no_forwards_request"
-	// MessageServiceActionStarGift 映射 messageActionStarGift：收到一份 Star 礼物。
-	// 礼物快照（贴纸/星价）内嵌在 action 里，收礼人无需额外拉取即可渲染气泡。
-	MessageServiceActionStarGift MessageServiceActionKind = "star_gift"
-	// MessageServiceActionGiftStars maps messageActionGiftStars: fiat-purchased
-	// Stars credited directly to a friend, distinct from collectible Star Gifts.
-	MessageServiceActionGiftStars MessageServiceActionKind = "gift_stars"
-	// MessageServiceActionStarGiftUnique maps messageActionStarGiftUnique. The
-	// immutable collectible snapshot is carried by the service message so an
-	// exact replay/difference never depends on mutable catalog state.
-	MessageServiceActionStarGiftUnique        MessageServiceActionKind = "star_gift_unique"
-	MessageServiceActionStarGiftOffer         MessageServiceActionKind = "star_gift_offer"
-	MessageServiceActionStarGiftOfferDeclined MessageServiceActionKind = "star_gift_offer_declined"
 )
 
 // MessagePhoneCallAction 是 messageActionPhoneCall 的协议中立载荷。
@@ -685,92 +673,6 @@ type MessageServiceAction struct {
 	RequestedPeer         *MessageRequestedPeerAction         `json:"requested_peer,omitempty"`
 	ChatThemeEmoticon     string                              `json:"chat_theme_emoticon,omitempty"`
 	NoForwards            *MessageNoForwardsAction            `json:"no_forwards,omitempty"`
-	StarGift              *MessageStarGiftAction              `json:"star_gift,omitempty"`
-	GiftStars             *MessageGiftStarsAction             `json:"gift_stars,omitempty"`
-	StarGiftUnique        *MessageStarGiftUniqueAction        `json:"star_gift_unique,omitempty"`
-	StarGiftOffer         *MessageStarGiftOfferAction         `json:"star_gift_offer,omitempty"`
-	StarGiftOfferDeclined *MessageStarGiftOfferDeclinedAction `json:"star_gift_offer_declined,omitempty"`
-}
-
-// MessageGiftStarsAction is the immutable service-message projection. The
-// recipient-only BalanceAfter field is not encoded in messageActionGiftStars;
-// it lets online push and offline difference attach the matching non-PTS
-// updateStarsBalance without querying mutable current state.
-type MessageGiftStarsAction struct {
-	Currency      string `json:"currency"`
-	Amount        int64  `json:"amount"`
-	Stars         int64  `json:"stars"`
-	TransactionID string `json:"transaction_id,omitempty"`
-	BalanceAfter  int64  `json:"balance_after"`
-}
-
-// MessageStarGiftAction 是 messageActionStarGift 的协议中立载荷：内嵌礼物快照（贴纸/星价）
-// 使收礼人无需额外拉取即可渲染。PeerUserID/PeerChannelID 为收礼方；NameHidden 时下发不暴露 from。
-type MessageStarGiftAction struct {
-	GiftID             int64     `json:"gift_id"`
-	Stars              int64     `json:"stars"`
-	ConvertStars       int64     `json:"convert_stars,omitempty"`
-	Title              string    `json:"title,omitempty"`
-	Sticker            *Document `json:"sticker,omitempty"`
-	Message            string    `json:"message,omitempty"`
-	FromUserID         int64     `json:"from_user_id,omitempty"`
-	PeerUserID         int64     `json:"peer_user_id,omitempty"`
-	PeerChannelID      int64     `json:"peer_channel_id,omitempty"`
-	SavedID            int64     `json:"saved_id,omitempty"`
-	NameHidden         bool      `json:"name_hidden,omitempty"`
-	Saved              bool      `json:"saved,omitempty"`
-	Converted          bool      `json:"converted,omitempty"`
-	CanUpgrade         bool      `json:"can_upgrade,omitempty"`
-	PrepaidUpgrade     bool      `json:"prepaid_upgrade,omitempty"`
-	PrepaidUpgradeHash string    `json:"prepaid_upgrade_hash,omitempty"`
-	UpgradeSeparate    bool      `json:"upgrade_separate,omitempty"`
-	// UpgradePriceStars belongs to the inner StarGift.upgrade_stars field and
-	// is the price of a normal paid upgrade. UpgradeStars below belongs to the
-	// outer messageActionStarGift and is only the amount already prepaid by the
-	// sender. TDesktop uses these two fields to choose the paid vs free flow.
-	UpgradePriceStars int64 `json:"upgrade_price_stars,omitempty"`
-	UpgradeStars      int64 `json:"upgrade_stars,omitempty"`
-	UpgradeMsgID      int   `json:"upgrade_msg_id,omitempty"`
-	GiftMsgID         int   `json:"gift_msg_id,omitempty"`
-	GiftNum           int   `json:"gift_num,omitempty"`
-	AuctionAcquired   bool  `json:"auction_acquired,omitempty"`
-	To                Peer  `json:"to,omitempty"`
-}
-
-type MessageStarGiftUniqueAction struct {
-	Gift                     UniqueStarGift  `json:"gift"`
-	FromUserID               int64           `json:"from_user_id,omitempty"`
-	Peer                     Peer            `json:"peer"`
-	SavedID                  int64           `json:"saved_id,omitempty"`
-	Upgrade                  bool            `json:"upgrade,omitempty"`
-	Saved                    bool            `json:"saved,omitempty"`
-	PrepaidUpgrade           bool            `json:"prepaid_upgrade,omitempty"`
-	Transferred              bool            `json:"transferred,omitempty"`
-	Refunded                 bool            `json:"refunded,omitempty"`
-	Assigned                 bool            `json:"assigned,omitempty"`
-	FromOffer                bool            `json:"from_offer,omitempty"`
-	Craft                    bool            `json:"craft,omitempty"`
-	CanExportAt              int             `json:"can_export_at,omitempty"`
-	TransferStars            int64           `json:"transfer_stars,omitempty"`
-	ResaleAmount             *StarGiftAmount `json:"resale_amount,omitempty"`
-	CanTransferAt            int             `json:"can_transfer_at,omitempty"`
-	CanResellAt              int             `json:"can_resell_at,omitempty"`
-	DropOriginalDetailsStars int64           `json:"drop_original_details_stars,omitempty"`
-	CanCraftAt               int             `json:"can_craft_at,omitempty"`
-}
-
-type MessageStarGiftOfferAction struct {
-	Gift      UniqueStarGift `json:"gift"`
-	Price     StarGiftAmount `json:"price"`
-	ExpiresAt int            `json:"expires_at"`
-	Accepted  bool           `json:"accepted,omitempty"`
-	Declined  bool           `json:"declined,omitempty"`
-}
-
-type MessageStarGiftOfferDeclinedAction struct {
-	Gift    UniqueStarGift `json:"gift"`
-	Price   StarGiftAmount `json:"price"`
-	Expired bool           `json:"expired,omitempty"`
 }
 
 // MessageMedia 是一条消息媒体载荷的业务表示（落库为消息行上的 JSONB 快照）。

@@ -175,12 +175,6 @@ func TestBroadcastChannelAcceptsFullReactionCatalog(t *testing.T) {
 	if !ok || len(some.Reactions) != catalogSize {
 		t.Fatalf("full channel reactions = %#v, want %d explicit reactions", stored, catalogSize)
 	}
-	if fullChannel.GetPaidReactionsAvailable() {
-		t.Fatalf("full channel paid reactions = true, want false without paid_enabled flag")
-	}
-	if !fullChannel.GetPaidMediaAllowed() {
-		t.Fatalf("broadcast full channel paid_media_allowed = false, want true for Android paid reaction editor")
-	}
 }
 
 func TestSetChatAvailableReactionsPreservesOptionalFlags(t *testing.T) {
@@ -230,9 +224,6 @@ func TestSetChatAvailableReactionsPreservesOptionalFlags(t *testing.T) {
 	if fullChannel.ReactionsLimit != 7 {
 		t.Fatalf("reactions limit after omitted flag = %d, want preserved 7", fullChannel.ReactionsLimit)
 	}
-	if !fullChannel.GetPaidReactionsAvailable() {
-		t.Fatalf("paid reactions after omitted flag = false, want preserved true")
-	}
 
 	disablePaid := &tg.MessagesSetChatAvailableReactionsRequest{
 		Peer: peer,
@@ -252,12 +243,6 @@ func TestSetChatAvailableReactionsPreservesOptionalFlags(t *testing.T) {
 	fullChannel = full.FullChat.(*tg.ChannelFull)
 	if fullChannel.ReactionsLimit != 7 {
 		t.Fatalf("reactions limit after paid-only update = %d, want preserved 7", fullChannel.ReactionsLimit)
-	}
-	if fullChannel.GetPaidReactionsAvailable() {
-		t.Fatalf("paid reactions after explicit false = true, want false")
-	}
-	if !fullChannel.GetPaidMediaAllowed() {
-		t.Fatalf("broadcast paid_media_allowed after paid disable = false, want capability preserved")
 	}
 }
 
@@ -299,10 +284,6 @@ func TestSetChatAvailableReactionsStripsTDesktopPaidSentinel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get full channel after TDesktop sentinel set: %v", err)
 	}
-	fullChannel := full.FullChat.(*tg.ChannelFull)
-	if !fullChannel.GetPaidReactionsAvailable() {
-		t.Fatalf("paid reactions after TDesktop sentinel set = false, want true")
-	}
 	some := mustChannelFullSomeReactions(t, full)
 	if len(some.Reactions) != 2 {
 		t.Fatalf("stored reactions after stripping sentinel = %d, want 2", len(some.Reactions))
@@ -333,81 +314,6 @@ func TestSetChatAvailableReactionsStripsTDesktopPaidSentinel(t *testing.T) {
 	some = mustChannelFullSomeReactions(t, full)
 	if len(some.Reactions) != domain.MaxChannelReactionTypes {
 		t.Fatalf("stored reactions after max sentinel set = %d, want %d", len(some.Reactions), domain.MaxChannelReactionTypes)
-	}
-}
-
-func TestChannelFullPaidReactionCapabilityOnlyBroadcast(t *testing.T) {
-	ctx := context.Background()
-	userStore := memory.NewUserStore()
-	owner, _ := userStore.Create(ctx, domain.User{AccessHash: 101, Phone: "15550002202", FirstName: "Owner"})
-	channelStore := memory.NewChannelStore()
-	r := New(Config{}, Deps{
-		Users:    appusers.NewService(userStore),
-		Channels: appchannels.NewService(channelStore),
-	}, zaptest.NewLogger(t), clock.System)
-
-	broadcastCreated, err := r.onChannelsCreateChannel(WithUserID(ctx, owner.ID), &tg.ChannelsCreateChannelRequest{
-		Title:     "Paid Reaction Broadcast",
-		Broadcast: true,
-	})
-	if err != nil {
-		t.Fatalf("create broadcast channel: %v", err)
-	}
-	broadcast := broadcastCreated.(*tg.Updates).Chats[0].(*tg.Channel)
-	broadcastFull, err := r.onChannelsGetFullChannel(WithUserID(ctx, owner.ID), &tg.InputChannel{ChannelID: broadcast.ID, AccessHash: broadcast.AccessHash})
-	if err != nil {
-		t.Fatalf("get broadcast full channel: %v", err)
-	}
-	broadcastFullChannel := broadcastFull.FullChat.(*tg.ChannelFull)
-	if !broadcastFullChannel.GetPaidMediaAllowed() {
-		t.Fatalf("broadcast paid_media_allowed = false, want true")
-	}
-	if broadcastFullChannel.GetPaidReactionsAvailable() {
-		t.Fatalf("broadcast paid_reactions_available = true before paid_enabled, want false")
-	}
-
-	enablePaid := &tg.MessagesSetChatAvailableReactionsRequest{
-		Peer:               &tg.InputPeerChannel{ChannelID: broadcast.ID, AccessHash: broadcast.AccessHash},
-		AvailableReactions: &tg.ChatReactionsAll{},
-	}
-	enablePaid.SetPaidEnabled(true)
-	if _, err := r.onMessagesSetChatAvailableReactions(WithUserID(ctx, owner.ID), enablePaid); err != nil {
-		t.Fatalf("enable broadcast paid reactions: %v", err)
-	}
-	broadcastFull, err = r.onChannelsGetFullChannel(WithUserID(ctx, owner.ID), &tg.InputChannel{ChannelID: broadcast.ID, AccessHash: broadcast.AccessHash})
-	if err != nil {
-		t.Fatalf("get broadcast full channel after paid enable: %v", err)
-	}
-	broadcastFullChannel = broadcastFull.FullChat.(*tg.ChannelFull)
-	if !broadcastFullChannel.GetPaidMediaAllowed() || !broadcastFullChannel.GetPaidReactionsAvailable() {
-		t.Fatalf("broadcast flags after enable: paid_media_allowed=%v paid_reactions_available=%v, want both true",
-			broadcastFullChannel.GetPaidMediaAllowed(), broadcastFullChannel.GetPaidReactionsAvailable())
-	}
-
-	megaCreated, err := r.onChannelsCreateChannel(WithUserID(ctx, owner.ID), &tg.ChannelsCreateChannelRequest{
-		Title:     "Paid Reaction Mega",
-		Megagroup: true,
-	})
-	if err != nil {
-		t.Fatalf("create megagroup: %v", err)
-	}
-	mega := megaCreated.(*tg.Updates).Chats[0].(*tg.Channel)
-	enableMegaPaid := &tg.MessagesSetChatAvailableReactionsRequest{
-		Peer:               &tg.InputPeerChannel{ChannelID: mega.ID, AccessHash: mega.AccessHash},
-		AvailableReactions: &tg.ChatReactionsAll{},
-	}
-	enableMegaPaid.SetPaidEnabled(true)
-	if _, err := r.onMessagesSetChatAvailableReactions(WithUserID(ctx, owner.ID), enableMegaPaid); err != nil {
-		t.Fatalf("set megagroup paid_enabled request: %v", err)
-	}
-	megaFull, err := r.onChannelsGetFullChannel(WithUserID(ctx, owner.ID), &tg.InputChannel{ChannelID: mega.ID, AccessHash: mega.AccessHash})
-	if err != nil {
-		t.Fatalf("get megagroup full channel: %v", err)
-	}
-	megaFullChannel := megaFull.FullChat.(*tg.ChannelFull)
-	if megaFullChannel.GetPaidMediaAllowed() || megaFullChannel.GetPaidReactionsAvailable() {
-		t.Fatalf("megagroup flags: paid_media_allowed=%v paid_reactions_available=%v, want both false",
-			megaFullChannel.GetPaidMediaAllowed(), megaFullChannel.GetPaidReactionsAvailable())
 	}
 }
 

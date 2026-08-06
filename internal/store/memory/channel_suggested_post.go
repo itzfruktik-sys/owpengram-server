@@ -117,26 +117,9 @@ func (s *ChannelStore) toggleSuggestedPostApprovalLocked(req domain.ToggleSugges
 		return base, nil
 	}
 
-	starsBalance, tonBalance, enough := s.reserveSuggestedPostPaymentLocked(original.SavedPeer.ID, parent.ID, price)
-	if !enough {
-		if exists {
-			out := cloneSuggestedPostResult(approval.lastResult)
-			out.PayerStarsBalance, out.PayerTONBalance = starsBalance, tonBalance
-			out.Duplicate = true
-			return out, nil
-		}
-		service, serviceEvent := s.appendSuggestedPostServiceLocked(mono, parent, req.UserID, original.SavedPeer, original.ID, req.Date, domain.ChannelMessageAction{
-			Type: domain.ChannelActionSuggestedPostApproval, SuggestedPostBalanceTooLow: true,
-			SuggestedPostScheduleDate: scheduleDate, SuggestedPostPrice: price,
-		})
-		base.Monoforum = cloneChannel(s.channels[mono.ID])
-		base.ServiceMessage, base.ServiceEvent = cloneChannelMessage(service), cloneChannelEvent(serviceEvent)
-		base.PayerStarsBalance, base.PayerTONBalance = starsBalance, tonBalance
-		approval = memorySuggestedPostApproval{actorUserID: req.UserID, parentID: parent.ID, savedPeer: original.SavedPeer, state: base.State, price: price, scheduleDate: scheduleDate, lastResult: cloneSuggestedPostResult(base)}
-		s.suggestedPostApprovals[key] = approval
-		return base, nil
-	}
-
+	// telesrv has no Stars economy: a suggested post is approved for free
+	// regardless of any price attached to it, so the balance-check/collect
+	// step and its "balance too low" retry state are skipped entirely.
 	original.SuggestedPost.Accepted = true
 	original.SuggestedPost.Rejected = false
 	effectivePublishDate := scheduleDate
@@ -150,19 +133,16 @@ func (s *ChannelStore) toggleSuggestedPostApprovalLocked(req domain.ToggleSugges
 	})
 	base.Monoforum, base.OriginalMessage, base.OriginalEvent = cloneChannel(s.channels[mono.ID]), cloneChannelMessage(original), cloneChannelEvent(edit)
 	base.ServiceMessage, base.ServiceEvent = cloneChannelMessage(service), cloneChannelEvent(serviceEvent)
-	base.PayerStarsBalance, base.PayerTONBalance = starsBalance, tonBalance
 	base.State = domain.SuggestedPostStateScheduled
 	approval = memorySuggestedPostApproval{actorUserID: req.UserID, parentID: parent.ID, savedPeer: original.SavedPeer, state: base.State, price: price, scheduleDate: effectivePublishDate}
 	if effectivePublishDate <= req.Date {
 		published := s.publishSuggestedPostLocked(parent, original, req.UserID, req.Date)
 		base.Published = &published
 		approval.publishedMessageID = published.Message.ID
-		if price == nil {
-			base.State = domain.SuggestedPostStateCompleted
-		} else {
-			base.State = domain.SuggestedPostStatePublished
-			approval.settlementDue = req.Date + suggestedPostSettlementAge
-		}
+		// telesrv has no Stars economy: nothing was ever charged, so a
+		// published post goes straight to Completed -- there is no
+		// settlement window regardless of any attached price.
+		base.State = domain.SuggestedPostStateCompleted
 		approval.state = base.State
 	}
 	approval.lastResult = cloneSuggestedPostResult(base)
@@ -212,54 +192,20 @@ func (s *ChannelStore) ProcessSuggestedPostLifecycle(_ context.Context, req doma
 		}
 		result := domain.ToggleSuggestedPostApprovalResult{Monoforum: cloneChannel(mono), Parent: cloneChannel(parent), SavedPeer: approval.savedPeer, State: approval.state, Recipients: s.monoforumRecipientsLocked(parent.ID, approval.savedPeer.ID)}
 		changed := false
+		// telesrv has no Stars economy: nothing was ever charged, so a deleted
+		// scheduled post is simply dropped (Refunded is the closest existing
+		// terminal state, reused here so downstream event handling stays
+		// uniform) and a published post is Completed immediately -- there is
+		// no settlement window and no refund path to run.
 		if approval.state == domain.SuggestedPostStateScheduled && original.Deleted {
-			if approval.price != nil {
-				s.refundSuggestedPostPaymentLocked(approval.savedPeer.ID, approval.price)
-				service, event := s.appendSuggestedPostServiceLocked(mono, parent, approval.actorUserID, approval.savedPeer, key.messageID, req.Now, domain.ChannelMessageAction{Type: domain.ChannelActionSuggestedPostRefund})
-				result.ServiceMessage, result.ServiceEvent = service, event
-			}
 			approval.state, result.State, changed = domain.SuggestedPostStateRefunded, domain.SuggestedPostStateRefunded, true
 		}
 		if approval.state == domain.SuggestedPostStateScheduled && approval.scheduleDate <= req.Now {
 			published := s.publishSuggestedPostLocked(parent, original, approval.actorUserID, req.Now)
 			result.Published = &published
 			approval.publishedMessageID = published.Message.ID
-			if approval.price == nil {
-				approval.state = domain.SuggestedPostStateCompleted
-			} else {
-				approval.state = domain.SuggestedPostStatePublished
-				approval.settlementDue = req.Now + suggestedPostSettlementAge
-			}
+			approval.state = domain.SuggestedPostStateCompleted
 			result.State, changed = approval.state, true
-		}
-		if approval.state == domain.SuggestedPostStatePublished {
-			if approval.price == nil || approval.publishedMessageID <= 0 || approval.settlementDue <= 0 {
-				return out, fmt.Errorf("suggested post lifecycle invariant: incomplete published state %d/%d", mono.ID, key.messageID)
-			}
-			deleted := false
-			publishedFound := false
-			for _, message := range s.messages[parent.ID] {
-				if message.ID == approval.publishedMessageID {
-					deleted = message.Deleted
-					publishedFound = true
-					break
-				}
-			}
-			if !publishedFound {
-				return out, fmt.Errorf("suggested post lifecycle invariant: missing published message %d/%d", parent.ID, approval.publishedMessageID)
-			}
-			deleteDate := s.channelMessageDeleteDateLocked(parent.ID, approval.publishedMessageID)
-			if deleted && (deleteDate == 0 || deleteDate < approval.settlementDue) {
-				s.refundSuggestedPostPaymentLocked(approval.savedPeer.ID, approval.price)
-				service, event := s.appendSuggestedPostServiceLocked(mono, parent, approval.actorUserID, approval.savedPeer, key.messageID, req.Now, domain.ChannelMessageAction{Type: domain.ChannelActionSuggestedPostRefund})
-				result.ServiceMessage, result.ServiceEvent = service, event
-				approval.state, result.State, changed = domain.SuggestedPostStateRefunded, domain.SuggestedPostStateRefunded, true
-			} else if approval.settlementDue <= req.Now {
-				s.settleSuggestedPostPaymentLocked(parent.ID, approval.price)
-				service, event := s.appendSuggestedPostServiceLocked(mono, parent, approval.actorUserID, approval.savedPeer, key.messageID, req.Now, domain.ChannelMessageAction{Type: domain.ChannelActionSuggestedPostSuccess, SuggestedPostPrice: cloneSuggestedPostPrice(approval.price)})
-				result.ServiceMessage, result.ServiceEvent = service, event
-				approval.state, result.State, changed = domain.SuggestedPostStateCompleted, domain.SuggestedPostStateCompleted, true
-			}
 		}
 		if changed {
 			result.Monoforum, result.Parent = cloneChannel(s.channels[mono.ID]), cloneChannel(s.channels[parent.ID])
@@ -286,61 +232,6 @@ func (s *ChannelStore) channelMessageDeleteDateLocked(channelID int64, messageID
 	return 0
 }
 
-func (s *ChannelStore) reserveSuggestedPostPaymentLocked(payerID, parentID int64, price *domain.SuggestedPostPrice) (*domain.StarsBalance, *int64, bool) {
-	if price == nil {
-		return nil, nil, true
-	}
-	switch price.Kind {
-	case domain.SuggestedPostPriceStars:
-		current, ok := s.starsBalances[payerID]
-		if !ok {
-			current = domain.DefaultStarsStartingGrant
-		}
-		balance := &domain.StarsBalance{UserID: payerID, Balance: current, Granted: true}
-		if price.Nanos != 0 || current < price.Amount {
-			return balance, nil, false
-		}
-		current -= price.Amount
-		s.starsBalances[payerID] = current
-		balance.Balance = current
-		return balance, nil, true
-	case domain.SuggestedPostPriceTON:
-		current := s.tonBalances[payerID]
-		balance := current
-		if current < price.Amount {
-			return nil, &balance, false
-		}
-		current -= price.Amount
-		s.tonBalances[payerID] = current
-		balance = current
-		return nil, &balance, true
-	default:
-		return nil, nil, false
-	}
-}
-
-func (s *ChannelStore) refundSuggestedPostPaymentLocked(payerID int64, price *domain.SuggestedPostPrice) {
-	if price == nil {
-		return
-	}
-	if price.Kind == domain.SuggestedPostPriceStars {
-		s.starsBalances[payerID] += price.Amount
-	} else if price.Kind == domain.SuggestedPostPriceTON {
-		s.tonBalances[payerID] += price.Amount
-	}
-}
-
-func (s *ChannelStore) settleSuggestedPostPaymentLocked(parentID int64, price *domain.SuggestedPostPrice) {
-	if price == nil {
-		return
-	}
-	credit := price.Amount * paidMessageChannelCommissionPermille / 1000
-	if price.Kind == domain.SuggestedPostPriceStars {
-		s.channelStarsBalances[parentID] += credit
-	} else if price.Kind == domain.SuggestedPostPriceTON {
-		s.channelTONBalances[parentID] += credit
-	}
-}
 
 func (s *ChannelStore) appendSuggestedPostServiceLocked(mono, parent domain.Channel, actor int64, saved domain.Peer, replyID, date int, action domain.ChannelMessageAction) (domain.ChannelMessage, domain.ChannelUpdateEvent) {
 	pts := s.nextChannelPtsLocked(mono.ID)
@@ -405,14 +296,6 @@ func cloneSuggestedPostResult(in domain.ToggleSuggestedPostApprovalResult) domai
 		p.Event = cloneChannelEvent(p.Event)
 		p.Recipients = append([]int64(nil), p.Recipients...)
 		in.Published = &p
-	}
-	if in.PayerStarsBalance != nil {
-		b := *in.PayerStarsBalance
-		in.PayerStarsBalance = &b
-	}
-	if in.PayerTONBalance != nil {
-		b := *in.PayerTONBalance
-		in.PayerTONBalance = &b
 	}
 	return in
 }

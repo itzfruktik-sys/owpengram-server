@@ -63,24 +63,22 @@ func (w channelReadWatermark) advance(userID int64, maxID int) channelReadWaterm
 
 // ChannelStore is an in-memory channel/supergroup store for tests and local development.
 type ChannelStore struct {
-	mu        sync.RWMutex
-	nextID    int64
-	nextHash  int64
-	channels  map[int64]domain.Channel
-	members   map[int64]map[int64]domain.ChannelMember
-	dialogs   map[int64]map[int64]domain.ChannelDialog
-	topics    map[int64]map[int]domain.ChannelForumTopic
-	messages  map[int64][]domain.ChannelMessage
-	reactions map[int64]map[int]map[int64][]domain.ChannelMessagePeerReaction
-	// paidReactions 是 per-(channel,message,user) 付费 reaction 累计星数 + 匿名标志。
-	paidReactions map[int64]map[int]map[int64]memoryPaidReaction
-	top           map[int64]map[string]domain.TopMessageReaction
-	recent        map[int64]map[string]domain.RecentMessageReaction
-	mentions      map[int64]map[int64]map[int]memoryMention
-	msgViews      map[int64]map[int]int
-	msgViewers    map[int64]map[int]map[int64]struct{}
-	events        map[int64][]domain.ChannelUpdateEvent
-	retention     map[int64]domain.ChannelUpdateRetentionCheckpoint
+	mu         sync.RWMutex
+	nextID     int64
+	nextHash   int64
+	channels   map[int64]domain.Channel
+	members    map[int64]map[int64]domain.ChannelMember
+	dialogs    map[int64]map[int64]domain.ChannelDialog
+	topics     map[int64]map[int]domain.ChannelForumTopic
+	messages   map[int64][]domain.ChannelMessage
+	reactions  map[int64]map[int]map[int64][]domain.ChannelMessagePeerReaction
+	top        map[int64]map[string]domain.TopMessageReaction
+	recent     map[int64]map[string]domain.RecentMessageReaction
+	mentions   map[int64]map[int64]map[int]memoryMention
+	msgViews   map[int64]map[int]int
+	msgViewers map[int64]map[int]map[int64]struct{}
+	events     map[int64][]domain.ChannelUpdateEvent
+	retention  map[int64]domain.ChannelUpdateRetentionCheckpoint
 	// historyClearDates is the no-PTS recovery timestamp for a future
 	// owner-local clear, keyed by channel then user. The member remains the
 	// absolute boundary authority; this map only makes account difference
@@ -134,7 +132,6 @@ func NewChannelStore() *ChannelStore {
 		topics:                 make(map[int64]map[int]domain.ChannelForumTopic),
 		messages:               make(map[int64][]domain.ChannelMessage),
 		reactions:              make(map[int64]map[int]map[int64][]domain.ChannelMessagePeerReaction),
-		paidReactions:          make(map[int64]map[int]map[int64]memoryPaidReaction),
 		top:                    make(map[int64]map[string]domain.TopMessageReaction),
 		recent:                 make(map[int64]map[string]domain.RecentMessageReaction),
 		mentions:               make(map[int64]map[int64]map[int]memoryMention),

@@ -31,3 +31,12 @@ time the migration is written.
 
 Upstream's own migrations keep their original sequential numbers untouched;
 only migrations authored in this fork use the timestamp scheme.
+
+## Removed feature: Stars, Star Gifts, Account Rating
+
+The Stars economy, Star Gifts (collectibles/NFT gifts, local TON ledger),
+and the Account Rating system were fully removed from the server (all
+application/domain/store code and admin panel UI deleted). Their migrations
+stay in place unmodified and are not reverted — this repo's convention is to
+never renumber or delete migration history. The corresponding tables are
+inert/orphaned as of the removal; this is intentional, not an oversight.

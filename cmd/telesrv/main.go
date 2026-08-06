@@ -50,10 +50,7 @@ import (
 	phoneapp "telesrv/internal/app/phone"
 	pollsapp "telesrv/internal/app/polls"
 	privacyapp "telesrv/internal/app/privacy"
-	ratingapp "telesrv/internal/app/rating"
 	secretchatapp "telesrv/internal/app/secretchat"
-	"telesrv/internal/app/stargifts"
-	"telesrv/internal/app/stars"
 	storiesapp "telesrv/internal/app/stories"
 	telegramloginapp "telesrv/internal/app/telegramlogin"
 	themesapp "telesrv/internal/app/themes"
@@ -68,7 +65,6 @@ import (
 	"telesrv/internal/domain"
 	"telesrv/internal/mtprotoedge"
 	obsmetrics "telesrv/internal/observability/metrics"
-	"telesrv/internal/officialgifts"
 	"telesrv/internal/otpdelivery"
 	otpsmtp "telesrv/internal/otpdelivery/smtp"
 	otpwebhook "telesrv/internal/otpdelivery/webhook"
@@ -873,9 +869,8 @@ func run(logger *zap.Logger) error {
 	rateLimiter := redisstore.NewRateLimiter(rdb)
 	activeSessions := mtprotoedge.NewSessionManager(logger.Named("mtprotoedge").Named("sessions"))
 	adminService := adminapp.NewService(adminapp.Dependencies{
-		Commands:      adminStore,
-		Restrictions:  adminStore,
-		OfficialGifts: officialgifts.New(cfg.OfficialGiftsDir),
+		Commands:     adminStore,
+		Restrictions: adminStore,
 	})
 	storageRetentionMaxAge := cfg.StorageRetentionMaxAge
 	if !cfg.StorageRetentionEnable {
@@ -1095,32 +1090,6 @@ func run(logger *zap.Logger) error {
 	secretChatStore := postgres.NewSecretChatStore(pool)
 	encryptedQueueStore := postgres.NewEncryptedQueueStore(pool)
 	secretChatService := secretchatapp.NewService(secretChatStore, encryptedQueueStore, secretChatIDAllocator)
-	starsStore := postgres.NewStarsStore(pool)
-	starsPurchaseStore := postgres.NewStarsPurchaseStore(pool, messageStore, channelStore)
-	starsService := stars.NewService(starsStore,
-		stars.WithStartingGrant(cfg.StarsStartingGrant),
-		stars.WithPurchaseStore(starsPurchaseStore))
-	starGiftStore := postgres.NewStarGiftStore(pool)
-	starGiftUpgradeStore := postgres.NewStarGiftUpgradeStore(pool, messageStore, postgres.WithStarGiftLifecyclePolicy(domain.StarGiftLifecyclePolicy{
-		TransferStars: cfg.StarGiftTransferStars, DropOriginalDetailsStars: cfg.StarGiftDropOriginalDetailsStars,
-		OfferMinStars:      cfg.StarGiftOfferMinStars,
-		ExportDelaySeconds: int(cfg.StarGiftExportDelay / time.Second), TransferDelaySeconds: int(cfg.StarGiftTransferDelay / time.Second),
-		ResellDelaySeconds: int(cfg.StarGiftResellDelay / time.Second), CraftDelaySeconds: int(cfg.StarGiftCraftDelay / time.Second),
-		CraftChancePermille: cfg.StarGiftCraftChancePermille,
-	}))
-	starGiftLifecycleStore := postgres.NewStarGiftLifecycleStore(pool, messageStore, cfg.StarGiftTONStartingGrant,
-		postgres.WithStarGiftMarketPolicy(domain.StarGiftMarketPolicy{
-			StarsProceedsPermille: cfg.StarGiftStarsProceedsPermille,
-			TONProceedsPermille:   cfg.StarGiftTONProceedsPermille,
-		}))
-	starGiftWithdrawalProvider, err := stargifts.NewLocalWithdrawalProvider(cfg.PublicBaseURL)
-	if err != nil {
-		return fmt.Errorf("init local star gift withdrawal provider: %w", err)
-	}
-	giftsService := stargifts.NewService(starGiftStore, blobBackend, cfg.DC,
-		stargifts.WithUpgradeStore(starGiftUpgradeStore),
-		stargifts.WithLifecycleStore(starGiftLifecycleStore),
-		stargifts.WithWithdrawalProvider(starGiftWithdrawalProvider))
 	// Passkey:凭据持久化走 postgres;一次性挑战走进程内内存(短 TTL,与 QR 登录 token
 	// 同属进程内一次性凭据,不跨实例)。
 	passkeyStore := postgres.NewPasskeyStore(pool)
@@ -1216,25 +1185,15 @@ func run(logger *zap.Logger) error {
 		}),
 		auth.WithEmailSignup(cfg.EmailSignupEnable),
 		auth.WithEmailSignupPhonePrefixes(cfg.EmailSignupPhonePrefixes))
-	// Collectible (NFT) usernames and the gramsrv composite account rating are
-	// optional read models projected at the protocol edge. The rating worker
-	// computes and persists scores; profile reads never recompute them.
+	// Collectible (NFT) usernames are an optional read model projected at the
+	// protocol edge.
 	collectibleUsernameStore := postgres.NewCollectibleUsernameStore(pool)
-	accountRatingStore := postgres.NewAccountRatingStore(pool)
 	usernamesService := usernamesapp.NewService(
 		usernamesapp.WithRegistryStore(collectibleUsernameStore),
 		usernamesapp.WithCollectibleStore(collectibleUsernameStore),
 		usernamesapp.WithURLTemplate(cfg.CollectibleUsernameURLTemplate),
 		usernamesapp.WithPublicBaseURL(cfg.PublicBaseURL),
 		usernamesapp.WithLogger(logger.Named("app").Named("usernames")),
-	)
-	ratingService := ratingapp.NewService(
-		ratingapp.WithStore(accountRatingStore),
-		ratingapp.WithEnabled(cfg.RatingEnabled),
-		ratingapp.WithWeights(cfg.AccountRatingWeights()),
-		ratingapp.WithPendingDelay(cfg.RatingPendingDelay),
-		ratingapp.WithStaleAfter(cfg.RatingStaleAfter),
-		ratingapp.WithLogger(logger.Named("app").Named("rating")),
 	)
 	// Official platform verification: applications are filed through the built-in
 	// @verifybot and decided in the admin panel. Every eligibility rule lives in
@@ -1339,7 +1298,6 @@ func run(logger *zap.Logger) error {
 		Moderation:          moderationService,
 		Users:               usersService,
 		Usernames:           usernamesService,
-		AccountRatings:      ratingService,
 		BotVerifications:    botVerificationService,
 		TelegramLogin:       telegramLoginRPCDependency(telegramLoginService),
 		Updates:             updatesService,
@@ -1361,8 +1319,6 @@ func run(logger *zap.Logger) error {
 		Stories:             storiesService,
 		Phone:               phoneService,
 		SecretChats:         secretChatService,
-		Stars:               starsService,
-		Gifts:               giftsService,
 		Passkey:             passkeyService,
 		Themes:              themeService,
 		GroupCalls:          groupCallsService,
@@ -1393,7 +1349,6 @@ func run(logger *zap.Logger) error {
 		RPCProjections:     router,
 		BaseUsers:          userCache,
 		BotProfiles:        botsService,
-		StarGifts:          giftsService,
 		AccountSettings:    router,
 	}, logger.Named("store").Named("read-model-listener"))
 	go readModelListener.Run(ctx)
@@ -1406,23 +1361,18 @@ func run(logger *zap.Logger) error {
 		Auth:                   authService,
 		Revoker:                router,
 		Users:                  usersService,
-		Stars:                  starsService,
-		StarsNotifier:          router,
 		UserNotifier:           router,
 		UserModerationNotifier: router,
 		FreezeNotifier:         router,
 		Channels:               channelsService,
 		ChannelNotifier:        router,
 		Messages:               messagesService,
-		Gifts:                  giftsService,
 		Photos:                 filesService,
 		StickerSets:            filesService,
-		GiftGranter:            router,
 		Bots:                   botsService,
 		Emoji:                  filesService,
 		Moderation:             moderationService,
 		Usernames:              usernamesService,
-		Rating:                 ratingService,
 		Verification:           verificationService,
 		BotVerification:        botVerificationService,
 		Account:                accountService,
@@ -1479,8 +1429,6 @@ func run(logger *zap.Logger) error {
 		logger.Warn("third-party verification push is not implemented by the RPC edge",
 			zap.String("expected_hook", "rpc.Router.NotifyPeerBotVerification"))
 	}
-	go ratingapp.NewRecomputeWorker(ratingService, logger.Named("rating").Named("recompute"),
-		cfg.RatingRecomputeInterval, cfg.RatingRecomputeBatch).Run(ctx)
 	// Applicant notifications are delivered from a durable outbox, never inside the
 	// decision transaction: @verifybot may be blocked and the panel must not wait on
 	// a message send.
@@ -1536,32 +1484,6 @@ func run(logger *zap.Logger) error {
 	if telegramLoginService != nil {
 		go runTelegramLoginRetention(ctx, telegramLoginService, cfg.TelegramLoginRetention, cfg.TelegramLoginSweepInterval, cfg.TelegramLoginSweepBatch, logger.Named("telegram-login-retention"))
 	}
-	go func() {
-		interval := cfg.StarGiftSweepInterval
-		if interval <= 0 {
-			interval = 15 * time.Second
-		}
-		batch := cfg.StarGiftSweepBatch
-		if batch <= 0 {
-			batch = 1000
-		}
-		run := func() {
-			if err := giftsService.SweepLifecycle(ctx, int(time.Now().Unix()), batch); err != nil && ctx.Err() == nil {
-				logger.Warn("star_gift_lifecycle_sweep_failed", zap.Error(err))
-			}
-		}
-		run()
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				run()
-			}
-		}
-	}()
 	go router.RunInlineBotPushSubscriber(ctx)
 	go router.RunBotCallbackAnswerSubscriber(ctx)
 	go router.RunEphemeralPushSubscriber(ctx)
@@ -1598,8 +1520,6 @@ func run(logger *zap.Logger) error {
 		Channels:          channelStore,
 		Privacy:           privacyService,
 		Photos:            filesService,
-		UniqueGifts:       giftsService,
-		GiftWithdrawals:   giftsService,
 		ModerationAppeals: moderationService,
 		TelegramLogin:     telegramLoginHTTPHandler,
 	}, logger.Named("public-web")); err != nil {

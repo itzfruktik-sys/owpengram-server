@@ -37,14 +37,6 @@ func cloneChannelMessageAction(action *domain.ChannelMessageAction) *domain.Chan
 		v := *action.Hidden
 		clone.Hidden = &v
 	}
-	if action.StarGift != nil {
-		g := *action.StarGift
-		if action.StarGift.Sticker != nil {
-			sticker := *action.StarGift.Sticker
-			g.Sticker = &sticker
-		}
-		clone.StarGift = &g
-	}
 	clone.Wallpaper = domain.CloneWallpaperPtr(action.Wallpaper)
 	clone.Photo = domain.ClonePhotoPtr(action.Photo)
 	return &clone

@@ -324,18 +324,6 @@ func collectChannelMessagePeerRefs(msg domain.ChannelMessage, currentChannelID i
 				userIDs[id] = struct{}{}
 			}
 		}
-		if msg.Action.StarGift != nil {
-			if id := msg.Action.StarGift.FromUserID; id != 0 && !msg.Action.StarGift.NameHidden {
-				userIDs[id] = struct{}{}
-			}
-			if id := msg.Action.StarGift.PeerUserID; id != 0 {
-				userIDs[id] = struct{}{}
-			}
-			if id := msg.Action.StarGift.PeerChannelID; id != 0 && id != currentChannelID {
-				channelIDs[id] = struct{}{}
-			}
-		}
-		collectStarGiftUniquePeerRefs(msg.Action.StarGiftUnique, currentChannelID, userIDs, channelIDs)
 	}
 	if msg.Reactions != nil {
 		for _, reaction := range msg.Reactions.Recent {
@@ -355,37 +343,6 @@ func collectServiceActionPeerRefs(media *domain.MessageMedia, currentChannelID i
 		for _, peer := range action.RequestedPeer.Peers {
 			addDomainPeerRef(peer, currentChannelID, userIDs, channelIDs)
 		}
-	}
-	if gift := action.StarGift; gift != nil {
-		if gift.FromUserID != 0 && !gift.NameHidden {
-			userIDs[gift.FromUserID] = struct{}{}
-		}
-		if gift.PeerUserID != 0 {
-			userIDs[gift.PeerUserID] = struct{}{}
-		}
-		if gift.PeerChannelID != 0 && gift.PeerChannelID != currentChannelID {
-			channelIDs[gift.PeerChannelID] = struct{}{}
-		}
-		addDomainPeerRef(gift.To, currentChannelID, userIDs, channelIDs)
-	}
-	collectStarGiftUniquePeerRefs(action.StarGiftUnique, currentChannelID, userIDs, channelIDs)
-}
-
-func collectStarGiftUniquePeerRefs(action *domain.MessageStarGiftUniqueAction, currentChannelID int64, userIDs, channelIDs map[int64]struct{}) {
-	if action == nil {
-		return
-	}
-	if action.FromUserID != 0 {
-		userIDs[action.FromUserID] = struct{}{}
-	}
-	addDomainPeerRef(action.Peer, currentChannelID, userIDs, channelIDs)
-	addDomainPeerRef(action.Gift.Owner, currentChannelID, userIDs, channelIDs)
-	addDomainPeerRef(action.Gift.OriginalOwner, currentChannelID, userIDs, channelIDs)
-	addDomainPeerRef(action.Gift.ReleasedBy, currentChannelID, userIDs, channelIDs)
-	addDomainPeerRef(action.Gift.ThemePeer, currentChannelID, userIDs, channelIDs)
-	addDomainPeerRef(action.Gift.Host, currentChannelID, userIDs, channelIDs)
-	if action.Gift.OriginalFromUserID != 0 && !action.Gift.OriginalNameHidden {
-		userIDs[action.Gift.OriginalFromUserID] = struct{}{}
 	}
 }
 

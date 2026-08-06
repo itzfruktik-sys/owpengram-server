@@ -78,7 +78,6 @@ type ChannelStore interface {
 	ListAdminLog(ctx context.Context, req domain.ChannelAdminLogRequest) (domain.ChannelAdminLogResult, error)
 	GetChannelMessageViews(ctx context.Context, req domain.ChannelMessageViewsRequest) (domain.ChannelMessageViewsResult, error)
 	SetChannelMessageReactions(ctx context.Context, req domain.SetChannelMessageReactionsRequest) (domain.ChannelMessageReactionsResult, error)
-	AddChannelMessagePaidReaction(ctx context.Context, req domain.SendChannelPaidReactionRequest) (domain.ChannelMessagePaidReactionResult, error)
 	GetChannelMessageReactions(ctx context.Context, req domain.ChannelMessageReactionsRequest) (domain.ChannelMessageReactionsResult, error)
 	VoteChannelMessagePoll(ctx context.Context, req domain.VoteChannelMessagePollRequest) (domain.ChannelMessagePollResult, error)
 	CloseChannelMessagePoll(ctx context.Context, req domain.CloseChannelMessagePollRequest) (domain.ChannelMessagePollResult, error)
@@ -205,8 +204,6 @@ type ChannelStore interface {
 	// AppendCallServiceMessage 生成群通话服务消息（started/ended/invite，带频道
 	// pts），Recipients 为活跃成员（rpc 据此扇出 updateNewChannelMessage）。
 	AppendCallServiceMessage(ctx context.Context, channelID, senderUserID int64, date int, action domain.ChannelMessageAction) (domain.SendChannelMessageResult, error)
-	// AppendStarGiftAdminLog 记录频道 Star gift 的 Recent Actions 快照，不插入频道历史、不推进 pts。
-	AppendStarGiftAdminLog(ctx context.Context, channelID, senderUserID int64, savedID int64, date int, action domain.ChannelMessageAction) error
 }
 
 // ChannelIDAllocator allocates channel IDs.

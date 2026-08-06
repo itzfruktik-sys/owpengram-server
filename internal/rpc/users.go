@@ -362,14 +362,6 @@ func (r *Router) buildUserFullProjection(ctx context.Context, currentUserID int6
 		}
 		full.CommonChatsCount = common.Count
 	}
-	// star gift 数量：客户端把资料页 Gifts 区段/标签页门控在 stargifts_count>0
-	//（DrKLO ProfileActivity:10497 / TDesktop data_user.cpp:924），不下发则收到的礼物
-	// 不在资料页展示。计展示在资料的礼物数（非转换、非隐藏）。
-	if r.deps.Gifts != nil {
-		if n, err := r.deps.Gifts.CountSaved(ctx, domain.Peer{Type: domain.PeerTypeUser, ID: u.ID}); err == nil && n > 0 {
-			full.SetStargiftsCount(n)
-		}
-	}
 	// 屏蔽 premium 礼物赠送：telesrv 未实现 payments.getPremiumGiftCodeOptions，
 	// DrKLO GiftSheet 对个人送礼时总会渲染一个「Gift Premium」区段（fillItems:918），
 	// premiumTiers 永远空 → 卡死成三个 flicker 占位骨架。设 disallow_premium_gifts=true
@@ -389,7 +381,6 @@ func (r *Router) buildUserFullProjection(ctx context.Context, currentUserID int6
 			full.SetBirthday(tgBirthday(u.Birthday))
 		}
 	}
-	r.applyAccountRatingToUserFull(ctx, currentUserID, u, &full)
 	// 个人频道（account.updatePersonalChannel）不在此落地：它按 viewer 实时解析，作为缓存后的
 	// overlay 处理（applyPersonalChannelToUserFull），避免烤进 per-(viewer,target) 投影缓存以及
 	// build/chats 两次解析同一频道。
@@ -441,50 +432,6 @@ func (r *Router) userFullPrivacyVisibility(ctx context.Context, viewerUserID, ow
 	return out, nil
 }
 
-// applyAccountRatingToUserFull projects gramsrv's stored composite rating through
-// the rating fields official clients already render. This is a gramsrv policy
-// score, not a promise that its inputs or thresholds match Telegram's service.
-//
-// The projection is built inside the existing per-(viewer,target) UserFull
-// cache. Therefore a cache miss adds at most one primary-key read and a cache hit
-// adds none. Recompute and writes remain exclusively in the bounded background
-// worker/admin paths.
-func (r *Router) applyAccountRatingToUserFull(ctx context.Context, viewerUserID int64, target domain.User, full *tg.UserFull) {
-	targetUserID := target.ID
-	if r.deps.AccountRatings == nil || full == nil || !domain.RatableAccount(targetUserID, target.Bot) {
-		return
-	}
-	rating, err := r.deps.AccountRatings.Rating(ctx, targetUserID)
-	if err != nil {
-		// Missing, disabled and temporarily unavailable projections all preserve
-		// the legacy wire shape instead of failing the surrounding profile read.
-		return
-	}
-	full.SetStarsRating(tgAccountRatingLevel(rating.LevelSnapshot()))
-	if viewerUserID == 0 || viewerUserID != targetUserID {
-		return
-	}
-	pending, ok := rating.PendingLevel()
-	if !ok {
-		return
-	}
-	full.SetStarsMyPendingRating(tgAccountRatingLevel(pending))
-	full.SetStarsMyPendingRatingDate(int(rating.PendingDate.Unix()))
-}
-
-// tgAccountRatingLevel maps the local level snapshot onto starsRating#1b0e4f07.
-// next_level_stars remains absent at the configured maximum local level.
-func tgAccountRatingLevel(in domain.AccountRatingLevel) tg.StarsRating {
-	out := tg.StarsRating{
-		Level:             in.Level,
-		CurrentLevelStars: in.CurrentLevelStars,
-		Stars:             in.Stars,
-	}
-	if in.HasNextLevelStars {
-		out.SetNextLevelStars(in.NextLevelStars)
-	}
-	return out
-}
 
 // tgBirthday 把 domain 生日转 tg.Birthday（Year 可选，0 表示不含年份）。
 func tgBirthday(b domain.Birthday) tg.Birthday {

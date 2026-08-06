@@ -546,32 +546,6 @@ func StoryAlbums() tg.StoriesAlbumsClass {
 	return &tg.StoriesAlbums{Hash: 0, Albums: []tg.StoryAlbum{}}
 }
 
-func StarGiftActiveAuctions() tg.PaymentsStarGiftActiveAuctionsClass {
-	return &tg.PaymentsStarGiftActiveAuctionsNotModified{}
-}
-
-func StarGifts() tg.PaymentsStarGiftsClass {
-	return &tg.PaymentsStarGifts{
-		Gifts: []tg.StarGiftClass{},
-		Chats: []tg.ChatClass{},
-		Users: []tg.UserClass{},
-	}
-}
-
-func SavedStarGifts() *tg.PaymentsSavedStarGifts {
-	return &tg.PaymentsSavedStarGifts{
-		Gifts: []tg.SavedStarGift{},
-		Chats: []tg.ChatClass{},
-		Users: []tg.UserClass{},
-	}
-}
-
-func StarGiftCollections() tg.PaymentsStarGiftCollectionsClass {
-	return &tg.PaymentsStarGiftCollections{
-		Collections: []tg.StarGiftCollection{},
-	}
-}
-
 func StarsRevenueStats(ton bool) *tg.PaymentsStarsRevenueStats {
 	zeroAmount := tg.StarsAmountClass(&tg.StarsAmount{})
 	if ton {

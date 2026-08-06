@@ -323,13 +323,6 @@ func (s *ChannelStore) lookupChannelSendReplayLocked(req domain.ChannelSendRepla
 		Duplicate:         true,
 		ReplayDeleteEvent: replayDelete,
 	}
-	if first.PaidMessageStars > 0 {
-		balance, ok := s.starsBalances[first.SenderUserID]
-		if !ok {
-			return domain.SendChannelMessageResult{}, false, fmt.Errorf("memory paid-message replay has no sender balance")
-		}
-		result.SenderStarsBalance = &domain.StarsBalance{UserID: first.SenderUserID, Balance: balance, Granted: true}
-	}
 	return result, true, nil
 }
 
@@ -368,7 +361,6 @@ func (s *ChannelStore) nextChannelMessageIDLocked(channelID int64) int {
 func (s *ChannelStore) appendChannelServiceMessageLocked(channelID, senderUserID int64, date int, action domain.ChannelMessageAction) (domain.ChannelMessage, domain.ChannelUpdateEvent) {
 	channel := s.channels[channelID]
 	msgID := s.nextChannelMessageIDLocked(channelID)
-	action = channelServiceActionForMessage(channelID, msgID, action)
 	pts := s.nextChannelPtsLocked(channelID)
 	msg := domain.ChannelMessage{
 		ChannelID:    channelID,
@@ -393,20 +385,6 @@ func (s *ChannelStore) appendChannelServiceMessageLocked(channelID, senderUserID
 	s.messages[channelID] = append(s.messages[channelID], msg)
 	s.appendChannelEventLocked(event)
 	return msg, event
-}
-
-func channelServiceActionForMessage(channelID int64, msgID int, action domain.ChannelMessageAction) domain.ChannelMessageAction {
-	if action.Type == domain.ChannelActionStarGift && action.StarGift != nil {
-		g := *action.StarGift
-		if g.PeerChannelID == 0 {
-			g.PeerChannelID = channelID
-		}
-		if g.SavedID == 0 {
-			g.SavedID = int64(msgID)
-		}
-		action.StarGift = &g
-	}
-	return action
 }
 
 func canSendChannelMessage(channel domain.Channel, member domain.ChannelMember) bool {

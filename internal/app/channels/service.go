@@ -981,21 +981,6 @@ func (s *Service) SetMessageReactions(ctx context.Context, userID int64, req dom
 	return s.channels.SetChannelMessageReactions(ctx, req)
 }
 
-// SendPaidReaction 为一条广播频道消息增投付费 reaction 星数；扣费在 rpc 层经 Stars 账本
-// Debit 完成，本方法只负责累计与聚合。
-func (s *Service) SendPaidReaction(ctx context.Context, userID int64, req domain.SendChannelPaidReactionRequest) (domain.ChannelMessagePaidReactionResult, error) {
-	if s == nil || s.channels == nil || userID == 0 || req.ChannelID == 0 || req.MessageID <= 0 {
-		return domain.ChannelMessagePaidReactionResult{}, domain.ErrChannelInvalid
-	}
-	if req.UserID == 0 {
-		req.UserID = userID
-	}
-	if req.UserID != userID || req.MessageID > domain.MaxMessageBoxID || req.Stars <= 0 || req.Stars > domain.MaxPaidReactionStarsPerRequest {
-		return domain.ChannelMessagePaidReactionResult{}, domain.ErrChannelInvalid
-	}
-	return s.channels.AddChannelMessagePaidReaction(ctx, req)
-}
-
 // VoteMessagePoll 给频道/超级群消息上的 poll 投票（options 为空 = 撤票）。
 func (s *Service) VoteMessagePoll(ctx context.Context, userID int64, req domain.VoteChannelMessagePollRequest) (domain.ChannelMessagePollResult, error) {
 	if s == nil || s.channels == nil || userID == 0 || req.ChannelID == 0 || req.MessageID <= 0 {

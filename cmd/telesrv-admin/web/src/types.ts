@@ -75,8 +75,6 @@ export type AccountDetail = {
   Fake: boolean;
   Support: boolean;
   Bot: boolean;
-  StarsBalance: number;
-  StarsGranted: boolean;
   Restriction: RestrictionRow;
   HasRestriction: boolean;
   Authorizations: AuthorizationRow[];
@@ -205,74 +203,6 @@ export type OutboxRow = {
   UpdatedAt: string;
 };
 
-export type StarGiftRow = {
-  GiftID: string;
-  RevisionID: string;
-  Revision: number;
-  Title: string;
-  Stars: string;
-  ConvertStars: string;
-  Enabled: boolean;
-  SortOrder: number;
-  DocumentID: string;
-  SourceName: string;
-  SourceFormat: "tgs" | "lottie";
-  AnimationSHA: string;
-  AnimationSize: string;
-  Width: number;
-  Height: number;
-  FrameRate: number;
-  ReceivedCount: string;
-  CreatedBy: string;
-  UpdatedAt: string;
-};
-
-export type StarGiftListResponse = { Gifts: StarGiftRow[] };
-
-// A built-in original demo gift available to import. Ids are small integers
-// (1..N), so plain numbers are safe here — no snowflake precision concern.
-export type DefaultGiftRow = {
-  id: number;
-  title: string;
-  stars: number;
-  convert_stars: number;
-  upgrade_stars: number;
-  upgradeable: boolean;
-  craftable: boolean;
-  limited: boolean;
-  availability: number;
-  require_premium: boolean;
-  model_count: number;
-  pattern_count: number;
-  backdrop_count: number;
-  crafted_count: number;
-};
-
-export type DefaultGiftListResponse = { gifts: DefaultGiftRow[] };
-
-// A verified official Star Gift snapshot entry (see cmd/giftfetch). Numeric
-// ids/counters that can approach int64 range are decimal strings.
-export type OfficialStarGiftRow = {
-  source_gift_id: string;
-  title: string;
-  stars: string;
-  convert_stars: string;
-  upgrade_stars: string;
-  availability_total: number;
-  limited: boolean;
-  sold_out: boolean;
-  model_count: number;
-  pattern_count: number;
-  backdrop_count: number;
-  crafted_model_count: number;
-  can_upgrade: boolean;
-  can_craft: boolean;
-  document_id: string;
-  animation_validated: boolean;
-};
-
-export type OfficialStarGiftListResponse = { gifts: OfficialStarGiftRow[] };
-
 export type ModerationPeer = {
   Type: "user" | "channel";
   ID: number;
@@ -352,37 +282,6 @@ export type ModerationReport = {
   CreatedAt: string;
 };
 
-export type StarGiftCollectibleAttributeRow = {
-  id: string;
-  kind: "model" | "pattern" | "backdrop";
-  name: string;
-  rarity_kind: "permille" | "uncommon" | "rare" | "epic" | "legendary";
-  rarity_permille: number;
-  crafted: boolean;
-  official_document_id: string;
-  sort_order: number;
-  source_name?: string;
-  source_format?: "tgs" | "lottie";
-  backdrop_id?: number;
-  center_color?: number;
-  edge_color?: number;
-  pattern_color?: number;
-  text_color?: number;
-};
-
-export type StarGiftCollectiblePreview = {
-  found: boolean;
-  gift_id: string;
-  revision?: number;
-  upgrade_stars?: string;
-  supply_total?: number;
-  issued?: number;
-  slug_prefix?: string;
-  models?: StarGiftCollectibleAttributeRow[];
-  patterns?: StarGiftCollectibleAttributeRow[];
-  backdrops?: StarGiftCollectibleAttributeRow[];
-};
-
 export type CollectibleUsernameStatus = "vault" | "owned" | "burned";
 
 export type CollectiblePeerType = "" | "user" | "channel";
@@ -446,50 +345,6 @@ export type CollectibleUsernameListResponse = {
 export type CollectibleUsernameDetail = {
   asset: CollectibleUsernameRow;
   transfers: CollectibleUsernameTransferRow[] | null;
-};
-
-export type AccountRatingRow = {
-  UserID: string;
-  Username: string;
-  FirstName: string;
-  Level: number;
-  Stars: string;
-  CurrentLevelStars: string;
-  NextLevelStars: string;
-  HasNextLevel: boolean;
-  StarsComponent: string;
-  ActivityComponent: string;
-  PenaltyComponent: string;
-  ManualComponent: string;
-  PendingStars: string;
-  PendingDate: string;
-  ComputedAt: string;
-  UpdatedAt: string;
-  Version: string;
-};
-
-export type AccountRatingEventKind = "stars" | "activity" | "moderation" | "manual" | "recompute";
-
-export type AccountRatingEventRow = {
-  ID: string;
-  UserID: string;
-  Kind: AccountRatingEventKind;
-  Amount: string;
-  Reason: string;
-  Actor: string;
-  CommandKey: string;
-  CreatedAt: string;
-};
-
-export type AccountRatingListResponse = {
-  rows: AccountRatingRow[] | null;
-  has_more: boolean;
-  next_before_id: string;
-};
-
-export type AccountRatingDetail = {
-  rating: AccountRatingRow;
-  events: AccountRatingEventRow[] | null;
 };
 
 // Official platform verification. Every int64 the backend tags `,string` stays a
@@ -762,7 +617,7 @@ export type CommandResult = {
 
 export type StickerSetRow = {
   // String, not number: these are 18-19 digit snowflake ids, past JS's 2^53
-  // safe-integer limit — see GiftID on StarGiftRow for the same convention.
+  // safe-integer limit.
   ID: string;
   ShortName: string;
   Title: string;

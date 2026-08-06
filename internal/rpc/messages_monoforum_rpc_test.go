@@ -296,12 +296,6 @@ func TestMonoforumSendMessageWritePath(t *testing.T) {
 	if storedDraft.Message != "pending suggested post" || storedDraft.SuggestedPost == nil || storedDraft.SuggestedPost.Price == nil || storedDraft.SuggestedPost.Price.Amount != 10 || storedDraft.SuggestedPost.ScheduleDate != 1_700_100_000 {
 		t.Fatalf("persisted monoforum draft = %+v, want suggested post content", storedDraft)
 	}
-	tooLow := &tg.MessagesSendMessageRequest{Peer: monoInput, Message: "under-authorized", RandomID: 554}
-	tooLow.SetAllowPaidStars(9)
-	if _, err := r.onMessagesSendMessage(WithUserID(ctx, sub.ID), tooLow); err == nil || !strings.Contains(err.Error(), "ALLOW_PAYMENT_REQUIRED") || !strings.Contains(err.Error(), "(10)") {
-		t.Fatalf("under-authorized paid message err = %v, want ALLOW_PAYMENT_REQUIRED_10", err)
-	}
-
 	// TDesktop 的订阅者请求不携带 InputReplyToMonoForum;服务端必须从调用者推导 saved_peer=self。
 	subReq := &tg.MessagesSendMessageRequest{Peer: monoInput, Message: "hi from sub telesrv://resolve?domain=Owner", RandomID: 555}
 	subReq.ClearDraft = true
@@ -319,7 +313,7 @@ func TestMonoforumSendMessageWritePath(t *testing.T) {
 		t.Fatalf("subscriber send updates = %T, want *tg.Updates", subUpd)
 	}
 	var subMessageID int
-	var subPaidStars, subBalance int64
+	var subPaidStars int64
 	for _, update := range subUpdates.Updates {
 		if newMessage, ok := update.(*tg.UpdateNewChannelMessage); ok {
 			if message, ok := newMessage.Message.(*tg.Message); ok {
@@ -336,36 +330,21 @@ func TestMonoforumSendMessageWritePath(t *testing.T) {
 				}
 			}
 		}
-		if balance, ok := update.(*tg.UpdateStarsBalance); ok {
-			if amount, ok := balance.Balance.(*tg.StarsAmount); ok {
-				subBalance = amount.Amount
-			}
-		}
 	}
-	if subMessageID == 0 || subPaidStars != 10 || subBalance != 990 {
-		t.Fatalf("subscriber send updates id/paid/balance = %d/%d/%d, want id>0/10/990: %#v", subMessageID, subPaidStars, subBalance, subUpdates.Updates)
+	// telesrv has no Stars economy: DM sends are always free, so no
+	// UpdateStarsBalance is ever emitted regardless of allow_paid_stars.
+	if subMessageID == 0 || subPaidStars != 0 {
+		t.Fatalf("subscriber send updates id/paid = %d/%d, want id>0/0: %#v", subMessageID, subPaidStars, subUpdates.Updates)
 	}
 	if _, found, err := dialogSvc.GetDraft(ctx, sub.ID, domain.Peer{Type: domain.PeerTypeChannel, ID: monoID}, 0); err != nil || found {
-		t.Fatalf("clear_draft after paid send found/err = %v/%v, want false/nil", found, err)
+		t.Fatalf("clear_draft after send found/err = %v/%v, want false/nil", found, err)
 	}
 	duplicateUpd, err := r.onMessagesSendMessage(WithUserID(ctx, sub.ID), subReq)
 	if err != nil {
-		t.Fatalf("subscriber paid replay: %v", err)
+		t.Fatalf("subscriber replay: %v", err)
 	}
-	duplicateUpdates, ok := duplicateUpd.(*tg.Updates)
-	if !ok {
-		t.Fatalf("subscriber paid replay = %T, want *tg.Updates", duplicateUpd)
-	}
-	var duplicateBalance int64
-	for _, update := range duplicateUpdates.Updates {
-		if balance, ok := update.(*tg.UpdateStarsBalance); ok {
-			if amount, ok := balance.Balance.(*tg.StarsAmount); ok {
-				duplicateBalance = amount.Amount
-			}
-		}
-	}
-	if duplicateBalance != 990 {
-		t.Fatalf("subscriber paid replay balance = %d, want 990 without a second debit", duplicateBalance)
+	if _, ok := duplicateUpd.(*tg.Updates); !ok {
+		t.Fatalf("subscriber replay = %T, want *tg.Updates", duplicateUpd)
 	}
 
 	// 管理员回复到该订阅者的子会话：同一个 inputReplyToMessage 同时携带真实 reply id
@@ -435,8 +414,10 @@ func TestMonoforumSendMessageWritePath(t *testing.T) {
 	if _, ok := top.Media.(*tg.MessageMediaContact); !ok {
 		t.Fatalf("history[0] media = %T, want MessageMediaContact", top.Media)
 	}
-	if paid, ok := top.GetPaidMessageStars(); !ok || paid != 10 {
-		t.Fatalf("media paid_message_stars = %d/%v, want actual configured price 10", paid, ok)
+	// telesrv has no Stars economy: sends are always free regardless of the
+	// channel's configured price, so paid_message_stars is never set.
+	if paid, ok := top.GetPaidMessageStars(); ok || paid != 0 {
+		t.Fatalf("media paid_message_stars = %d/%v, want 0/false", paid, ok)
 	}
 	topSuggested, ok := top.GetSuggestedPost()
 	if !ok {

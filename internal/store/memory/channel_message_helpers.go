@@ -69,14 +69,6 @@ func cloneChannelMessageAction(in *domain.ChannelMessageAction) *domain.ChannelM
 		v := *in.Hidden
 		out.Hidden = &v
 	}
-	if in.StarGift != nil {
-		g := *in.StarGift
-		if in.StarGift.Sticker != nil {
-			sticker := *in.StarGift.Sticker
-			g.Sticker = &sticker
-		}
-		out.StarGift = &g
-	}
 	if in.SuggestedPostPrice != nil {
 		price := *in.SuggestedPostPrice
 		out.SuggestedPostPrice = &price

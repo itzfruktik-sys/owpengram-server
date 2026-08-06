@@ -1,6 +1,14 @@
 package domain
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+// ErrEmojiStatusCollectibleInvalid is returned when a collectible emoji-status
+// snapshot fails EmojiStatusCollectible.Valid() -- partial/malformed rather
+// than either fully empty or fully populated.
+var ErrEmojiStatusCollectibleInvalid = errors.New("emoji status collectible invalid")
 
 // UserIDSequenceBase 是普通用户 ID 的起始值。
 //

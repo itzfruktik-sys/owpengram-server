@@ -196,35 +196,6 @@ func TestAccountWallpaperSeedLookupAndAckRPCs(t *testing.T) {
 	}
 }
 
-func TestPaymentsGetStarGiftCollectionsNoServiceFallbackAndValidatesPeer(t *testing.T) {
-	r := New(Config{DC: 2, IP: "127.0.0.1", Port: 2398}, Deps{}, zaptest.NewLogger(t), clock.System)
-	ctx := WithUserID(context.Background(), 1000000001)
-
-	var okReq bin.Buffer
-	if err := (&tg.PaymentsGetStarGiftCollectionsRequest{Peer: &tg.InputPeerSelf{}}).Encode(&okReq); err != nil {
-		t.Fatalf("encode request: %v", err)
-	}
-	got, err := r.Dispatch(ctx, [8]byte{}, 0, &okReq)
-	if err != nil {
-		t.Fatalf("dispatch: %v", err)
-	}
-	collections, ok := got.(*tg.PaymentsStarGiftCollections)
-	if !ok {
-		t.Fatalf("response type = %T, want *tg.PaymentsStarGiftCollections", got)
-	}
-	if len(collections.Collections) != 0 {
-		t.Fatalf("collections = %+v, want empty list", collections.Collections)
-	}
-
-	var badReq bin.Buffer
-	if err := (&tg.PaymentsGetStarGiftCollectionsRequest{Peer: &tg.InputPeerEmpty{}}).Encode(&badReq); err != nil {
-		t.Fatalf("encode bad request: %v", err)
-	}
-	if _, err := r.Dispatch(ctx, [8]byte{}, 0, &badReq); err == nil || !strings.Contains(err.Error(), "PEER_ID_INVALID") {
-		t.Fatalf("bad peer err = %v, want PEER_ID_INVALID", err)
-	}
-}
-
 func TestPaymentsGetStarsRevenueAdsAccountURLReturnsCompatURLAndValidatesPeer(t *testing.T) {
 	r := New(Config{DC: 2, IP: "127.0.0.1", Port: 2398}, Deps{}, zaptest.NewLogger(t), clock.System)
 	ctx := WithUserID(context.Background(), 1000000001)

@@ -1792,7 +1792,7 @@ func (r *Router) onAccountUpdateEmojiStatus(ctx context.Context, status tg.Emoji
 		if errors.Is(err, domain.ErrPremiumRequired) {
 			return false, tgerr400("PREMIUM_ACCOUNT_REQUIRED")
 		}
-		if errors.Is(err, domain.ErrStarGiftCollectibleInvalid) {
+		if errors.Is(err, domain.ErrEmojiStatusCollectibleInvalid) {
 			return false, tgerr400("COLLECTIBLE_INVALID")
 		}
 		return false, internalErr()
@@ -1842,29 +1842,9 @@ func (r *Router) domainUserEmojiStatus(ctx context.Context, userID int64, input 
 		}
 		return value, nil
 	case *tg.InputEmojiStatusCollectible:
-		if r.deps.Gifts == nil || status.CollectibleID <= 0 {
-			return domain.UserEmojiStatus{}, tgerr400("COLLECTIBLE_INVALID")
-		}
-		gift, found, err := r.deps.Gifts.UniqueByID(ctx, status.CollectibleID)
-		if err != nil {
-			return domain.UserEmojiStatus{}, internalErr()
-		}
-		owner := domain.Peer{Type: domain.PeerTypeUser, ID: userID}
-		if !found || gift.Owner != owner || gift.Burned || gift.OwnerAddress != "" {
-			return domain.UserEmojiStatus{}, tgerr400("COLLECTIBLE_INVALID")
-		}
-		collectible, valid := domain.CollectibleEmojiStatus(gift)
-		if !valid {
-			return domain.UserEmojiStatus{}, tgerr400("COLLECTIBLE_INVALID")
-		}
-		value := domain.UserEmojiStatus{DocumentID: collectible.DocumentID, Collectible: collectible}
-		if until, ok := status.GetUntil(); ok {
-			value.Until = until
-		}
-		if !value.Valid() {
-			return domain.UserEmojiStatus{}, tgerr400("COLLECTIBLE_INVALID")
-		}
-		return value, nil
+		// telesrv has no Star Gifts, so no account can ever own the collectible
+		// this would reference.
+		return domain.UserEmojiStatus{}, tgerr400("COLLECTIBLE_INVALID")
 	default:
 		return domain.UserEmojiStatus{}, inputConstructorInvalidErr()
 	}
@@ -1969,35 +1949,11 @@ func (r *Router) onAccountGetDefaultEmojiStatuses(ctx context.Context, hash int6
 // owned unique gifts as complete emojiStatusCollectible values. The bounded
 // list order and hash are stable, so Android can safely reuse its cache.
 func (r *Router) onAccountGetCollectibleEmojiStatuses(ctx context.Context, hash int64) (tg.AccountEmojiStatusesClass, error) {
-	userID, _, err := r.currentUserID(ctx)
-	if err != nil {
+	if _, _, err := r.currentUserID(ctx); err != nil {
 		return nil, internalErr()
 	}
-	if r.deps.Gifts == nil {
-		return tdesktop.CollectibleEmojiStatuses(), nil
-	}
-	gifts, err := r.deps.Gifts.ListUniqueByOwner(ctx, domain.Peer{Type: domain.PeerTypeUser, ID: userID}, domain.MaxSavedStarGiftsLimit)
-	if err != nil {
-		return nil, internalErr()
-	}
-	ids := make([]int64, 0, len(gifts))
-	statuses := make([]tg.EmojiStatusClass, 0, len(gifts))
-	for _, gift := range gifts {
-		collectible, ok := domain.CollectibleEmojiStatus(gift)
-		if !ok {
-			continue
-		}
-		ids = append(ids, collectible.CollectibleID)
-		statuses = append(statuses, tgUserEmojiStatusValue(domain.UserEmojiStatus{
-			DocumentID:  collectible.DocumentID,
-			Collectible: collectible,
-		}))
-	}
-	catalogHash := mediaCatalogHash(ids)
-	if hash != 0 && hash == catalogHash {
-		return &tg.AccountEmojiStatusesNotModified{}, nil
-	}
-	return &tg.AccountEmojiStatuses{Hash: catalogHash, Statuses: statuses}, nil
+	// telesrv has no Star Gifts, so no account ever owns a collectible to list.
+	return tdesktop.CollectibleEmojiStatuses(), nil
 }
 
 func (r *Router) pushUsernameUpdate(ctx context.Context, u domain.User) *tg.User {

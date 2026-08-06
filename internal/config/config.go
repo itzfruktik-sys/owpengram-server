@@ -246,11 +246,6 @@ type Config struct {
 	WebPagePreviewRatePerMin int
 	// LangPackSeedDir 是 TDesktop 语言包 .strings 种子目录。
 	LangPackSeedDir string
-	// OfficialGiftsDir 是 cmd/giftfetch 生成的只读官方礼物快照目录。
-	OfficialGiftsDir string
-	// StarGiftTONStartingGrant 是 telesrv 内部 TON 账本首次访问时授予的 nanoton。
-	// 该账本只用于自建服务端礼物链路，不连接任何外部区块链。
-	StarGiftTONStartingGrant int64
 	// BlobDir 是本地磁盘 blob backend 根目录（媒体文件字节内容）。
 	BlobDir string
 	// BlobBackendKind selects the blob storage backend: "localfs" (default)
@@ -432,63 +427,11 @@ type Config struct {
 	// PasskeyAllowedOrigins 是允许的 WebAuthn origin 白名单；为空=不强校验 origin
 	//（服务端通常不预知 Android apk-key-hash origin）。
 	PasskeyAllowedOrigins []string
-	// StarsStartingGrant 是 Stars 本地账本的起始余额（首读时惰性授予、granted 布尔幂等，
-	// 新老账号都覆盖、免回填迁移）；0 关闭自动授予。
-	StarsStartingGrant int64
 	// PremiumSweepInterval 是会员到期 sweeper 的轮询间隔。premium 下发正确性
 	// 由读取路径即时派生，sweeper 只负责清理过期行并推 updateUser 通知。
 	PremiumSweepInterval time.Duration
 	// PremiumSweepBatch 是单次到期清理的最大行数。
 	PremiumSweepBatch int
-	// StarGiftSweepInterval drives offer expiry/refunds, auction rounds and their
-	// durable notification/delivery outboxes. It is entirely server-local.
-	StarGiftSweepInterval time.Duration
-	// StarGiftSweepBatch bounds rows/aggregates claimed by one sweep.
-	StarGiftSweepBatch               int
-	StarGiftTransferStars            int64
-	StarGiftDropOriginalDetailsStars int64
-	StarGiftOfferMinStars            int
-	StarGiftStarsProceedsPermille    int
-	StarGiftTONProceedsPermille      int
-	StarGiftExportDelay              time.Duration
-	StarGiftTransferDelay            time.Duration
-	StarGiftResellDelay              time.Duration
-	StarGiftCraftDelay               time.Duration
-	StarGiftCraftChancePermille      int
-
-	// RatingEnabled controls the local admin-only composite account rating.
-	// Disabled keeps every local projection empty and refuses rating writes; no
-	// client-facing Telegram field changes in either mode.
-	RatingEnabled bool
-	// RatingPendingDelay is how long a rating increase stays parked as a pending
-	// local score before it becomes the visible admin level. A decrease is
-	// always applied immediately: a penalty must not sit behind a delay.
-	// 0 applies every change immediately.
-	RatingPendingDelay time.Duration
-	// RatingRecomputeInterval / RatingRecomputeBatch drive the background
-	// recompute worker. The rating derives from signals owned by other
-	// subsystems, so freshness is a worker property, not a write-path one.
-	RatingRecomputeInterval time.Duration
-	RatingRecomputeBatch    int
-	// RatingStaleAfter is the projection age after which the worker recomputes a
-	// user.
-	RatingStaleAfter time.Duration
-	// Rating weights are the integer composite formula. Defaults mirror
-	// domain.DefaultAccountRatingWeights() exactly, so the shipped behaviour is
-	// identical whether or not these keys are set. Every weight is a magnitude:
-	// the penalties are subtracted by the domain formula, so all values are
-	// non-negative and a negative value fails startup.
-	RatingWeightStarsReceivedPermille int64
-	RatingWeightStarsSpentPermille    int64
-	RatingWeightMessageSent           int64
-	RatingWeightAccountAgeDay         int64
-	RatingWeightGiftReceived          int64
-	RatingWeightModerationCase        int64
-	RatingWeightScamPenalty           int64
-	RatingWeightFakePenalty           int64
-	// RatingActivityCap bounds the activity component so activity alone cannot
-	// outweigh Stars and moderation; 0 leaves it uncapped.
-	RatingActivityCap int64
 	// VerificationEnabled controls official platform verification: the @verifybot
 	// application flow and the panel's review queue. Disabled refuses every
 	// verification use case explicitly; already-verified peers keep their badge,
@@ -697,9 +640,6 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("TELESRV_ADVERTISE_IP: %w", err)
 	}
-	// The composite rating weight defaults are the domain formula's own defaults;
-	// see RatingWeight* below.
-	defaultRatingWeights := domain.DefaultAccountRatingWeights()
 	adminScopedTokens, err := parseAdminScopedTokens(envAllowEmptyOr("TELESRV_ADMIN_SCOPED_TOKENS", ""))
 	if err != nil {
 		return Config{}, err
@@ -809,8 +749,6 @@ func Load() (Config, error) {
 		SMTPTLSMode:               strings.ToLower(strings.TrimSpace(envOr("TELESRV_SMTP_TLS", "starttls"))),
 		SMTPTimeout:               envDurationOr("TELESRV_SMTP_TIMEOUT", 10*time.Second),
 		LangPackSeedDir:           envOr("TELESRV_LANGPACK_SEED_DIR", "data/langpack"),
-		OfficialGiftsDir:          envOr("TELESRV_OFFICIAL_GIFTS_DIR", "data/official-gifts"),
-		StarGiftTONStartingGrant:  envInt64Or("TELESRV_STARGIFT_TON_STARTING_GRANT", 10_000_000_000),
 		BlobDir:                   envOr("TELESRV_BLOB_DIR", "data/blobs"),
 		// s3 (MinIO by default, see deploy/docker-compose.yml's minio service) is
 		// the default blob backend; localfs remains fully supported as an
@@ -894,43 +832,13 @@ func Load() (Config, error) {
 		CallSignalingRate:      envIntOr("TELESRV_CALL_SIGNALING_RATE", 50),
 		CallExpiryInterval:     envDurationOr("TELESRV_CALL_EXPIRY_INTERVAL", time.Second),
 
-		PremiumGrantMonths:               envIntOr("TELESRV_PREMIUM_GRANT_MONTHS", 3),
-		DefaultStickerSetID:              envInt64Or("TELESRV_DEFAULT_STICKER_SET_ID", 0),
-		PasskeyRPID:                      envOr("TELESRV_PASSKEY_RP_ID", "telesrv.net"),
-		PasskeyAllowedOrigins:            envListOr("TELESRV_PASSKEY_ALLOWED_ORIGINS", nil),
-		StarsStartingGrant:               int64(envIntOr("TELESRV_STARS_STARTING_GRANT", 1000)),
-		PremiumSweepInterval:             envDurationOr("TELESRV_PREMIUM_SWEEP_INTERVAL", time.Minute),
-		PremiumSweepBatch:                envIntOr("TELESRV_PREMIUM_SWEEP_BATCH", 500),
-		StarGiftSweepInterval:            envDurationOr("TELESRV_STARGIFT_SWEEP_INTERVAL", 15*time.Second),
-		StarGiftSweepBatch:               envIntOr("TELESRV_STARGIFT_SWEEP_BATCH", 1000),
-		StarGiftTransferStars:            int64(envIntOr("TELESRV_STARGIFT_TRANSFER_STARS", 25)),
-		StarGiftDropOriginalDetailsStars: int64(envIntOr("TELESRV_STARGIFT_DROP_DETAILS_STARS", 25)),
-		StarGiftOfferMinStars:            envIntOr("TELESRV_STARGIFT_OFFER_MIN_STARS", 1),
-		StarGiftStarsProceedsPermille:    envIntOr("TELESRV_STARGIFT_STARS_PROCEEDS_PERMILLE", 1000),
-		StarGiftTONProceedsPermille:      envIntOr("TELESRV_STARGIFT_TON_PROCEEDS_PERMILLE", 1000),
-		StarGiftExportDelay:              envDurationOr("TELESRV_STARGIFT_EXPORT_DELAY", 0),
-		StarGiftTransferDelay:            envDurationOr("TELESRV_STARGIFT_TRANSFER_DELAY", 0),
-		StarGiftResellDelay:              envDurationOr("TELESRV_STARGIFT_RESELL_DELAY", 0),
-		StarGiftCraftDelay:               envDurationOr("TELESRV_STARGIFT_CRAFT_DELAY", 0),
-		StarGiftCraftChancePermille:      envIntOr("TELESRV_STARGIFT_CRAFT_CHANCE_PERMILLE", 250),
-
-		RatingEnabled:           envBoolOr("TELESRV_RATING_ENABLED", true),
-		RatingPendingDelay:      envDurationOr("TELESRV_RATING_PENDING_DELAY", 24*time.Hour),
-		RatingRecomputeInterval: envDurationOr("TELESRV_RATING_RECOMPUTE_INTERVAL", 15*time.Minute),
-		RatingRecomputeBatch:    envIntOr("TELESRV_RATING_RECOMPUTE_BATCH", 500),
-		RatingStaleAfter:        envDurationOr("TELESRV_RATING_STALE_AFTER", 6*time.Hour),
-		// Weight defaults are read from the domain formula itself so the shipped
-		// behaviour cannot drift from domain.DefaultAccountRatingWeights().
-		RatingWeightStarsReceivedPermille: envInt64Or("TELESRV_RATING_WEIGHT_STARS_RECEIVED_PERMILLE", defaultRatingWeights.StarsReceivedPermille),
-		RatingWeightStarsSpentPermille:    envInt64Or("TELESRV_RATING_WEIGHT_STARS_SPENT_PERMILLE", defaultRatingWeights.StarsSpentPermille),
-		RatingWeightMessageSent:           envInt64Or("TELESRV_RATING_WEIGHT_MESSAGE_SENT", defaultRatingWeights.PerMessageSent),
-		RatingWeightAccountAgeDay:         envInt64Or("TELESRV_RATING_WEIGHT_ACCOUNT_AGE_DAY", defaultRatingWeights.PerAccountAgeDay),
-		RatingWeightGiftReceived:          envInt64Or("TELESRV_RATING_WEIGHT_GIFT_RECEIVED", defaultRatingWeights.PerGiftReceived),
-		RatingWeightModerationCase:        envInt64Or("TELESRV_RATING_WEIGHT_MODERATION_CASE", defaultRatingWeights.PerModerationCase),
-		RatingWeightScamPenalty:           envInt64Or("TELESRV_RATING_WEIGHT_SCAM_PENALTY", defaultRatingWeights.ScamPenalty),
-		RatingWeightFakePenalty:           envInt64Or("TELESRV_RATING_WEIGHT_FAKE_PENALTY", defaultRatingWeights.FakePenalty),
-		RatingActivityCap:                 envInt64Or("TELESRV_RATING_ACTIVITY_CAP", defaultRatingWeights.ActivityCap),
-		CollectibleUsernameURLTemplate:    strings.TrimSpace(envAllowEmptyOr("TELESRV_COLLECTIBLE_USERNAME_URL_TEMPLATE", "")),
+		PremiumGrantMonths:             envIntOr("TELESRV_PREMIUM_GRANT_MONTHS", 3),
+		DefaultStickerSetID:            envInt64Or("TELESRV_DEFAULT_STICKER_SET_ID", 0),
+		PasskeyRPID:                    envOr("TELESRV_PASSKEY_RP_ID", "telesrv.net"),
+		PasskeyAllowedOrigins:          envListOr("TELESRV_PASSKEY_ALLOWED_ORIGINS", nil),
+		PremiumSweepInterval:           envDurationOr("TELESRV_PREMIUM_SWEEP_INTERVAL", time.Minute),
+		PremiumSweepBatch:              envIntOr("TELESRV_PREMIUM_SWEEP_BATCH", 500),
+		CollectibleUsernameURLTemplate: strings.TrimSpace(envAllowEmptyOr("TELESRV_COLLECTIBLE_USERNAME_URL_TEMPLATE", "")),
 
 		// Official verification defaults ship the feature on with the official bar
 		// in place: user accounts are not accepted, a rejection costs a month, and
@@ -986,12 +894,6 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if err := validateRPCExecutionConfig(cfg); err != nil {
-		return Config{}, err
-	}
-	if err := validateStarGiftConfig(cfg); err != nil {
-		return Config{}, err
-	}
-	if err := validateAccountRatingConfig(cfg); err != nil {
 		return Config{}, err
 	}
 	if err := validateCollectibleUsernameConfig(cfg); err != nil {
@@ -1074,77 +976,6 @@ func validateTelegramLoginConfig(cfg Config) error {
 		if _, err := netip.ParsePrefix(strings.TrimSpace(raw)); err != nil {
 			return fmt.Errorf("TELESRV_TELEGRAM_LOGIN_TRUSTED_PROXY_CIDRS contains invalid CIDR %q: %w", raw, err)
 		}
-	}
-	return nil
-}
-
-func validateStarGiftConfig(cfg Config) error {
-	if cfg.StarGiftSweepInterval <= 0 || cfg.StarGiftSweepBatch <= 0 || cfg.StarGiftSweepBatch > 10000 {
-		return fmt.Errorf("TELESRV_STARGIFT_SWEEP_INTERVAL must be positive and TELESRV_STARGIFT_SWEEP_BATCH must be 1..10000")
-	}
-	if cfg.StarGiftTONStartingGrant < 0 {
-		return fmt.Errorf("TELESRV_STARGIFT_TON_STARTING_GRANT must be non-negative")
-	}
-	if cfg.StarGiftTransferStars < 0 || cfg.StarGiftDropOriginalDetailsStars < 0 || cfg.StarGiftOfferMinStars < 0 {
-		return fmt.Errorf("TELESRV_STARGIFT_TRANSFER_STARS, TELESRV_STARGIFT_DROP_DETAILS_STARS and TELESRV_STARGIFT_OFFER_MIN_STARS must be non-negative")
-	}
-	if cfg.StarGiftExportDelay < 0 || cfg.StarGiftTransferDelay < 0 || cfg.StarGiftResellDelay < 0 || cfg.StarGiftCraftDelay < 0 {
-		return fmt.Errorf("TELESRV_STARGIFT lifecycle delays must be non-negative")
-	}
-	const maxProtocolDelay = time.Duration(1<<31-1) * time.Second
-	if cfg.StarGiftExportDelay > maxProtocolDelay || cfg.StarGiftTransferDelay > maxProtocolDelay ||
-		cfg.StarGiftResellDelay > maxProtocolDelay || cfg.StarGiftCraftDelay > maxProtocolDelay {
-		return fmt.Errorf("TELESRV_STARGIFT lifecycle delays exceed the protocol int32 date range")
-	}
-	if cfg.StarGiftCraftChancePermille < 0 || cfg.StarGiftCraftChancePermille > 1000 {
-		return fmt.Errorf("TELESRV_STARGIFT_CRAFT_CHANCE_PERMILLE must be 0..1000")
-	}
-	if cfg.StarGiftStarsProceedsPermille < 0 || cfg.StarGiftStarsProceedsPermille > 1000 ||
-		cfg.StarGiftTONProceedsPermille < 0 || cfg.StarGiftTONProceedsPermille > 1000 {
-		return fmt.Errorf("TELESRV_STARGIFT_*_PROCEEDS_PERMILLE must be 0..1000")
-	}
-	return nil
-}
-
-// AccountRatingWeights renders the configured composite rating formula. It is
-// the single conversion point between env keys and the domain formula, so the
-// app service and the admin explanation always use the same numbers.
-func (c Config) AccountRatingWeights() domain.AccountRatingWeights {
-	return domain.AccountRatingWeights{
-		StarsReceivedPermille: c.RatingWeightStarsReceivedPermille,
-		StarsSpentPermille:    c.RatingWeightStarsSpentPermille,
-		PerMessageSent:        c.RatingWeightMessageSent,
-		PerAccountAgeDay:      c.RatingWeightAccountAgeDay,
-		PerGiftReceived:       c.RatingWeightGiftReceived,
-		PerModerationCase:     c.RatingWeightModerationCase,
-		ScamPenalty:           c.RatingWeightScamPenalty,
-		FakePenalty:           c.RatingWeightFakePenalty,
-		ActivityCap:           c.RatingActivityCap,
-	}
-}
-
-// validateAccountRatingConfig rejects a formula or worker cadence that cannot
-// produce a reproducible rating. Weights are validated even when the feature is
-// disabled: enabling it later must not be the moment a typo is discovered.
-func validateAccountRatingConfig(cfg Config) error {
-	if err := cfg.AccountRatingWeights().Validate(); err != nil {
-		return fmt.Errorf("TELESRV_RATING_WEIGHT_* and TELESRV_RATING_ACTIVITY_CAP must be non-negative: %w", err)
-	}
-	if cfg.RatingPendingDelay < 0 {
-		return fmt.Errorf("TELESRV_RATING_PENDING_DELAY must be non-negative")
-	}
-	const maxRatingPendingDelay = 30 * 24 * time.Hour
-	if cfg.RatingPendingDelay > maxRatingPendingDelay {
-		return fmt.Errorf("TELESRV_RATING_PENDING_DELAY must not exceed 720h")
-	}
-	if cfg.RatingRecomputeInterval <= 0 {
-		return fmt.Errorf("TELESRV_RATING_RECOMPUTE_INTERVAL must be positive")
-	}
-	if cfg.RatingStaleAfter <= 0 {
-		return fmt.Errorf("TELESRV_RATING_STALE_AFTER must be positive")
-	}
-	if cfg.RatingRecomputeBatch <= 0 || cfg.RatingRecomputeBatch > 10000 {
-		return fmt.Errorf("TELESRV_RATING_RECOMPUTE_BATCH must be 1..10000")
 	}
 	return nil
 }

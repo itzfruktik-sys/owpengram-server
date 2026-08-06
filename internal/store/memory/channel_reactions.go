@@ -168,100 +168,6 @@ func (s *ChannelStore) SetChannelMessageReactions(_ context.Context, req domain.
 	}, nil
 }
 
-type memoryPaidReaction struct {
-	stars     int64
-	anonymous bool
-	date      int
-}
-
-// AddChannelMessagePaidReaction 累计 viewer 对一条广播频道消息的付费 reaction 星数（内存镜像）。
-func (s *ChannelStore) AddChannelMessagePaidReaction(_ context.Context, req domain.SendChannelPaidReactionRequest) (domain.ChannelMessagePaidReactionResult, error) {
-	if req.UserID == 0 || req.ChannelID == 0 || req.MessageID <= 0 || req.MessageID > domain.MaxMessageBoxID {
-		return domain.ChannelMessagePaidReactionResult{}, domain.ErrChannelInvalid
-	}
-	if req.Stars <= 0 || req.Stars > domain.MaxPaidReactionStarsPerRequest {
-		return domain.ChannelMessagePaidReactionResult{}, domain.ErrChannelInvalid
-	}
-	if req.Date == 0 {
-		req.Date = int(time.Now().Unix())
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	channel, member, err := s.channelAndMemberLocked(req.UserID, req.ChannelID)
-	if err != nil {
-		return domain.ChannelMessagePaidReactionResult{}, err
-	}
-	if !channel.Broadcast || channel.Megagroup {
-		return domain.ChannelMessagePaidReactionResult{}, domain.ErrReactionInvalid
-	}
-	msg, ok := s.findMessageLocked(req.ChannelID, req.MessageID)
-	if !ok || msg.Deleted || msg.Action != nil || msg.ID <= member.AvailableMinID {
-		return domain.ChannelMessagePaidReactionResult{}, domain.ErrMessageIDInvalid
-	}
-	if s.paidReactions[req.ChannelID] == nil {
-		s.paidReactions[req.ChannelID] = make(map[int]map[int64]memoryPaidReaction)
-	}
-	if s.paidReactions[req.ChannelID][req.MessageID] == nil {
-		s.paidReactions[req.ChannelID][req.MessageID] = make(map[int64]memoryPaidReaction)
-	}
-	prev := s.paidReactions[req.ChannelID][req.MessageID][req.UserID]
-	s.paidReactions[req.ChannelID][req.MessageID][req.UserID] = memoryPaidReaction{
-		stars:     prev.stars + req.Stars,
-		anonymous: req.Anonymous,
-		date:      req.Date,
-	}
-	paid := s.aggregatePaidReactionsLocked(req.ChannelID, req.MessageID, req.UserID)
-	outMsg := cloneChannelMessage(msg)
-	reactions := s.channelMessageReactionsLocked(req.UserID, channel, req.MessageID)
-	outMsg.Reactions = cloneChannelMessageReactionsPtr(&reactions)
-	return domain.ChannelMessagePaidReactionResult{
-		Channel:    cloneChannel(channel),
-		Message:    outMsg,
-		Paid:       paid,
-		Recipients: s.activeMemberIDsLocked(req.ChannelID, 0, 0),
-	}, nil
-}
-
-func (s *ChannelStore) aggregatePaidReactionsLocked(channelID int64, messageID int, viewerUserID int64) domain.ChannelMessagePaidReactions {
-	byUser := s.paidReactions[channelID][messageID]
-	reactors := make([]domain.PaidReactor, 0, len(byUser))
-	var out domain.ChannelMessagePaidReactions
-	for userID, entry := range byUser {
-		r := domain.PaidReactor{UserID: userID, Stars: entry.stars, Anonymous: entry.anonymous, My: userID == viewerUserID}
-		out.TotalStars += entry.stars
-		if r.My {
-			out.MyStars = entry.stars
-			out.MyAnonymous = entry.anonymous
-		}
-		reactors = append(reactors, r)
-	}
-	sort.Slice(reactors, func(i, j int) bool {
-		if reactors[i].Stars != reactors[j].Stars {
-			return reactors[i].Stars > reactors[j].Stars
-		}
-		return reactors[i].UserID < reactors[j].UserID
-	})
-	myInTop := false
-	for i, r := range reactors {
-		if i >= domain.MaxPaidReactionTopReactors {
-			break
-		}
-		out.TopReactors = append(out.TopReactors, r)
-		if r.My {
-			myInTop = true
-		}
-	}
-	if out.MyStars > 0 && !myInTop {
-		for _, r := range reactors {
-			if r.My {
-				out.TopReactors = append(out.TopReactors, r)
-				break
-			}
-		}
-	}
-	return out
-}
-
 func (s *ChannelStore) DeleteChannelParticipantReaction(_ context.Context, req domain.DeleteChannelParticipantReactionRequest) (domain.ChannelMessageReactionsResult, error) {
 	if req.UserID == 0 || req.ChannelID == 0 || req.MessageID <= 0 || req.MessageID > domain.MaxMessageBoxID || req.ParticipantUserID == 0 {
 		return domain.ChannelMessageReactionsResult{}, domain.ErrChannelInvalid
@@ -867,10 +773,6 @@ func (s *ChannelStore) channelMessageReactionsLocked(viewerUserID int64, channel
 		Results:    []domain.ChannelMessageReactionCount{},
 		Recent:     []domain.ChannelMessagePeerReaction{},
 	}
-	// 付费 reaction 与普通 reaction 分表：即便无普通 reaction 也要回显 ReactionPaid。
-	if paid := s.aggregatePaidReactionsLocked(channel.ID, messageID, viewerUserID); paid.TotalStars > 0 {
-		out.Paid = &paid
-	}
 	if len(rows) == 0 {
 		return out
 	}
@@ -1012,11 +914,6 @@ func cloneChannelMessageReactionsPtr(in *domain.ChannelMessageReactions) *domain
 func cloneChannelMessageReactions(in domain.ChannelMessageReactions) domain.ChannelMessageReactions {
 	in.Results = append([]domain.ChannelMessageReactionCount(nil), in.Results...)
 	in.Recent = cloneChannelPeerReactions(in.Recent)
-	if in.Paid != nil {
-		paid := *in.Paid
-		paid.TopReactors = append([]domain.PaidReactor(nil), in.Paid.TopReactors...)
-		in.Paid = &paid
-	}
 	return in
 }
 

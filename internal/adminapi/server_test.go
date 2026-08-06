@@ -1,10 +1,8 @@
 package adminapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,8 +10,6 @@ import (
 
 	"telesrv/internal/admin"
 	"telesrv/internal/domain"
-	"telesrv/internal/officialgifts"
-	"telesrv/internal/seed/giftdemo"
 )
 
 func TestAdminAPIRequiresBearerToken(t *testing.T) {
@@ -278,20 +274,6 @@ func TestAdminAPISetVerified(t *testing.T) {
 	}
 }
 
-func TestAdminAPIGrantStars(t *testing.T) {
-	srv := &Server{token: "secret", svc: fakeService{}}
-	req := httptest.NewRequest(http.MethodPost, "/v1/accounts/grant-stars", strings.NewReader(`{"command_id":"c-stars","actor":"ops","reason":"manual grant","dry_run":true,"user_id":1001,"amount":500}`))
-	req.Header.Set("Authorization", "Bearer secret")
-	rec := httptest.NewRecorder()
-	srv.routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"command_id":"c-stars"`) {
-		t.Fatalf("body=%s", rec.Body.String())
-	}
-}
-
 func TestAdminAPISetChannelVerified(t *testing.T) {
 	srv := &Server{token: "secret", svc: fakeService{}}
 	req := httptest.NewRequest(http.MethodPost, "/v1/channels/set-verified", strings.NewReader(`{"command_id":"c3","actor":"ops","reason":"official","dry_run":true,"channel_id":2001,"verified":true}`))
@@ -306,103 +288,6 @@ func TestAdminAPISetChannelVerified(t *testing.T) {
 	}
 }
 
-func TestAdminAPIImportStarGiftMultipart(t *testing.T) {
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("metadata", `{"command_id":"gift-1","actor":"ops","reason":"catalog","dry_run":true,"title":"Gift","stars":50,"convert_stars":25,"enabled":true,"sort_order":3}`); err != nil {
-		t.Fatal(err)
-	}
-	part, err := writer.CreateFormFile("file", "gift.lottie")
-	if err != nil {
-		t.Fatal(err)
-	}
-	animation := []byte(`{"v":"5.7","w":512,"h":512,"fr":30,"ip":0,"op":30,"layers":[{}]}`)
-	if _, err := part.Write(animation); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	svc := &captureGiftService{}
-	srv := &Server{token: "secret", svc: svc}
-	req := httptest.NewRequest(http.MethodPost, "/v1/gifts/import", &body)
-	req.Header.Set("Authorization", "Bearer secret")
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	rec := httptest.NewRecorder()
-	srv.routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	if svc.req.CommandID != "gift-1" || svc.req.FileName != "gift.lottie" || !bytes.Equal(svc.req.Data, animation) || svc.req.Stars != 50 || svc.req.ConvertStars != 25 {
-		t.Fatalf("decoded gift request = %+v", svc.req)
-	}
-}
-
-func TestAdminAPIPublishStarGiftCollectiblesMultipart(t *testing.T) {
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	metadata := `{"command_id":"pool-1","actor":"ops","reason":"pool","dry_run":true,"upgrade_stars":125,"supply_total":100,"slug_prefix":"cake","models":[{"name":"Ruby","rarity_permille":500,"sort_order":0,"file_key":"model-0"},{"name":"Sapphire","rarity_permille":500,"sort_order":1,"file_key":"model-1"}],"patterns":[{"name":"Stars","rarity_permille":500,"sort_order":0,"file_key":"pattern-0"},{"name":"Moons","rarity_permille":500,"sort_order":1,"file_key":"pattern-1"}],"backdrops":[{"name":"Night","backdrop_id":1,"center_color":1122867,"edge_color":2241348,"pattern_color":3359829,"text_color":16777215,"rarity_permille":500,"sort_order":0},{"name":"Day","backdrop_id":2,"center_color":11189196,"edge_color":7833753,"pattern_color":14544639,"text_color":1118481,"rarity_permille":500,"sort_order":1}]}`
-	if err := writer.WriteField("metadata", metadata); err != nil {
-		t.Fatal(err)
-	}
-	for key, name := range map[string]string{
-		"model-0": "ruby.lottie", "model-1": "sapphire.lottie",
-		"pattern-0": "stars.tgs", "pattern-1": "moons.tgs",
-	} {
-		part, err := writer.CreateFormFile(key, name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := part.Write([]byte(key)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	svc := &captureCollectibleService{}
-	srv := &Server{token: "secret", svc: svc}
-	req := httptest.NewRequest(http.MethodPost, "/v1/gifts/11/collectibles/publish", &body)
-	req.Header.Set("Authorization", "Bearer secret")
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	rec := httptest.NewRecorder()
-	srv.routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	if svc.req.GiftID != 11 || len(svc.req.Models) != 2 || svc.req.Models[0].FileName != "ruby.lottie" ||
-		string(svc.req.Patterns[0].Data) != "pattern-0" || len(svc.req.Backdrops) != 2 || svc.req.Backdrops[1].BackdropID != 2 {
-		t.Fatalf("decoded collectible request = %+v", svc.req)
-	}
-}
-
-func TestCollectiblePreviewResponsePreservesInt64AsDecimalStrings(t *testing.T) {
-	const maxInt64 = int64(9223372036854775807)
-	got := collectiblePreviewResponse(domain.StarGiftUpgradePreview{
-		GiftID:       maxInt64,
-		UpgradeStars: maxInt64,
-		Models: []domain.StarGiftCollectibleAttribute{{
-			ID:                 maxInt64,
-			Kind:               domain.StarGiftCollectibleModel,
-			Name:               "Exact",
-			RarityKind:         domain.StarGiftRarityPermille,
-			RarityPermille:     1000,
-			OfficialDocumentID: maxInt64,
-		}},
-	})
-	if got["gift_id"] != "9223372036854775807" || got["upgrade_stars"] != "9223372036854775807" {
-		t.Fatalf("preview ids = %#v", got)
-	}
-	models, ok := got["models"].([]map[string]any)
-	if !ok || len(models) != 1 {
-		t.Fatalf("preview models = %#v", got["models"])
-	}
-	if models[0]["id"] != "9223372036854775807" || models[0]["official_document_id"] != "9223372036854775807" {
-		t.Fatalf("preview model ids = %#v", models[0])
-	}
-}
-
 type fakeService struct{}
 
 type captureFreezeService struct {
@@ -410,27 +295,7 @@ type captureFreezeService struct {
 	req admin.SetAccountFrozenRequest
 }
 
-type captureGiftService struct {
-	fakeService
-	req admin.ImportStarGiftRequest
-}
-
-type captureCollectibleService struct {
-	fakeService
-	req admin.PublishStarGiftCollectiblesRequest
-}
-
 func (s *captureFreezeService) SetAccountFrozen(_ context.Context, req admin.SetAccountFrozenRequest) (admin.CommandResult, error) {
-	s.req = req
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (s *captureGiftService) ImportStarGift(_ context.Context, req admin.ImportStarGiftRequest) (admin.CommandResult, error) {
-	s.req = req
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (s *captureCollectibleService) PublishStarGiftCollectibles(_ context.Context, req admin.PublishStarGiftCollectiblesRequest) (admin.CommandResult, error) {
 	s.req = req
 	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
 }
@@ -440,10 +305,6 @@ func (fakeService) SetAccountFrozen(_ context.Context, req admin.SetAccountFroze
 }
 
 func (fakeService) GrantPremium(_ context.Context, req admin.GrantPremiumRequest) (admin.CommandResult, error) {
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (fakeService) GrantStars(_ context.Context, req admin.GrantStarsRequest) (admin.CommandResult, error) {
 	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
 }
 
@@ -480,10 +341,6 @@ func (fakeService) SetChannelFlags(_ context.Context, req admin.SetChannelFlagsR
 }
 
 func (fakeService) SetSupport(_ context.Context, req admin.SetSupportRequest) (admin.CommandResult, error) {
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (fakeService) GiveGift(_ context.Context, req admin.GiveGiftRequest) (admin.CommandResult, error) {
 	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
 }
 
@@ -551,18 +408,6 @@ func (fakeService) DeletePrivateHistory(context.Context, admin.DeletePrivateHist
 	return admin.CommandResult{}, nil
 }
 
-func (fakeService) ImportStarGift(_ context.Context, req admin.ImportStarGiftRequest) (admin.CommandResult, error) {
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (fakeService) ImportDefaultStarGift(_ context.Context, req admin.ImportDefaultStarGiftRequest) (admin.CommandResult, error) {
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (fakeService) ImportAllDefaultStarGifts(_ context.Context, req admin.ImportAllDefaultStarGiftsRequest) (admin.CommandResult, error) {
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
 func (fakeService) AccountAvatar(context.Context, int64) ([]byte, string, bool, error) {
 	return nil, "", false, nil
 }
@@ -599,56 +444,8 @@ func (fakeService) StickerDocumentAnimation(context.Context, int64) ([]byte, str
 	return nil, "", false, nil
 }
 
-func (fakeService) DefaultStarGifts() []giftdemo.GiftInfo {
-	return giftdemo.List()
-}
-
-func (fakeService) DefaultStarGiftAnimation(context.Context, int) ([]byte, bool, error) {
-	return []byte(`{"v":"5.7","w":512,"h":512}`), true, nil
-}
-
-func (fakeService) ImportOfficialStarGift(_ context.Context, req admin.ImportOfficialStarGiftRequest) (admin.CommandResult, error) {
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (fakeService) ImportAllOfficialStarGifts(_ context.Context, req admin.ImportAllOfficialStarGiftsRequest) (admin.CommandResult, error) {
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (fakeService) OfficialStarGifts(context.Context) ([]officialgifts.GiftSummary, error) {
-	return nil, nil
-}
-
-func (fakeService) OfficialStarGiftAnimation(context.Context, string) ([]byte, bool, error) {
-	return []byte(`{"v":"5.7","w":512,"h":512}`), true, nil
-}
-
-func (fakeService) PublishStarGiftCollectibles(_ context.Context, req admin.PublishStarGiftCollectiblesRequest) (admin.CommandResult, error) {
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (fakeService) SetStarGiftEnabled(_ context.Context, req admin.SetStarGiftEnabledRequest) (admin.CommandResult, error) {
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (fakeService) SetStarGiftSortOrder(_ context.Context, req admin.SetStarGiftSortOrderRequest) (admin.CommandResult, error) {
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (fakeService) StarGiftAnimation(context.Context, int64) ([]byte, bool, error) {
-	return []byte(`{"v":"5.7","w":512,"h":512}`), true, nil
-}
-
 func (fakeService) EmojiAnimation(context.Context, int64) ([]byte, bool, error) {
 	return []byte(`{"v":"5.7","w":100,"h":100}`), true, nil
-}
-
-func (fakeService) StarGiftCollectibles(context.Context, int64) (domain.StarGiftUpgradePreview, bool, error) {
-	return domain.StarGiftUpgradePreview{}, false, nil
-}
-
-func (fakeService) StarGiftCollectibleAnimation(context.Context, int64, domain.StarGiftCollectibleAttributeKind, int64) ([]byte, bool, error) {
-	return []byte(`{"v":"5.7","w":512,"h":512}`), true, nil
 }
 
 func (fakeService) ModerationCases(context.Context, domain.ModerationCaseFilter) ([]domain.ModerationCase, error) {
@@ -747,64 +544,12 @@ func maxInt64Collectible() domain.CollectibleUsername {
 	}
 }
 
-type captureAccountRatingService struct {
-	fakeService
-	recompute admin.RecomputeAccountRatingRequest
-	adjust    admin.AdjustAccountRatingRequest
-	filter    domain.AccountRatingFilter
-}
-
-func (s *captureAccountRatingService) RecomputeAccountRating(_ context.Context, req admin.RecomputeAccountRatingRequest) (admin.CommandResult, error) {
-	s.recompute = req
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (s *captureAccountRatingService) AdjustAccountRating(_ context.Context, req admin.AdjustAccountRatingRequest) (admin.CommandResult, error) {
-	s.adjust = req
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (s *captureAccountRatingService) AccountRatings(_ context.Context, filter domain.AccountRatingFilter) ([]domain.AccountRating, error) {
-	s.filter = filter
-	return []domain.AccountRating{maxInt64Rating()}, nil
-}
-
-func (s *captureAccountRatingService) AccountRating(_ context.Context, userID int64) (domain.AccountRating, error) {
-	rating := maxInt64Rating()
-	rating.UserID = userID
-	return rating, nil
-}
-
-func (s *captureAccountRatingService) AccountRatingEvents(_ context.Context, userID int64, _ int) ([]domain.AccountRatingEvent, error) {
-	return []domain.AccountRatingEvent{{
-		ID: 9223372036854775807, UserID: userID,
-		Kind: domain.AccountRatingEventManual, Amount: -9223372036854775807,
-		Actor: "ops", Reason: "abuse",
-	}}, nil
-}
-
-func maxInt64Rating() domain.AccountRating {
-	return domain.AccountRating{
-		UserID:            1001,
-		Level:             7,
-		Stars:             9223372036854775807,
-		CurrentLevelStars: 4900,
-		NextLevelStars:    6400,
-		HasNextLevel:      true,
-		StarsComponent:    9223372036854775807,
-		ManualComponent:   -1500,
-		Version:           9223372036854775807,
-	}
-}
-
 func TestAdminAPICollectibleUsernameCommandsRequireToken(t *testing.T) {
 	srv := &Server{token: "secret", svc: fakeService{}}
 	for _, path := range []string{
 		"/v1/collectible-usernames/mint",
 		"/v1/collectible-usernames/transfer",
 		"/v1/collectible-usernames/revoke",
-		"/v1/account-ratings/recompute",
-		"/v1/account-ratings/adjust",
 	} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
 		rec := httptest.NewRecorder()
@@ -816,8 +561,6 @@ func TestAdminAPICollectibleUsernameCommandsRequireToken(t *testing.T) {
 	for _, path := range []string{
 		"/v1/collectible-usernames",
 		"/v1/collectible-usernames/7",
-		"/v1/account-ratings",
-		"/v1/account-ratings/7",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
@@ -875,28 +618,6 @@ func TestAdminAPITransferAndRevokeCollectibleUsername(t *testing.T) {
 	}
 }
 
-func TestAdminAPIAccountRatingCommands(t *testing.T) {
-	svc := &captureAccountRatingService{}
-	srv := &Server{token: "secret", svc: svc}
-	recompute := httptest.NewRequest(http.MethodPost, "/v1/account-ratings/recompute", strings.NewReader(
-		`{"command_id":"rc-1","actor":"ops","reason":"support ticket","dry_run":true,"user_id":"1001"}`))
-	recompute.Header.Set("Authorization", "Bearer secret")
-	recomputeRec := httptest.NewRecorder()
-	srv.routes().ServeHTTP(recomputeRec, recompute)
-	if recomputeRec.Code != http.StatusOK || svc.recompute.UserID != 1001 || !svc.recompute.DryRun {
-		t.Fatalf("recompute status=%d request=%+v body=%s", recomputeRec.Code, svc.recompute, recomputeRec.Body.String())
-	}
-
-	adjust := httptest.NewRequest(http.MethodPost, "/v1/account-ratings/adjust", strings.NewReader(
-		`{"command_id":"adj-1","actor":"ops","reason":"manual penalty","user_id":"1001","amount":"-2500"}`))
-	adjust.Header.Set("Authorization", "Bearer secret")
-	adjustRec := httptest.NewRecorder()
-	srv.routes().ServeHTTP(adjustRec, adjust)
-	if adjustRec.Code != http.StatusOK || svc.adjust.Amount != -2500 || svc.adjust.DryRun {
-		t.Fatalf("adjust status=%d request=%+v body=%s", adjustRec.Code, svc.adjust, adjustRec.Body.String())
-	}
-}
-
 func TestAdminAPICollectibleUsernameReadsUseDecimalStrings(t *testing.T) {
 	svc := &captureCollectibleUsernameService{}
 	srv := &Server{token: "secret", svc: svc}
@@ -939,44 +660,7 @@ func TestAdminAPICollectibleUsernameReadsUseDecimalStrings(t *testing.T) {
 	}
 }
 
-func TestAdminAPIAccountRatingReadsUseDecimalStrings(t *testing.T) {
-	svc := &captureAccountRatingService{}
-	srv := &Server{token: "secret", svc: svc}
-	list := httptest.NewRequest(http.MethodGet, "/v1/account-ratings?min_level=3&user_id=1001&limit=10&before_id=99", nil)
-	list.Header.Set("Authorization", "Bearer secret")
-	listRec := httptest.NewRecorder()
-	srv.routes().ServeHTTP(listRec, list)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("list status=%d body=%s", listRec.Code, listRec.Body.String())
-	}
-	if svc.filter.MinLevel != 3 || svc.filter.UserID != 1001 || svc.filter.Limit != 10 || svc.filter.BeforeID != 99 {
-		t.Fatalf("rating filter = %+v", svc.filter)
-	}
-	if !strings.Contains(listRec.Body.String(), `"stars":"9223372036854775807"`) {
-		t.Fatalf("rating list lost int64 precision: %s", listRec.Body.String())
-	}
-
-	detail := httptest.NewRequest(http.MethodGet, "/v1/account-ratings/1001", nil)
-	detail.Header.Set("Authorization", "Bearer secret")
-	detailRec := httptest.NewRecorder()
-	srv.routes().ServeHTTP(detailRec, detail)
-	if detailRec.Code != http.StatusOK {
-		t.Fatalf("detail status=%d body=%s", detailRec.Code, detailRec.Body.String())
-	}
-	var payload struct {
-		Rating map[string]any   `json:"rating"`
-		Events []map[string]any `json:"events"`
-	}
-	if err := json.Unmarshal(detailRec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode detail: %v", err)
-	}
-	if payload.Rating["user_id"] != "1001" || payload.Rating["stars"] != "9223372036854775807" ||
-		len(payload.Events) != 1 || payload.Events[0]["amount"] != "-9223372036854775807" {
-		t.Fatalf("rating detail payload = %+v", payload)
-	}
-}
-
-func TestAdminAPIMissingCollectibleAndRatingReportCodedErrors(t *testing.T) {
+func TestAdminAPIMissingCollectibleReportsCodedError(t *testing.T) {
 	srv := &Server{token: "secret", svc: fakeService{}}
 	asset := httptest.NewRequest(http.MethodGet, "/v1/collectible-usernames/5", nil)
 	asset.Header.Set("Authorization", "Bearer secret")
@@ -985,15 +669,6 @@ func TestAdminAPIMissingCollectibleAndRatingReportCodedErrors(t *testing.T) {
 	if assetRec.Code != http.StatusNotFound ||
 		!strings.Contains(assetRec.Body.String(), `"code":"`+admin.CodeCollectibleNotFound+`"`) {
 		t.Fatalf("missing asset status=%d body=%s", assetRec.Code, assetRec.Body.String())
-	}
-
-	rating := httptest.NewRequest(http.MethodGet, "/v1/account-ratings/5", nil)
-	rating.Header.Set("Authorization", "Bearer secret")
-	ratingRec := httptest.NewRecorder()
-	srv.routes().ServeHTTP(ratingRec, rating)
-	if ratingRec.Code != http.StatusNotFound ||
-		!strings.Contains(ratingRec.Body.String(), `"code":"`+admin.CodeRatingNotFound+`"`) {
-		t.Fatalf("missing rating status=%d body=%s", ratingRec.Code, ratingRec.Body.String())
 	}
 }
 
@@ -1022,25 +697,5 @@ func (fakeService) CollectibleUsernameByID(context.Context, int64) (domain.Colle
 }
 
 func (fakeService) CollectibleUsernameTransfers(context.Context, int64, int) ([]domain.CollectibleUsernameTransfer, error) {
-	return nil, nil
-}
-
-func (fakeService) RecomputeAccountRating(_ context.Context, req admin.RecomputeAccountRatingRequest) (admin.CommandResult, error) {
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (fakeService) AdjustAccountRating(_ context.Context, req admin.AdjustAccountRatingRequest) (admin.CommandResult, error) {
-	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
-}
-
-func (fakeService) AccountRating(context.Context, int64) (domain.AccountRating, error) {
-	return domain.AccountRating{}, domain.ErrAccountRatingNotFound
-}
-
-func (fakeService) AccountRatings(context.Context, domain.AccountRatingFilter) ([]domain.AccountRating, error) {
-	return nil, nil
-}
-
-func (fakeService) AccountRatingEvents(context.Context, int64, int) ([]domain.AccountRatingEvent, error) {
 	return nil, nil
 }

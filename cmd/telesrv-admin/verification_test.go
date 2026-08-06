@@ -179,10 +179,8 @@ func TestCSRFProtectionCoversEveryExistingMutatingRoute(t *testing.T) {
 	for _, path := range []string{
 		"/api/logout",
 		"/api/actions/set-frozen",
-		"/api/actions/grant-stars",
 		"/api/actions/delete-bot",
 		"/api/actions/revoke-collectible-username",
-		"/api/actions/adjust-account-rating",
 		"/api/moderation/cases/7/claim",
 		"/api/verification/applications/7/approve",
 		"/api/actions/revoke-verification",

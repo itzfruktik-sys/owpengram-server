@@ -499,14 +499,6 @@ WHERE channel_id = $1 AND id = $2`, msg.ChannelID, msg.ID).Scan(
 		SenderUserID: first.SenderUserID,
 	}
 	result := domain.SendChannelMessageResult{Channel: channel, Message: replay, Event: event, Duplicate: true, ReplayDeleteEvent: replayDelete}
-	if first.PaidMessageStars > 0 {
-		balance := domain.StarsBalance{UserID: first.SenderUserID}
-		if err := s.db.QueryRow(ctx, `SELECT balance, granted FROM stars_balances WHERE user_id = $1`, first.SenderUserID).
-			Scan(&balance.Balance, &balance.Granted); err != nil {
-			return domain.SendChannelMessageResult{}, fmt.Errorf("load paid-message replay balance: %w", err)
-		}
-		result.SenderStarsBalance = &balance
-	}
 	return result, nil
 }
 
@@ -515,7 +507,6 @@ func (s *ChannelStore) insertServiceMessage(ctx context.Context, tx pgx.Tx, chan
 	if err != nil {
 		return domain.ChannelMessage{}, domain.ChannelUpdateEvent{}, fmt.Errorf("allocate channel service message id: %w", err)
 	}
-	action = channelServiceActionForMessage(channel.ID, msgID, action)
 	pts, err := s.reserveChannelPts(ctx, tx, channel.ID)
 	if err != nil {
 		return domain.ChannelMessage{}, domain.ChannelUpdateEvent{}, fmt.Errorf("allocate channel service pts: %w", err)
@@ -550,20 +541,6 @@ func (s *ChannelStore) insertServiceMessage(ctx context.Context, tx pgx.Tx, chan
 		return domain.ChannelMessage{}, domain.ChannelUpdateEvent{}, fmt.Errorf("update channel service top: %w", err)
 	}
 	return msg, event, nil
-}
-
-func channelServiceActionForMessage(channelID int64, msgID int, action domain.ChannelMessageAction) domain.ChannelMessageAction {
-	if action.Type == domain.ChannelActionStarGift && action.StarGift != nil {
-		g := *action.StarGift
-		if g.PeerChannelID == 0 {
-			g.PeerChannelID = channelID
-		}
-		if g.SavedID == 0 {
-			g.SavedID = int64(msgID)
-		}
-		action.StarGift = &g
-	}
-	return action
 }
 
 func insertChannelMessageTx(ctx context.Context, tx pgx.Tx, msg domain.ChannelMessage) error {

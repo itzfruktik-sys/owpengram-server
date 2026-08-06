@@ -22,9 +22,6 @@ func (s *ChannelStore) SendMonoforumMessage(ctx context.Context, req domain.Send
 		req.SavedPeer.Type != domain.PeerTypeUser || strings.TrimSpace(req.Message) == "" && req.Media == nil {
 		return domain.SendChannelMessageResult{}, domain.ErrChannelInvalid
 	}
-	if req.AllowPaidStars < 0 {
-		return domain.SendChannelMessageResult{}, domain.ErrStarsInvalidAmount
-	}
 	requestFingerprint, err := store.MonoforumSendFingerprint(req)
 	if err != nil {
 		return domain.SendChannelMessageResult{}, err
@@ -103,47 +100,10 @@ FOR SHARE OF m, p`, channel.ID).Scan(
 	if req.SenderUserID != req.SavedPeer.ID && !isAdmin {
 		return domain.SendChannelMessageResult{}, domain.ErrChannelAdminRequired
 	}
-	var senderBalance *domain.StarsBalance
+	// Direct Messages are always free: telesrv has no Stars economy, so the
+	// per-channel paid-messages price (if a stale admin setting still has one)
+	// is never charged.
 	paidMessageStars := int64(0)
-	if !isAdmin && channel.SendPaidMessagesStars > 0 {
-		if req.AllowPaidStars < channel.SendPaidMessagesStars {
-			return domain.SendChannelMessageResult{}, &domain.StarsPaymentRequiredError{Stars: channel.SendPaidMessagesStars}
-		}
-		balance := domain.StarsBalance{UserID: req.SenderUserID}
-		if err := tx.QueryRow(ctx, `SELECT balance, granted FROM stars_balances WHERE user_id = $1 FOR UPDATE`, req.SenderUserID).
-			Scan(&balance.Balance, &balance.Granted); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return domain.SendChannelMessageResult{}, domain.ErrStarsInsufficient
-			}
-			return domain.SendChannelMessageResult{}, fmt.Errorf("lock paid-message sender balance: %w", err)
-		}
-		if balance.Balance < channel.SendPaidMessagesStars {
-			return domain.SendChannelMessageResult{}, domain.ErrStarsInsufficient
-		}
-		paidMessageStars = channel.SendPaidMessagesStars
-		if err := tx.QueryRow(ctx, `
-UPDATE stars_balances
-SET balance = balance - $2, updated_at = now()
-WHERE user_id = $1
-RETURNING balance`, req.SenderUserID, paidMessageStars).Scan(&balance.Balance); err != nil {
-			return domain.SendChannelMessageResult{}, fmt.Errorf("debit paid-message sender balance: %w", err)
-		}
-		if err := insertStarsTxn(ctx, tx, req.SenderUserID, -paidMessageStars, domain.StarsReasonPaidMessage,
-			domain.Peer{Type: domain.PeerTypeChannel, ID: parent.ID}, req.Date, "Paid message", ""); err != nil {
-			return domain.SendChannelMessageResult{}, err
-		}
-		channelCredit := paidMessageStars * paidMessageChannelCommissionPermille / 1000
-		if channelCredit > 0 {
-			if _, err := tx.Exec(ctx, `
-INSERT INTO channel_stars_balances(channel_id, balance)
-VALUES($1, $2)
-ON CONFLICT(channel_id) DO UPDATE
-SET balance = channel_stars_balances.balance + EXCLUDED.balance, updated_at = now()`, parent.ID, channelCredit); err != nil {
-				return domain.SendChannelMessageResult{}, fmt.Errorf("credit paid-message channel balance: %w", err)
-			}
-		}
-		senderBalance = &balance
-	}
 	if req.ReplyTo != nil {
 		if req.ReplyTo.MessageID <= 0 || req.ReplyTo.Peer != (domain.Peer{Type: domain.PeerTypeChannel, ID: channel.ID}) {
 			return domain.SendChannelMessageResult{}, domain.ErrReplyMessageIDInvalid
@@ -266,7 +226,7 @@ ORDER BY user_id`, parent.ID)
 	committed = true
 	channel.TopMessageID = msgID
 	channel.Pts = pts
-	return domain.SendChannelMessageResult{Channel: channel, Message: msg, Event: event, Recipients: uniqueChannelUserIDs(recipients, 0), SenderStarsBalance: senderBalance}, nil
+	return domain.SendChannelMessageResult{Channel: channel, Message: msg, Event: event, Recipients: uniqueChannelUserIDs(recipients, 0)}, nil
 }
 
 // ListMonoforumHistory 拉取某订阅者(saved_peer)在 monoforum 内的私信历史,id 倒序分页。

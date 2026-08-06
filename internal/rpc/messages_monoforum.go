@@ -300,11 +300,6 @@ func (r *Router) monoforumSendUpdates(ctx context.Context, userID int64, mono do
 		newMsg.Message = &tg.MessageEmpty{ID: res.Message.ID}
 	}
 	updates = append(updates, newMsg)
-	if res.SenderStarsBalance != nil && res.Message.SenderUserID == userID {
-		updates = append(updates, &tg.UpdateStarsBalance{
-			Balance: &tg.StarsAmount{Amount: res.SenderStarsBalance.Balance},
-		})
-	}
 	date := int(r.clock.Now().Unix())
 	if res.Duplicate && res.ReplayDeleteEvent != nil {
 		if deleted := tgChannelUpdate(userID, *res.ReplayDeleteEvent); deleted != nil {

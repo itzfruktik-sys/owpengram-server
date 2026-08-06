@@ -76,10 +76,9 @@ func TestMonoforumManagerRequiresManageDirectMessages(t *testing.T) {
 	}
 }
 
-func TestSuggestedPostStarsApprovalRefundAndSettlement(t *testing.T) {
+func TestSuggestedPostApprovalRefundAndSettlement(t *testing.T) {
 	ctx := context.Background()
 	store, parent, mono, subscriber := newSuggestedPostMemoryFixture(t)
-	store.starsBalances[subscriber.ID] = 100
 
 	suggestion, err := store.SendMonoforumMessage(ctx, domain.SendMonoforumMessageRequest{MonoforumID: mono.ID, SenderUserID: subscriber.ID, SavedPeer: subscriber, RandomID: 11, Message: "publish me", SuggestedPost: &domain.SuggestedPost{Price: &domain.SuggestedPostPrice{Kind: domain.SuggestedPostPriceStars, Amount: 10}}, Date: 1_700_000_100})
 	if err != nil {
@@ -89,22 +88,22 @@ func TestSuggestedPostStarsApprovalRefundAndSettlement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if approved.State != domain.SuggestedPostStatePublished || approved.OriginalEvent.Type != domain.ChannelUpdateEditMessage || approved.ServiceMessage.Action == nil || approved.ServiceMessage.Action.Type != domain.ChannelActionSuggestedPostApproval || approved.Published == nil {
+	if approved.State != domain.SuggestedPostStateCompleted || approved.OriginalEvent.Type != domain.ChannelUpdateEditMessage || approved.ServiceMessage.Action == nil || approved.ServiceMessage.Action.Type != domain.ChannelActionSuggestedPostApproval || approved.Published == nil {
 		t.Fatalf("approval result=%+v", approved)
 	}
 	if approved.OriginalMessage.SuggestedPost.ScheduleDate != 1_700_000_200 || approved.ServiceMessage.Action.SuggestedPostScheduleDate != 1_700_000_200 {
 		t.Fatalf("immediate approval dates original/action=%d/%d, want commit date", approved.OriginalMessage.SuggestedPost.ScheduleDate, approved.ServiceMessage.Action.SuggestedPostScheduleDate)
 	}
-	if store.starsBalances[subscriber.ID] != 90 || store.channelStarsBalances[parent.ID] != 0 {
-		t.Fatalf("escrow/channel balances=%d/%d, want 90/0", store.starsBalances[subscriber.ID], store.channelStarsBalances[parent.ID])
-	}
 	duplicate, err := store.ToggleSuggestedPostApproval(ctx, domain.ToggleSuggestedPostApprovalRequest{UserID: 1, MonoforumID: mono.ID, MessageID: suggestion.Message.ID, Date: 1_700_000_201})
-	if err != nil || !duplicate.Duplicate || store.starsBalances[subscriber.ID] != 90 {
-		t.Fatalf("duplicate=%+v err=%v balance=%d", duplicate, err, store.starsBalances[subscriber.ID])
+	if err != nil || !duplicate.Duplicate {
+		t.Fatalf("duplicate=%+v err=%v", duplicate, err)
 	}
 	if duplicate.OriginalMessage.SuggestedPost.ScheduleDate != 1_700_000_200 || duplicate.ServiceMessage.Action.SuggestedPostScheduleDate != 1_700_000_200 {
 		t.Fatalf("duplicate changed immediate approval date: %+v", duplicate)
 	}
+	// An immediate approval is already terminal (Completed): there is nothing
+	// left to settle, so deleting the published post afterwards must not
+	// surface it again through the lifecycle worker.
 	store.mu.Lock()
 	for i := range store.messages[parent.ID] {
 		if store.messages[parent.ID][i].ID == approved.Published.Message.ID {
@@ -112,54 +111,59 @@ func TestSuggestedPostStarsApprovalRefundAndSettlement(t *testing.T) {
 		}
 	}
 	store.mu.Unlock()
-	lifecycle, err := store.ProcessSuggestedPostLifecycle(ctx, domain.SuggestedPostLifecycleRequest{Now: 1_700_000_300, Limit: 10})
-	if err != nil || len(lifecycle) != 1 || lifecycle[0].State != domain.SuggestedPostStateRefunded || lifecycle[0].ServiceMessage.Action.Type != domain.ChannelActionSuggestedPostRefund {
-		t.Fatalf("refund lifecycle=%+v err=%v", lifecycle, err)
-	}
-	if store.starsBalances[subscriber.ID] != 100 || store.channelStarsBalances[parent.ID] != 0 {
-		t.Fatalf("refund balances=%d/%d, want 100/0", store.starsBalances[subscriber.ID], store.channelStarsBalances[parent.ID])
+	if lifecycle, err := store.ProcessSuggestedPostLifecycle(ctx, domain.SuggestedPostLifecycleRequest{Now: 1_700_000_300, Limit: 10}); err != nil || len(lifecycle) != 0 {
+		t.Fatalf("already-completed post must not be revisited: lifecycle=%+v err=%v", lifecycle, err)
 	}
 
-	second, err := store.SendMonoforumMessage(ctx, domain.SendMonoforumMessageRequest{MonoforumID: mono.ID, SenderUserID: subscriber.ID, SavedPeer: subscriber, RandomID: 12, Message: "settle me", SuggestedPost: &domain.SuggestedPost{Price: &domain.SuggestedPostPrice{Kind: domain.SuggestedPostPriceStars, Amount: 20}}, Date: 1_700_000_400})
+	// A scheduled (not-yet-due) approval still refunds via the lifecycle
+	// worker if the suggestion is deleted before its publish date.
+	second, err := store.SendMonoforumMessage(ctx, domain.SendMonoforumMessageRequest{MonoforumID: mono.ID, SenderUserID: subscriber.ID, SavedPeer: subscriber, RandomID: 12, Message: "cancel scheduled", SuggestedPost: &domain.SuggestedPost{Price: &domain.SuggestedPostPrice{Kind: domain.SuggestedPostPriceStars, Amount: 20}}, Date: 1_700_000_400})
 	if err != nil {
 		t.Fatal(err)
 	}
-	settling, err := store.ToggleSuggestedPostApproval(ctx, domain.ToggleSuggestedPostApprovalRequest{UserID: 1, MonoforumID: mono.ID, MessageID: second.Message.ID, Date: 1_700_000_500})
-	if err != nil || settling.State != domain.SuggestedPostStatePublished {
-		t.Fatalf("second approval=%+v err=%v", settling, err)
+	scheduled, err := store.ToggleSuggestedPostApproval(ctx, domain.ToggleSuggestedPostApprovalRequest{UserID: 1, MonoforumID: mono.ID, MessageID: second.Message.ID, ScheduleDate: 1_700_000_900, Date: 1_700_000_401})
+	if err != nil || scheduled.State != domain.SuggestedPostStateScheduled {
+		t.Fatalf("scheduled approval=%+v err=%v", scheduled, err)
 	}
-	lifecycle, err = store.ProcessSuggestedPostLifecycle(ctx, domain.SuggestedPostLifecycleRequest{Now: 1_700_000_500 + suggestedPostSettlementAge, Limit: 10})
-	if err != nil || len(lifecycle) != 1 || lifecycle[0].State != domain.SuggestedPostStateCompleted || lifecycle[0].ServiceMessage.Action.Type != domain.ChannelActionSuggestedPostSuccess {
-		t.Fatalf("success lifecycle=%+v err=%v", lifecycle, err)
+	store.mu.Lock()
+	for i := range store.messages[mono.ID] {
+		if store.messages[mono.ID][i].ID == second.Message.ID {
+			store.messages[mono.ID][i].Deleted = true
+		}
 	}
-	if store.starsBalances[subscriber.ID] != 80 || store.channelStarsBalances[parent.ID] != 17 {
-		t.Fatalf("settled balances=%d/%d, want 80/17", store.starsBalances[subscriber.ID], store.channelStarsBalances[parent.ID])
+	store.mu.Unlock()
+	lifecycle, err := store.ProcessSuggestedPostLifecycle(ctx, domain.SuggestedPostLifecycleRequest{Now: 1_700_000_500, Limit: 10})
+	if err != nil || len(lifecycle) != 1 || lifecycle[0].State != domain.SuggestedPostStateRefunded {
+		t.Fatalf("refund lifecycle=%+v err=%v", lifecycle, err)
+	}
+
+	third, err := store.SendMonoforumMessage(ctx, domain.SendMonoforumMessageRequest{MonoforumID: mono.ID, SenderUserID: subscriber.ID, SavedPeer: subscriber, RandomID: 13, Message: "settle me", SuggestedPost: &domain.SuggestedPost{Price: &domain.SuggestedPostPrice{Kind: domain.SuggestedPostPriceStars, Amount: 20}}, Date: 1_700_000_600})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settling, err := store.ToggleSuggestedPostApproval(ctx, domain.ToggleSuggestedPostApprovalRequest{UserID: 1, MonoforumID: mono.ID, MessageID: third.Message.ID, Date: 1_700_000_700})
+	if err != nil || settling.State != domain.SuggestedPostStateCompleted {
+		t.Fatalf("third approval=%+v err=%v", settling, err)
 	}
 }
 
-func TestSuggestedPostLowBalanceRetryScheduleAndRoleMatrix(t *testing.T) {
+func TestSuggestedPostScheduleRetryAndRoleMatrix(t *testing.T) {
 	ctx := context.Background()
 	store, parent, mono, subscriber := newSuggestedPostMemoryFixture(t)
-	store.starsBalances[subscriber.ID] = 5
 	suggestion, err := store.SendMonoforumMessage(ctx, domain.SendMonoforumMessageRequest{MonoforumID: mono.ID, SenderUserID: subscriber.ID, SavedPeer: subscriber, RandomID: 21, Message: "later", SuggestedPost: &domain.SuggestedPost{Price: &domain.SuggestedPostPrice{Kind: domain.SuggestedPostPriceStars, Amount: 10}}, Date: 1_700_001_000})
 	if err != nil {
 		t.Fatal(err)
 	}
-	low, err := store.ToggleSuggestedPostApproval(ctx, domain.ToggleSuggestedPostApprovalRequest{UserID: 1, MonoforumID: mono.ID, MessageID: suggestion.Message.ID, ScheduleDate: 1_700_001_400, Date: 1_700_001_000})
-	if err != nil || low.State != domain.SuggestedPostStateBalanceLow || low.ServiceMessage.Action == nil || !low.ServiceMessage.Action.SuggestedPostBalanceTooLow {
-		t.Fatalf("low=%+v err=%v", low, err)
-	}
-	again, err := store.ToggleSuggestedPostApproval(ctx, domain.ToggleSuggestedPostApprovalRequest{UserID: 1, MonoforumID: mono.ID, MessageID: suggestion.Message.ID, ScheduleDate: 1_700_001_400, Date: 1_700_001_001})
-	if err != nil || !again.Duplicate {
-		t.Fatalf("low retry=%+v err=%v", again, err)
-	}
-	store.starsBalances[subscriber.ID] = 20
 	accepted, err := store.ToggleSuggestedPostApproval(ctx, domain.ToggleSuggestedPostApprovalRequest{UserID: 1, MonoforumID: mono.ID, MessageID: suggestion.Message.ID, ScheduleDate: 1_700_001_400, Date: 1_700_001_050})
 	if err != nil || accepted.State != domain.SuggestedPostStateScheduled || accepted.Published != nil {
 		t.Fatalf("scheduled=%+v err=%v", accepted, err)
 	}
+	again, err := store.ToggleSuggestedPostApproval(ctx, domain.ToggleSuggestedPostApprovalRequest{UserID: 1, MonoforumID: mono.ID, MessageID: suggestion.Message.ID, ScheduleDate: 1_700_001_400, Date: 1_700_001_051})
+	if err != nil || !again.Duplicate {
+		t.Fatalf("schedule retry=%+v err=%v", again, err)
+	}
 	due, err := store.ProcessSuggestedPostLifecycle(ctx, domain.SuggestedPostLifecycleRequest{Now: 1_700_001_400, Limit: 10})
-	if err != nil || len(due) != 1 || due[0].Published == nil || due[0].State != domain.SuggestedPostStatePublished {
+	if err != nil || len(due) != 1 || due[0].Published == nil || due[0].State != domain.SuggestedPostStateCompleted {
 		t.Fatalf("due=%+v err=%v", due, err)
 	}
 
@@ -277,8 +281,7 @@ func TestChannelAuthoredSuggestedPostAcceptedBySubscriber(t *testing.T) {
 
 func TestScheduledSuggestedPostDeletionRefundsBeforePublication(t *testing.T) {
 	ctx := context.Background()
-	store, parent, mono, subscriber := newSuggestedPostMemoryFixture(t)
-	store.starsBalances[subscriber.ID] = 30
+	store, _, mono, subscriber := newSuggestedPostMemoryFixture(t)
 	suggestion, err := store.SendMonoforumMessage(ctx, domain.SendMonoforumMessageRequest{MonoforumID: mono.ID, SenderUserID: subscriber.ID, SavedPeer: subscriber, RandomID: 41, Message: "cancel scheduled", SuggestedPost: &domain.SuggestedPost{Price: &domain.SuggestedPostPrice{Kind: domain.SuggestedPostPriceStars, Amount: 10}}, Date: 1_700_004_000})
 	if err != nil {
 		t.Fatal(err)
@@ -297,9 +300,6 @@ func TestScheduledSuggestedPostDeletionRefundsBeforePublication(t *testing.T) {
 	resolved, err := store.ProcessSuggestedPostLifecycle(ctx, domain.SuggestedPostLifecycleRequest{Now: 1_700_004_100, Limit: 10})
 	if err != nil || len(resolved) != 1 || resolved[0].State != domain.SuggestedPostStateRefunded || resolved[0].Published != nil {
 		t.Fatalf("resolved=%+v err=%v", resolved, err)
-	}
-	if store.starsBalances[subscriber.ID] != 30 || store.channelStarsBalances[parent.ID] != 0 {
-		t.Fatalf("balances=%d/%d", store.starsBalances[subscriber.ID], store.channelStarsBalances[parent.ID])
 	}
 }
 
@@ -332,28 +332,9 @@ func TestSuggestedPostLifecycleFailsFastOnCorruptAcceptedState(t *testing.T) {
 	}
 }
 
-func TestSuggestedPostDeletedAfterMinimumAgeStillSettles(t *testing.T) {
-	ctx := context.Background()
-	store, parent, mono, subscriber := newSuggestedPostMemoryFixture(t)
-	store.starsBalances[subscriber.ID] = 30
-	suggestion, err := store.SendMonoforumMessage(ctx, domain.SendMonoforumMessageRequest{MonoforumID: mono.ID, SenderUserID: subscriber.ID, SavedPeer: subscriber, RandomID: 51, Message: "late delete", SuggestedPost: &domain.SuggestedPost{Price: &domain.SuggestedPostPrice{Kind: domain.SuggestedPostPriceStars, Amount: 10}}, Date: 1_700_005_000})
-	if err != nil {
-		t.Fatal(err)
-	}
-	approvedAt := 1_700_005_100
-	approved, err := store.ToggleSuggestedPostApproval(ctx, domain.ToggleSuggestedPostApprovalRequest{UserID: 1, MonoforumID: mono.ID, MessageID: suggestion.Message.ID, Date: approvedAt})
-	if err != nil || approved.Published == nil {
-		t.Fatalf("approved=%+v err=%v", approved, err)
-	}
-	due := approvedAt + suggestedPostSettlementAge
-	if _, err := store.DeleteChannelMessages(ctx, domain.DeleteChannelMessagesRequest{UserID: 1, ChannelID: parent.ID, IDs: []int{approved.Published.Message.ID}, Date: due + 1}); err != nil {
-		t.Fatal(err)
-	}
-	resolved, err := store.ProcessSuggestedPostLifecycle(ctx, domain.SuggestedPostLifecycleRequest{Now: due + 2, Limit: 10})
-	if err != nil || len(resolved) != 1 || resolved[0].State != domain.SuggestedPostStateCompleted || resolved[0].ServiceMessage.Action == nil || resolved[0].ServiceMessage.Action.Type != domain.ChannelActionSuggestedPostSuccess {
-		t.Fatalf("resolved=%+v err=%v", resolved, err)
-	}
-	if store.starsBalances[subscriber.ID] != 20 || store.channelStarsBalances[parent.ID] != 8 {
-		t.Fatalf("balances=%d/%d, want 20/8", store.starsBalances[subscriber.ID], store.channelStarsBalances[parent.ID])
-	}
-}
+// An immediately-approved suggested post is terminal (Completed) the moment
+// it is published -- there is no settlement window anymore (telesrv has no
+// Stars economy, so nothing is ever collected that would need settling).
+// Deleting the published post afterwards is therefore a no-op for the
+// suggested-post lifecycle; see TestSuggestedPostApprovalRefundAndSettlement
+// for that assertion.

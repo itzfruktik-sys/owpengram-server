@@ -561,7 +561,7 @@ func (s *UserStore) UpdateEmojiStatus(ctx context.Context, userID int64, status 
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.User{}, domain.ErrUserNotFound
 		}
-		if errors.Is(err, domain.ErrStarGiftCollectibleInvalid) {
+		if errors.Is(err, domain.ErrEmojiStatusCollectibleInvalid) {
 			return domain.User{}, err
 		}
 		return domain.User{}, fmt.Errorf("update user emoji status: %w", err)
@@ -580,7 +580,7 @@ func (s *UserStore) UpdateEmojiStatusWithEvent(ctx context.Context, userID int64
 	}
 	if event.Type != domain.UpdateEventUserEmojiStatus || event.EmojiStatus != status ||
 		event.Peer != (domain.Peer{Type: domain.PeerTypeUser, ID: userID}) {
-		return domain.User{}, domain.UpdateEvent{}, domain.ErrStarGiftCollectibleInvalid
+		return domain.User{}, domain.UpdateEvent{}, domain.ErrEmojiStatusCollectibleInvalid
 	}
 	params := sqlcgen.UpdateUserEmojiStatusParams{
 		ID:                       userID,
@@ -604,7 +604,7 @@ func (s *UserStore) UpdateEmojiStatusWithEvent(ctx context.Context, userID int64
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.User{}, domain.UpdateEvent{}, domain.ErrUserNotFound
 		}
-		if errors.Is(err, domain.ErrStarGiftCollectibleInvalid) {
+		if errors.Is(err, domain.ErrEmojiStatusCollectibleInvalid) {
 			return domain.User{}, domain.UpdateEvent{}, err
 		}
 		return domain.User{}, domain.UpdateEvent{}, fmt.Errorf("update user emoji status with event: %w", err)
@@ -613,24 +613,10 @@ func (s *UserStore) UpdateEmojiStatusWithEvent(ctx context.Context, userID int64
 }
 
 func updateEmojiStatusRow(ctx context.Context, db sqlcgen.DBTX, q *sqlcgen.Queries, userID int64, status domain.UserEmojiStatus, params sqlcgen.UpdateUserEmojiStatusParams) (sqlcgen.User, error) {
+	// telesrv has no collectible-gift ownership left to verify against, so a
+	// collectible emoji status can never be legitimately set.
 	if !status.Collectible.Empty() {
-		var lockedID int64
-		if err := db.QueryRow(ctx, `
-SELECT id FROM unique_star_gifts WHERE id=$1 FOR UPDATE`, status.Collectible.CollectibleID).Scan(&lockedID); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return sqlcgen.User{}, domain.ErrStarGiftCollectibleInvalid
-			}
-			return sqlcgen.User{}, err
-		}
-		gift, found, err := NewStarGiftStore(db).UniqueByID(ctx, lockedID)
-		if err != nil {
-			return sqlcgen.User{}, err
-		}
-		expected, valid := domain.CollectibleEmojiStatus(gift)
-		if !found || !valid || gift.Owner != (domain.Peer{Type: domain.PeerTypeUser, ID: userID}) ||
-			gift.Burned || gift.OwnerAddress != "" || expected != status.Collectible {
-			return sqlcgen.User{}, domain.ErrStarGiftCollectibleInvalid
-		}
+		return sqlcgen.User{}, domain.ErrEmojiStatusCollectibleInvalid
 	}
 	return q.UpdateUserEmojiStatus(ctx, params)
 }
@@ -769,7 +755,7 @@ func userFromModel(r sqlcgen.User) domain.User {
 
 func encodeEmojiStatusCollectible(status domain.UserEmojiStatus) ([]byte, *int64, error) {
 	if !status.Valid() {
-		return nil, nil, domain.ErrStarGiftCollectibleInvalid
+		return nil, nil, domain.ErrEmojiStatusCollectibleInvalid
 	}
 	if status.Collectible.Empty() {
 		return []byte(`{}`), nil, nil

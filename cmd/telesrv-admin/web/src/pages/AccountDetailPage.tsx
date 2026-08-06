@@ -1,4 +1,4 @@
-import { ArrowLeft, BadgeCheck, CircleAlert, ImagePlus, MonitorSmartphone, ScrollText, Settings2, Sparkles, Star, UserRound } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CircleAlert, ImagePlus, MonitorSmartphone, ScrollText, Settings2, Sparkles, UserRound } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, errorMessage } from "../api";
 import { AvatarModal } from "../components/AvatarModal";
@@ -20,7 +20,6 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>("profile");
   const [months, setMonths] = useState("1");
-  const [starsAmount, setStarsAmount] = useState("1000");
   const [freezeUntil, setFreezeUntil] = useState(() => toDateTimeLocal(new Date(Date.now() + 7 * 86400_000)));
   const [freezeAppealURL, setFreezeAppealURL] = useState("");
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
@@ -123,7 +122,6 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
             <Summary label={"User ID"} value={String(account.ID)} mono />
             <Summary label={"Last active"} value={formatUnix(detail.LastSeenAt) || "-"} />
             <Summary label={"Premium expires"} value={account.PremiumUntil > 0 ? formatUnix(account.PremiumUntil) : "None"} />
-            <Summary label={"Stars balance"} value={`${detail.StarsBalance} / ${detail.StarsGranted ? "initial grant applied" : "initial grant pending"}`} />
             <Summary label={"Updated"} value={formatDate(account.UpdatedAt) || "-"} />
             <Summary label={"Authorized devices"} value={String(detail.Authorizations.length)} />
             <Summary label={"Account flags"} value={`support=${detail.Support} bot=${detail.Bot}`} />
@@ -197,7 +195,7 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
             </section>
 
             <section className="section-block">
-              <SectionHead title={"Premium & Stars"} />
+              <SectionHead title={"Premium"} />
               <div className="card-body">
                 <div className="attr-block">
                   <label className="duration-field">
@@ -229,27 +227,6 @@ export function AccountDetailPage({ id, navigate }: { id: number; navigate: Navi
                       onDone={load}
                     />
                   </div>
-                </div>
-                <div className="attr-block">
-                  <label className="duration-field">
-                    <span>{"Stars to grant"}</span>
-                    <input
-                      aria-label={"Set Stars amount to grant"}
-                      value={starsAmount}
-                      onChange={(event) => setStarsAmount(event.target.value)}
-                      type="number"
-                      min="1"
-                      max="1000000000"
-                    />
-                  </label>
-                  <ActionButton
-                    label={"Grant Stars"}
-                    icon={<Star size={15} />}
-                    tone="warn"
-                    path="/api/actions/grant-stars"
-                    payload={() => ({ user_id: account.ID, amount: toInt(starsAmount) })}
-                    onDone={load}
-                  />
                 </div>
               </div>
             </section>

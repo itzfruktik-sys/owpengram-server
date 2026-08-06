@@ -903,15 +903,6 @@ func (r *Router) registerMessages(d *tlprofile.Dispatcher) {
 		return r.onMessagesSetDefaultReaction(ctx, layerRequest.
 			Reaction)
 	})
-	registerRPC[*tg.MessagesGetPaidReactionPrivacyRequest](d, tlprofile.SemanticMethodMessagesGetPaidReactionPrivacy, func(ctx context.Context, layerRequest *tg.MessagesGetPaidReactionPrivacyRequest) (any, error) {
-		return r.onMessagesGetPaidReactionPrivacy(ctx)
-	})
-	registerRPC[*tg.MessagesTogglePaidReactionPrivacyRequest](d, tlprofile.SemanticMethodMessagesTogglePaidReactionPrivacy, func(ctx context.Context, layerRequest *tg.MessagesTogglePaidReactionPrivacyRequest) (any, error) {
-		return r.onMessagesTogglePaidReactionPrivacy(ctx, layerRequest)
-	})
-	registerRPC[*tg.MessagesSendPaidReactionRequest](d, tlprofile.SemanticMethodMessagesSendPaidReaction, func(ctx context.Context, layerRequest *tg.MessagesSendPaidReactionRequest) (any, error) {
-		return r.onMessagesSendPaidReaction(ctx, layerRequest)
-	})
 	registerRPC[*tg.MessagesDeleteParticipantReactionsRequest](d, tlprofile.SemanticMethodMessagesDeleteParticipantReactions, func(ctx context.Context, layerRequest *tg.MessagesDeleteParticipantReactionsRequest) (any, error) {
 		return r.onMessagesDeleteParticipantReactions(ctx, layerRequest)
 	})

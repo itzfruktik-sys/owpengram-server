@@ -17,8 +17,6 @@ import (
 
 	"telesrv/internal/admin"
 	"telesrv/internal/domain"
-	"telesrv/internal/officialgifts"
-	"telesrv/internal/seed/giftdemo"
 )
 
 type Config struct {
@@ -44,7 +42,6 @@ type Service interface {
 	AccountAvatar(ctx context.Context, userID int64) ([]byte, string, bool, error)
 	SetAccountFrozen(ctx context.Context, req admin.SetAccountFrozenRequest) (admin.CommandResult, error)
 	GrantPremium(ctx context.Context, req admin.GrantPremiumRequest) (admin.CommandResult, error)
-	GrantStars(ctx context.Context, req admin.GrantStarsRequest) (admin.CommandResult, error)
 	SetVerified(ctx context.Context, req admin.SetVerifiedRequest) (admin.CommandResult, error)
 	SetUserFlags(ctx context.Context, req admin.SetUserFlagsRequest) (admin.CommandResult, error)
 	SetChannelVerified(ctx context.Context, req admin.SetChannelVerifiedRequest) (admin.CommandResult, error)
@@ -70,18 +67,6 @@ type Service interface {
 	RevokeSessions(ctx context.Context, req admin.RevokeSessionsRequest) (admin.CommandResult, error)
 	DeletePrivateMessages(ctx context.Context, req admin.DeletePrivateMessagesRequest) (admin.CommandResult, error)
 	DeletePrivateHistory(ctx context.Context, req admin.DeletePrivateHistoryRequest) (admin.CommandResult, error)
-	ImportStarGift(ctx context.Context, req admin.ImportStarGiftRequest) (admin.CommandResult, error)
-	ImportDefaultStarGift(ctx context.Context, req admin.ImportDefaultStarGiftRequest) (admin.CommandResult, error)
-	ImportAllDefaultStarGifts(ctx context.Context, req admin.ImportAllDefaultStarGiftsRequest) (admin.CommandResult, error)
-	DefaultStarGifts() []giftdemo.GiftInfo
-	DefaultStarGiftAnimation(ctx context.Context, id int) ([]byte, bool, error)
-	ImportOfficialStarGift(ctx context.Context, req admin.ImportOfficialStarGiftRequest) (admin.CommandResult, error)
-	ImportAllOfficialStarGifts(ctx context.Context, req admin.ImportAllOfficialStarGiftsRequest) (admin.CommandResult, error)
-	OfficialStarGifts(ctx context.Context) ([]officialgifts.GiftSummary, error)
-	OfficialStarGiftAnimation(ctx context.Context, sourceGiftID string) ([]byte, bool, error)
-	PublishStarGiftCollectibles(ctx context.Context, req admin.PublishStarGiftCollectiblesRequest) (admin.CommandResult, error)
-	SetStarGiftEnabled(ctx context.Context, req admin.SetStarGiftEnabledRequest) (admin.CommandResult, error)
-	SetStarGiftSortOrder(ctx context.Context, req admin.SetStarGiftSortOrderRequest) (admin.CommandResult, error)
 	SetStickerSetArchived(ctx context.Context, req admin.SetStickerSetArchivedRequest) (admin.CommandResult, error)
 	SetStickerSetSortOrder(ctx context.Context, req admin.SetStickerSetSortOrderRequest) (admin.CommandResult, error)
 	RenameStickerSet(ctx context.Context, req admin.RenameStickerSetRequest) (admin.CommandResult, error)
@@ -90,11 +75,7 @@ type Service interface {
 	AddStickerToSet(ctx context.Context, req admin.AddStickerToSetRequest) (admin.CommandResult, error)
 	RemoveStickerFromSet(ctx context.Context, req admin.RemoveStickerFromSetRequest) (admin.CommandResult, error)
 	StickerDocumentAnimation(ctx context.Context, documentID int64) ([]byte, string, bool, error)
-	GiveGift(ctx context.Context, req admin.GiveGiftRequest) (admin.CommandResult, error)
-	StarGiftAnimation(ctx context.Context, giftID int64) ([]byte, bool, error)
 	EmojiAnimation(ctx context.Context, documentID int64) ([]byte, bool, error)
-	StarGiftCollectibles(ctx context.Context, giftID int64) (domain.StarGiftUpgradePreview, bool, error)
-	StarGiftCollectibleAnimation(ctx context.Context, giftID int64, kind domain.StarGiftCollectibleAttributeKind, attributeID int64) ([]byte, bool, error)
 	ModerationCases(ctx context.Context, filter domain.ModerationCaseFilter) ([]domain.ModerationCase, error)
 	ModerationCase(ctx context.Context, caseID int64) (domain.ModerationCaseDetail, bool, error)
 	ModerationReport(ctx context.Context, reportID int64) (domain.ModerationReport, bool, error)
@@ -109,11 +90,6 @@ type Service interface {
 	CollectibleUsernames(ctx context.Context, filter domain.CollectibleUsernameFilter) ([]domain.CollectibleUsername, error)
 	CollectibleUsernameByID(ctx context.Context, id int64) (domain.CollectibleUsername, error)
 	CollectibleUsernameTransfers(ctx context.Context, collectibleID int64, limit int) ([]domain.CollectibleUsernameTransfer, error)
-	RecomputeAccountRating(ctx context.Context, req admin.RecomputeAccountRatingRequest) (admin.CommandResult, error)
-	AdjustAccountRating(ctx context.Context, req admin.AdjustAccountRatingRequest) (admin.CommandResult, error)
-	AccountRating(ctx context.Context, userID int64) (domain.AccountRating, error)
-	AccountRatings(ctx context.Context, filter domain.AccountRatingFilter) ([]domain.AccountRating, error)
-	AccountRatingEvents(ctx context.Context, userID int64, limit int) ([]domain.AccountRatingEvent, error)
 	ClaimVerification(ctx context.Context, req admin.ClaimVerificationRequest) (admin.CommandResult, error)
 	ApproveVerification(ctx context.Context, req admin.ApproveVerificationRequest) (admin.CommandResult, error)
 	RejectVerification(ctx context.Context, req admin.RejectVerificationRequest) (admin.CommandResult, error)
@@ -195,7 +171,6 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/accounts/set-frozen", s.authenticated(s.handleSetAccountFrozen))
 	mux.HandleFunc("GET /v1/accounts/{id}/avatar", s.authenticated(s.handleAccountAvatar))
 	mux.HandleFunc("POST /v1/accounts/grant-premium", s.authenticated(s.handleGrantPremium))
-	mux.HandleFunc("POST /v1/accounts/grant-stars", s.authenticated(s.handleGrantStars))
 	mux.HandleFunc("POST /v1/accounts/set-verified", s.authenticated(s.handleSetVerified))
 	mux.HandleFunc("POST /v1/accounts/set-flags", s.authenticated(s.handleSetUserFlags))
 	mux.HandleFunc("POST /v1/accounts/set-support", s.authenticated(s.handleSetSupport))
@@ -221,18 +196,6 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/bots/export-token", s.authenticated(s.handleExportBotToken))
 	mux.HandleFunc("POST /v1/messages/delete", s.authenticated(s.handleDeleteMessages))
 	mux.HandleFunc("POST /v1/messages/delete-history", s.authenticated(s.handleDeleteHistory))
-	mux.HandleFunc("POST /v1/gifts/import", s.authenticated(s.handleImportStarGift))
-	mux.HandleFunc("GET /v1/default-gifts", s.authenticated(s.handleDefaultStarGifts))
-	mux.HandleFunc("GET /v1/default-gifts/{id}/animation", s.authenticated(s.handleDefaultStarGiftAnimation))
-	mux.HandleFunc("POST /v1/default-gifts/import", s.authenticated(s.handleImportDefaultStarGift))
-	mux.HandleFunc("POST /v1/default-gifts/import-all", s.authenticated(s.handleImportAllDefaultStarGifts))
-	mux.HandleFunc("GET /v1/official-gifts", s.authenticated(s.handleOfficialStarGifts))
-	mux.HandleFunc("GET /v1/official-gifts/{id}/animation", s.authenticated(s.handleOfficialStarGiftAnimation))
-	mux.HandleFunc("POST /v1/official-gifts/import", s.authenticated(s.handleImportOfficialStarGift))
-	mux.HandleFunc("POST /v1/official-gifts/import-all", s.authenticated(s.handleImportAllOfficialStarGifts))
-	mux.HandleFunc("POST /v1/gifts/{id}/collectibles/publish", s.authenticated(s.handlePublishStarGiftCollectibles))
-	mux.HandleFunc("POST /v1/gifts/set-enabled", s.authenticated(s.handleSetStarGiftEnabled))
-	mux.HandleFunc("POST /v1/gifts/set-sort-order", s.authenticated(s.handleSetStarGiftSortOrder))
 	mux.HandleFunc("POST /v1/stickers/set-archived", s.authenticated(s.handleSetStickerSetArchived))
 	mux.HandleFunc("POST /v1/stickers/set-sort-order", s.authenticated(s.handleSetStickerSetSortOrder))
 	mux.HandleFunc("POST /v1/stickers/rename", s.authenticated(s.handleRenameStickerSet))
@@ -241,11 +204,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/stickers/add", s.authenticated(s.handleAddStickerToSet))
 	mux.HandleFunc("POST /v1/stickers/remove", s.authenticated(s.handleRemoveStickerFromSet))
 	mux.HandleFunc("GET /v1/stickers/documents/{id}/animation", s.authenticated(s.handleStickerDocumentAnimation))
-	mux.HandleFunc("POST /v1/gifts/give", s.authenticated(s.handleGiveGift))
-	mux.HandleFunc("GET /v1/gifts/{id}/animation", s.authenticated(s.handleStarGiftAnimation))
 	mux.HandleFunc("GET /v1/emoji/{id}/animation", s.authenticated(s.handleEmojiAnimation))
-	mux.HandleFunc("GET /v1/gifts/{id}/collectibles", s.authenticated(s.handleStarGiftCollectibles))
-	mux.HandleFunc("GET /v1/gifts/{id}/collectibles/{kind}/{attribute_id}/animation", s.authenticated(s.handleStarGiftCollectibleAnimation))
 	mux.HandleFunc("GET /v1/moderation/cases", s.authenticated(s.handleModerationCases))
 	mux.HandleFunc("GET /v1/moderation/cases/{id}", s.authenticated(s.handleModerationCase))
 	mux.HandleFunc("GET /v1/moderation/reports/{id}", s.authenticated(s.handleModerationReport))
@@ -259,10 +218,6 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/collectible-usernames/delete", s.authenticated(s.handleDeleteCollectibleUsername))
 	mux.HandleFunc("GET /v1/collectible-usernames", s.authenticated(s.handleCollectibleUsernames))
 	mux.HandleFunc("GET /v1/collectible-usernames/{id}", s.authenticated(s.handleCollectibleUsername))
-	mux.HandleFunc("POST /v1/account-ratings/recompute", s.authenticated(s.handleRecomputeAccountRating))
-	mux.HandleFunc("POST /v1/account-ratings/adjust", s.authenticated(s.handleAdjustAccountRating))
-	mux.HandleFunc("GET /v1/account-ratings", s.authenticated(s.handleAccountRatings))
-	mux.HandleFunc("GET /v1/account-ratings/{id}", s.authenticated(s.handleAccountRating))
 	// Official platform verification. Unlike every route above, these carry a
 	// named permission, so a scoped token can be given the review surface and
 	// nothing else. Revocation additionally requires verification.revoke.
@@ -334,15 +289,6 @@ func (s *Server) handleGrantPremium(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.svc.GrantPremium(r.Context(), req)
-	writeCommandResult(w, result, err)
-}
-
-func (s *Server) handleGrantStars(w http.ResponseWriter, r *http.Request) {
-	var req admin.GrantStarsRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	result, err := s.svc.GrantStars(r.Context(), req)
 	writeCommandResult(w, result, err)
 }
 
@@ -634,231 +580,6 @@ func (s *Server) handleDeleteHistory(w http.ResponseWriter, r *http.Request) {
 	writeCommandResult(w, result, err)
 }
 
-func (s *Server) handleImportStarGift(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, 5<<20)
-	if err := r.ParseMultipartForm(1 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid multipart form: "+err.Error())
-		return
-	}
-	if r.MultipartForm != nil {
-		defer r.MultipartForm.RemoveAll()
-	}
-	var req admin.ImportStarGiftRequest
-	dec := json.NewDecoder(strings.NewReader(r.FormValue("metadata")))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid metadata: "+err.Error())
-		return
-	}
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "animation file is required")
-		return
-	}
-	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, (4<<20)+1))
-	if err != nil || len(data) == 0 || len(data) > 4<<20 {
-		writeError(w, http.StatusBadRequest, "animation file is empty or too large")
-		return
-	}
-	req.FileName = header.Filename
-	req.Data = data
-	result, err := s.svc.ImportStarGift(r.Context(), req)
-	writeCommandResult(w, result, err)
-}
-
-func (s *Server) handleDefaultStarGifts(w http.ResponseWriter, r *http.Request) {
-	items := s.svc.DefaultStarGifts()
-	writeJSON(w, http.StatusOK, map[string]any{"gifts": items})
-}
-
-func (s *Server) handleDefaultStarGiftAnimation(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid gift id")
-		return
-	}
-	raw, found, err := s.svc.DefaultStarGiftAnimation(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if !found {
-		writeError(w, http.StatusNotFound, "default gift animation not found")
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "private, max-age=60")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(raw)
-}
-
-func (s *Server) handleImportDefaultStarGift(w http.ResponseWriter, r *http.Request) {
-	var req admin.ImportDefaultStarGiftRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	result, err := s.svc.ImportDefaultStarGift(r.Context(), req)
-	writeCommandResult(w, result, err)
-}
-
-func (s *Server) handleImportAllDefaultStarGifts(w http.ResponseWriter, r *http.Request) {
-	var req admin.ImportAllDefaultStarGiftsRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	result, err := s.svc.ImportAllDefaultStarGifts(r.Context(), req)
-	writeCommandResult(w, result, err)
-}
-
-func (s *Server) handleOfficialStarGifts(w http.ResponseWriter, r *http.Request) {
-	items, err := s.svc.OfficialStarGifts(r.Context())
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, officialgifts.ErrUnavailable) {
-			status = http.StatusServiceUnavailable
-		}
-		writeError(w, status, err.Error())
-		return
-	}
-	result := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		result = append(result, officialStarGiftListItem(item))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"gifts": result})
-}
-
-func officialStarGiftListItem(item officialgifts.GiftSummary) map[string]any {
-	return map[string]any{
-		"source_gift_id": strconv.FormatInt(item.ID, 10), "title": item.Title,
-		"stars": strconv.FormatInt(item.Stars, 10), "convert_stars": strconv.FormatInt(item.ConvertStars, 10),
-		"upgrade_stars":      strconv.FormatInt(item.UpgradeStars, 10),
-		"availability_total": item.AvailabilityTotal, "limited": item.Limited, "sold_out": item.SoldOut,
-		"model_count": item.ModelCount, "pattern_count": item.PatternCount, "backdrop_count": item.BackdropCount,
-		"crafted_model_count": item.CraftedModelCount, "can_upgrade": item.CanUpgrade(), "can_craft": item.CanCraft(),
-		"document_id": strconv.FormatInt(item.DocumentID, 10), "animation_validated": item.AnimationValidated,
-	}
-}
-
-func (s *Server) handleOfficialStarGiftAnimation(w http.ResponseWriter, r *http.Request) {
-	raw, found, err := s.svc.OfficialStarGiftAnimation(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if !found {
-		writeError(w, http.StatusNotFound, "official gift animation not found")
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "private, max-age=60")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(raw)
-}
-
-func (s *Server) handleImportOfficialStarGift(w http.ResponseWriter, r *http.Request) {
-	var req admin.ImportOfficialStarGiftRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	result, err := s.svc.ImportOfficialStarGift(r.Context(), req)
-	writeCommandResult(w, result, err)
-}
-
-func (s *Server) handleImportAllOfficialStarGifts(w http.ResponseWriter, r *http.Request) {
-	var req admin.ImportAllOfficialStarGiftsRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	result, err := s.svc.ImportAllOfficialStarGifts(r.Context(), req)
-	writeCommandResult(w, result, err)
-}
-
-func (s *Server) handlePublishStarGiftCollectibles(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-	giftID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil || giftID <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid gift id")
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
-	if err := r.ParseMultipartForm(8 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid collectible multipart form: "+err.Error())
-		return
-	}
-	if r.MultipartForm != nil {
-		defer r.MultipartForm.RemoveAll()
-	}
-	var req admin.PublishStarGiftCollectiblesRequest
-	dec := json.NewDecoder(strings.NewReader(r.FormValue("metadata")))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid metadata: "+err.Error())
-		return
-	}
-	req.GiftID = giftID
-	seen := make(map[string]struct{}, len(req.Models)+len(req.Patterns))
-	if len(req.Models)+len(req.Patterns) > 128 {
-		writeError(w, http.StatusBadRequest, "too many collectible animation files")
-		return
-	}
-	load := func(upload *admin.StarGiftCollectibleAnimationUpload) error {
-		upload.FileKey = strings.TrimSpace(upload.FileKey)
-		if upload.FileKey == "" {
-			return fmt.Errorf("animation file key is required")
-		}
-		if _, ok := seen[upload.FileKey]; ok {
-			return fmt.Errorf("duplicate animation file key %q", upload.FileKey)
-		}
-		seen[upload.FileKey] = struct{}{}
-		file, header, err := r.FormFile(upload.FileKey)
-		if err != nil {
-			return fmt.Errorf("animation file %q is required", upload.FileKey)
-		}
-		defer file.Close()
-		data, err := io.ReadAll(io.LimitReader(file, (4<<20)+1))
-		if err != nil || len(data) == 0 || len(data) > 4<<20 {
-			return fmt.Errorf("animation file %q is empty or too large", upload.FileKey)
-		}
-		upload.FileName = header.Filename
-		upload.Data = data
-		return nil
-	}
-	for i := range req.Models {
-		if err := load(&req.Models[i]); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	for i := range req.Patterns {
-		if err := load(&req.Patterns[i]); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	result, err := s.svc.PublishStarGiftCollectibles(r.Context(), req)
-	writeCommandResult(w, result, err)
-}
-
-func (s *Server) handleSetStarGiftEnabled(w http.ResponseWriter, r *http.Request) {
-	var req admin.SetStarGiftEnabledRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	result, err := s.svc.SetStarGiftEnabled(r.Context(), req)
-	writeCommandResult(w, result, err)
-}
-
-func (s *Server) handleSetStarGiftSortOrder(w http.ResponseWriter, r *http.Request) {
-	var req admin.SetStarGiftSortOrderRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	result, err := s.svc.SetStarGiftSortOrder(r.Context(), req)
-	writeCommandResult(w, result, err)
-}
-
 func (s *Server) handleSetStickerSetArchived(w http.ResponseWriter, r *http.Request) {
 	var req admin.SetStickerSetArchivedRequest
 	if !decodeJSON(w, r, &req) {
@@ -993,36 +714,6 @@ func (s *Server) handleStickerDocumentAnimation(w http.ResponseWriter, r *http.R
 	_, _ = w.Write(raw)
 }
 
-func (s *Server) handleGiveGift(w http.ResponseWriter, r *http.Request) {
-	var req admin.GiveGiftRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	result, err := s.svc.GiveGift(r.Context(), req)
-	writeCommandResult(w, result, err)
-}
-
-func (s *Server) handleStarGiftAnimation(w http.ResponseWriter, r *http.Request) {
-	giftID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil || giftID <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid gift id")
-		return
-	}
-	raw, found, err := s.svc.StarGiftAnimation(r.Context(), giftID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if !found {
-		writeError(w, http.StatusNotFound, "gift animation not found")
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "private, max-age=60")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(raw)
-}
-
 func (s *Server) handleEmojiAnimation(w http.ResponseWriter, r *http.Request) {
 	documentID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || documentID <= 0 {
@@ -1036,86 +727,6 @@ func (s *Server) handleEmojiAnimation(w http.ResponseWriter, r *http.Request) {
 	}
 	if !found {
 		writeError(w, http.StatusNotFound, "emoji animation not found")
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "private, max-age=60")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(raw)
-}
-
-func (s *Server) handleStarGiftCollectibles(w http.ResponseWriter, r *http.Request) {
-	giftID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil || giftID <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid gift id")
-		return
-	}
-	preview, found, err := s.svc.StarGiftCollectibles(r.Context(), giftID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if !found {
-		writeJSON(w, http.StatusOK, map[string]any{"found": false, "gift_id": strconv.FormatInt(giftID, 10)})
-		return
-	}
-	writeJSON(w, http.StatusOK, collectiblePreviewResponse(preview))
-}
-
-func collectiblePreviewResponse(preview domain.StarGiftUpgradePreview) map[string]any {
-	attribute := func(value domain.StarGiftCollectibleAttribute) map[string]any {
-		result := map[string]any{
-			"id": strconv.FormatInt(value.ID, 10), "name": value.Name, "rarity_kind": value.RarityKind,
-			"rarity_permille": value.RarityPermille, "crafted": value.Crafted,
-			"official_document_id": strconv.FormatInt(value.OfficialDocumentID, 10),
-			"sort_order":           value.SortOrder, "kind": value.Kind,
-		}
-		if value.Animation != nil {
-			result["source_name"] = value.Animation.SourceName
-			result["source_format"] = value.Animation.SourceFormat
-		}
-		if value.Kind == domain.StarGiftCollectibleBackdrop {
-			result["backdrop_id"] = value.BackdropID
-			result["center_color"] = value.CenterColor
-			result["edge_color"] = value.EdgeColor
-			result["pattern_color"] = value.PatternColor
-			result["text_color"] = value.TextColor
-		}
-		return result
-	}
-	mapAttributes := func(values []domain.StarGiftCollectibleAttribute) []map[string]any {
-		result := make([]map[string]any, 0, len(values))
-		for _, value := range values {
-			result = append(result, attribute(value))
-		}
-		return result
-	}
-	return map[string]any{
-		"found": true, "gift_id": strconv.FormatInt(preview.GiftID, 10), "revision": preview.Revision,
-		"upgrade_stars": strconv.FormatInt(preview.UpgradeStars, 10),
-		"supply_total":  preview.SupplyTotal, "issued": preview.Issued,
-		"slug_prefix": preview.SlugPrefix,
-		"models":      mapAttributes(preview.Models), "patterns": mapAttributes(preview.Patterns),
-		"backdrops": mapAttributes(preview.Backdrops),
-	}
-}
-
-func (s *Server) handleStarGiftCollectibleAnimation(w http.ResponseWriter, r *http.Request) {
-	giftID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	attributeID, attrErr := strconv.ParseInt(r.PathValue("attribute_id"), 10, 64)
-	kind := domain.StarGiftCollectibleAttributeKind(r.PathValue("kind"))
-	if err != nil || giftID <= 0 || attrErr != nil || attributeID <= 0 ||
-		(kind != domain.StarGiftCollectibleModel && kind != domain.StarGiftCollectiblePattern) {
-		writeError(w, http.StatusBadRequest, "invalid collectible animation")
-		return
-	}
-	raw, found, err := s.svc.StarGiftCollectibleAnimation(r.Context(), giftID, kind, attributeID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if !found {
-		writeError(w, http.StatusNotFound, "collectible animation not found")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -1450,24 +1061,6 @@ func (s *Server) handleDeleteCollectibleUsername(w http.ResponseWriter, r *http.
 	writeCommandResult(w, result, err)
 }
 
-func (s *Server) handleRecomputeAccountRating(w http.ResponseWriter, r *http.Request) {
-	var req admin.RecomputeAccountRatingRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	result, err := s.svc.RecomputeAccountRating(r.Context(), req)
-	writeCommandResult(w, result, err)
-}
-
-func (s *Server) handleAdjustAccountRating(w http.ResponseWriter, r *http.Request) {
-	var req admin.AdjustAccountRatingRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	result, err := s.svc.AdjustAccountRating(r.Context(), req)
-	writeCommandResult(w, result, err)
-}
-
 func (s *Server) handleCollectibleUsernames(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	filter := domain.CollectibleUsernameFilter{
@@ -1530,66 +1123,6 @@ func (s *Server) handleCollectibleUsername(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"asset": collectibleUsernameResponse(asset), "transfers": log,
-	})
-}
-
-func (s *Server) handleAccountRatings(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-	minLevel, ok := optionalQueryInt(w, query, "min_level")
-	if !ok {
-		return
-	}
-	userID, ok := optionalQueryInt64(w, query, "user_id")
-	if !ok {
-		return
-	}
-	beforeID, ok := optionalQueryInt64(w, query, "before_id")
-	if !ok {
-		return
-	}
-	limit, ok := optionalQueryInt(w, query, "limit")
-	if !ok {
-		return
-	}
-	items, err := s.svc.AccountRatings(r.Context(), domain.AccountRatingFilter{
-		MinLevel: minLevel, UserID: userID, BeforeID: beforeID, Limit: limit,
-	})
-	if err != nil {
-		writeAccountRatingError(w, err)
-		return
-	}
-	ratings := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		ratings = append(ratings, accountRatingResponse(item))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ratings": ratings})
-}
-
-func (s *Server) handleAccountRating(w http.ResponseWriter, r *http.Request) {
-	userID, ok := moderationPathID(w, r, "id")
-	if !ok {
-		return
-	}
-	rating, err := s.svc.AccountRating(r.Context(), userID)
-	if err != nil {
-		writeAccountRatingError(w, err)
-		return
-	}
-	limit, ok := optionalQueryInt(w, r.URL.Query(), "limit")
-	if !ok {
-		return
-	}
-	events, err := s.svc.AccountRatingEvents(r.Context(), userID, limit)
-	if err != nil {
-		writeAccountRatingError(w, err)
-		return
-	}
-	ledger := make([]map[string]any, 0, len(events))
-	for _, item := range events {
-		ledger = append(ledger, accountRatingEventResponse(item))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"rating": accountRatingResponse(rating), "events": ledger,
 	})
 }
 
@@ -1695,50 +1228,6 @@ func collectibleUsernameTransferResponse(item domain.CollectibleUsernameTransfer
 
 // accountRatingResponse renders one composite rating. The score and every
 // component stay decimal strings for the same exactness reason as the asset ids.
-func accountRatingResponse(rating domain.AccountRating) map[string]any {
-	out := map[string]any{
-		"user_id":             strconv.FormatInt(rating.UserID, 10),
-		"level":               rating.Level,
-		"stars":               strconv.FormatInt(rating.Stars, 10),
-		"current_level_stars": strconv.FormatInt(rating.CurrentLevelStars, 10),
-		"has_next_level":      rating.HasNextLevel,
-		"stars_component":     strconv.FormatInt(rating.StarsComponent, 10),
-		"activity_component":  strconv.FormatInt(rating.ActivityComponent, 10),
-		"penalty_component":   strconv.FormatInt(rating.PenaltyComponent, 10),
-		"manual_component":    strconv.FormatInt(rating.ManualComponent, 10),
-		"pending_stars":       strconv.FormatInt(rating.PendingStars, 10),
-		"version":             strconv.FormatInt(rating.Version, 10),
-	}
-	if rating.HasNextLevel {
-		out["next_level_stars"] = strconv.FormatInt(rating.NextLevelStars, 10)
-	}
-	if !rating.PendingDate.IsZero() {
-		out["pending_date"] = rating.PendingDate.UTC().Format(time.RFC3339)
-	}
-	if !rating.ComputedAt.IsZero() {
-		out["computed_at"] = rating.ComputedAt.UTC().Format(time.RFC3339)
-	}
-	if !rating.UpdatedAt.IsZero() {
-		out["updated_at"] = rating.UpdatedAt.UTC().Format(time.RFC3339)
-	}
-	return out
-}
-
-func accountRatingEventResponse(event domain.AccountRatingEvent) map[string]any {
-	out := map[string]any{
-		"id":          strconv.FormatInt(event.ID, 10),
-		"user_id":     strconv.FormatInt(event.UserID, 10),
-		"kind":        string(event.Kind),
-		"amount":      strconv.FormatInt(event.Amount, 10),
-		"reason":      event.Reason,
-		"actor":       event.Actor,
-		"command_key": event.CommandKey,
-	}
-	if !event.CreatedAt.IsZero() {
-		out["created_at"] = event.CreatedAt.UTC().Format(time.RFC3339)
-	}
-	return out
-}
 
 // writeCollectibleUsernameError maps a collectible-username failure onto its
 // stable admin code and the matching HTTP status, the way writeModerationError
@@ -1755,18 +1244,6 @@ func writeCollectibleUsernameError(w http.ResponseWriter, err error) {
 		status = http.StatusConflict
 	case admin.CodeUsernameInvalid, admin.CodeUsernameNotCollectible,
 		admin.CodeCollectibleCurrencyInvalid, admin.CodeCollectibleStateInvalid:
-		status = http.StatusBadRequest
-	}
-	writeCodedError(w, status, code, err.Error())
-}
-
-func writeAccountRatingError(w http.ResponseWriter, err error) {
-	code := admin.AccountRatingErrorCode(err)
-	status := http.StatusInternalServerError
-	switch code {
-	case admin.CodeRatingNotFound:
-		status = http.StatusNotFound
-	case admin.CodeRatingAdjustmentInvalid, admin.CodeRatingWeightsInvalid:
 		status = http.StatusBadRequest
 	}
 	writeCodedError(w, status, code, err.Error())

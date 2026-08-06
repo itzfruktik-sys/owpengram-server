@@ -575,7 +575,7 @@ func (s *Service) RecordContactsReset(ctx context.Context, stateAuthKeyID [8]byt
 // to the account's other sessions and offline difference stream.
 func (s *Service) RecordUserEmojiStatus(ctx context.Context, stateAuthKeyID [8]byte, userID int64, status domain.UserEmojiStatus, excludeAuthKeyID [8]byte, excludeSessionID int64) (domain.UpdateEvent, domain.UpdateState, error) {
 	if !status.Valid() {
-		return domain.UpdateEvent{}, domain.UpdateState{}, domain.ErrStarGiftCollectibleInvalid
+		return domain.UpdateEvent{}, domain.UpdateState{}, domain.ErrEmojiStatusCollectibleInvalid
 	}
 	return s.recordEvent(ctx, stateAuthKeyID, excludeAuthKeyID, userID, domain.UpdateEvent{
 		Type:        domain.UpdateEventUserEmojiStatus,

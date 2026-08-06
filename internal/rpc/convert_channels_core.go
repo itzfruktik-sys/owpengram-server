@@ -304,10 +304,6 @@ func tgChannelMessageAction(action domain.ChannelMessageAction) tg.MessageAction
 			BroadcastMessagesAllowed: action.BroadcastMessagesAllowed,
 			Stars:                    action.Stars,
 		}
-	case domain.ChannelActionStarGift:
-		return tgMessageActionStarGift(action.StarGift)
-	case domain.ChannelActionStarGiftUnique:
-		return tgMessageActionStarGiftUnique(action.StarGiftUnique)
 	case domain.ChannelActionSetChatWallpaper:
 		if wallpaper := tgWallpaper(action.Wallpaper); wallpaper != nil {
 			return &tg.MessageActionSetChatWallPaper{Wallpaper: wallpaper}
@@ -648,19 +644,6 @@ func tgChannelFull(view domain.ChannelView, publicBaseURL ...string) *tg.Channel
 	}
 	if ch.ReactionPolicy.Limit > 0 {
 		full.SetReactionsLimit(ch.ReactionPolicy.Limit)
-	}
-	if ch.Broadcast && !ch.Megagroup {
-		// Android uses paid_media_allowed as the capability gate for showing the
-		// paid-reaction setting; paid_reactions_available below remains the saved
-		// on/off state.
-		full.SetPaidMediaAllowed(true)
-		full.SetStargiftsAvailable(true)
-	}
-	// paid_reactions_available reflects the saved chat policy, not mere broadcast
-	// capability. Android counts this flag as an extra available reaction in the
-	// settings row, so advertising it without paid_enabled corrupts the UI count.
-	if ch.Broadcast && !ch.Megagroup && ch.ReactionPolicy.PaidEnabled {
-		full.SetPaidReactionsAvailable(true)
 	}
 	return full
 }

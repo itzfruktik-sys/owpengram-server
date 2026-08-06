@@ -39,9 +39,6 @@ func TestSuggestedPostLifecyclePostgres(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM channels WHERE id=ANY($1::bigint[])`, []int64{monoID, created.Channel.ID})
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id=ANY($1::bigint[])`, []int64{owner.ID, subscriber.ID})
 	})
-	if _, err := pool.Exec(ctx, `INSERT INTO stars_balances(user_id,balance,granted) VALUES($1,100,true) ON CONFLICT(user_id) DO UPDATE SET balance=100,granted=true`, subscriber.ID); err != nil {
-		t.Fatal(err)
-	}
 	saved := domain.Peer{Type: domain.PeerTypeUser, ID: subscriber.ID}
 	suggestion, err := channels.SendMonoforumMessage(ctx, domain.SendMonoforumMessageRequest{MonoforumID: monoID, SenderUserID: subscriber.ID, SavedPeer: saved, RandomID: 71, Message: "postgres suggestion", SuggestedPost: &domain.SuggestedPost{Price: &domain.SuggestedPostPrice{Kind: domain.SuggestedPostPriceStars, Amount: 10}}, Date: 1_700_000_100})
 	if err != nil {
@@ -51,7 +48,7 @@ func TestSuggestedPostLifecyclePostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if approved.State != domain.SuggestedPostStatePublished || approved.Published == nil || approved.PayerStarsBalance == nil || approved.PayerStarsBalance.Balance != 90 {
+	if approved.State != domain.SuggestedPostStateCompleted || approved.Published == nil {
 		t.Fatalf("approved=%+v", approved)
 	}
 	if approved.OriginalMessage.SuggestedPost.ScheduleDate != 1_700_000_200 || approved.ServiceMessage.Action.SuggestedPostScheduleDate != 1_700_000_200 {
@@ -77,40 +74,39 @@ func TestSuggestedPostLifecyclePostgres(t *testing.T) {
 	}
 	var state string
 	var scheduleDate int
-	var debit, channelBalance int64
 	if err := pool.QueryRow(ctx, `SELECT state,schedule_date FROM suggested_post_approvals WHERE monoforum_id=$1 AND suggestion_message_id=$2`, monoID, suggestion.Message.ID).Scan(&state, &scheduleDate); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT balance FROM stars_balances WHERE user_id=$1`, subscriber.ID).Scan(&debit); err != nil {
-		t.Fatal(err)
-	}
-	_ = pool.QueryRow(ctx, `SELECT COALESCE((SELECT balance FROM channel_stars_balances WHERE channel_id=$1),0)`, created.Channel.ID).Scan(&channelBalance)
-	if state != string(domain.SuggestedPostStatePublished) || scheduleDate != 1_700_000_200 || debit != 90 || channelBalance != 0 {
-		t.Fatalf("state/schedule/debit/channel=%s/%d/%d/%d", state, scheduleDate, debit, channelBalance)
-	}
-	if _, err := pool.Exec(ctx, `UPDATE channel_messages SET deleted=true WHERE channel_id=$1 AND id=$2`, created.Channel.ID, approved.Published.Message.ID); err != nil {
-		t.Fatal(err)
-	}
-	resolved, err := channels.ProcessSuggestedPostLifecycle(ctx, domain.SuggestedPostLifecycleRequest{Now: 1_700_000_300, Limit: 10})
-	if err != nil || len(resolved) != 1 || resolved[0].State != domain.SuggestedPostStateRefunded || resolved[0].ServiceMessage.Action == nil || resolved[0].ServiceMessage.Action.Type != domain.ChannelActionSuggestedPostRefund {
-		t.Fatalf("refund=%+v err=%v", resolved, err)
-	}
-	if err := pool.QueryRow(ctx, `SELECT balance FROM stars_balances WHERE user_id=$1`, subscriber.ID).Scan(&debit); err != nil {
-		t.Fatal(err)
-	}
-	var txnNet int64
-	if err := pool.QueryRow(ctx, `SELECT COALESCE(sum(amount),0) FROM stars_transactions WHERE user_id=$1 AND reason=$2`, subscriber.ID, string(domain.StarsReasonSuggestedPost)).Scan(&txnNet); err != nil {
-		t.Fatal(err)
-	}
-	if debit != 100 || txnNet != 0 {
-		t.Fatalf("refund balance/net=%d/%d, want 100/0", debit, txnNet)
+	if state != string(domain.SuggestedPostStateCompleted) || scheduleDate != 1_700_000_200 {
+		t.Fatalf("state/schedule=%s/%d", state, scheduleDate)
 	}
 
-	late, err := channels.SendMonoforumMessage(ctx, domain.SendMonoforumMessageRequest{MonoforumID: monoID, SenderUserID: subscriber.ID, SavedPeer: saved, RandomID: 72, Message: "late deletion", SuggestedPost: &domain.SuggestedPost{Price: &domain.SuggestedPostPrice{Kind: domain.SuggestedPostPriceStars, Amount: 10}}, Date: 1_700_000_400})
+	// Scheduled (not-yet-due) posts still refund via the lifecycle worker if
+	// deleted before publication; immediate approvals above are already
+	// terminal (Completed) since there is nothing left to settle.
+	scheduled, err := channels.SendMonoforumMessage(ctx, domain.SendMonoforumMessageRequest{MonoforumID: monoID, SenderUserID: subscriber.ID, SavedPeer: saved, RandomID: 72, Message: "cancel before due", SuggestedPost: &domain.SuggestedPost{Price: &domain.SuggestedPostPrice{Kind: domain.SuggestedPostPriceStars, Amount: 10}}, Date: 1_700_000_400})
 	if err != nil {
 		t.Fatal(err)
 	}
-	approvedAt := 1_700_000_500
+	scheduledApproval, err := channels.ToggleSuggestedPostApproval(ctx, domain.ToggleSuggestedPostApprovalRequest{
+		UserID: owner.ID, MonoforumID: monoID, MessageID: scheduled.Message.ID, ScheduleDate: 1_700_000_900, Date: 1_700_000_401,
+	})
+	if err != nil || scheduledApproval.State != domain.SuggestedPostStateScheduled {
+		t.Fatalf("scheduled approval=%+v err=%v", scheduledApproval, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE channel_messages SET deleted=true WHERE channel_id=$1 AND id=$2`, monoID, scheduled.Message.ID); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := channels.ProcessSuggestedPostLifecycle(ctx, domain.SuggestedPostLifecycleRequest{Now: 1_700_000_500, Limit: 10})
+	if err != nil || len(resolved) != 1 || resolved[0].State != domain.SuggestedPostStateRefunded {
+		t.Fatalf("refund=%+v err=%v", resolved, err)
+	}
+
+	late, err := channels.SendMonoforumMessage(ctx, domain.SendMonoforumMessageRequest{MonoforumID: monoID, SenderUserID: subscriber.ID, SavedPeer: saved, RandomID: 73, Message: "late deletion", SuggestedPost: &domain.SuggestedPost{Price: &domain.SuggestedPostPrice{Kind: domain.SuggestedPostPriceStars, Amount: 10}}, Date: 1_700_000_600})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvedAt := 1_700_000_700
 	lateApproved, err := channels.ToggleSuggestedPostApproval(ctx, domain.ToggleSuggestedPostApprovalRequest{UserID: owner.ID, MonoforumID: monoID, MessageID: late.Message.ID, Date: approvedAt})
 	if err != nil || lateApproved.Published == nil {
 		t.Fatalf("late approval=%+v err=%v", lateApproved, err)
@@ -120,17 +116,8 @@ func TestSuggestedPostLifecyclePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolved, err = channels.ProcessSuggestedPostLifecycle(ctx, domain.SuggestedPostLifecycleRequest{Now: due + 2, Limit: 10})
-	if err != nil || len(resolved) != 1 || resolved[0].State != domain.SuggestedPostStateCompleted || resolved[0].ServiceMessage.Action == nil || resolved[0].ServiceMessage.Action.Type != domain.ChannelActionSuggestedPostSuccess {
-		t.Fatalf("late settlement=%+v err=%v", resolved, err)
-	}
-	if err := pool.QueryRow(ctx, `SELECT balance FROM stars_balances WHERE user_id=$1`, subscriber.ID).Scan(&debit); err != nil {
-		t.Fatal(err)
-	}
-	if err := pool.QueryRow(ctx, `SELECT COALESCE((SELECT balance FROM channel_stars_balances WHERE channel_id=$1),0)`, created.Channel.ID).Scan(&channelBalance); err != nil {
-		t.Fatal(err)
-	}
-	if debit != 90 || channelBalance != 8 {
-		t.Fatalf("late settlement balance/channel=%d/%d, want 90/8", debit, channelBalance)
+	if err != nil || len(resolved) != 0 {
+		t.Fatalf("already-completed post must not be revisited by the lifecycle worker: resolved=%+v err=%v", resolved, err)
 	}
 }
 

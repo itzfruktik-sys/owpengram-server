@@ -36,13 +36,7 @@ type ReadModelCacheSet struct {
 	RPCProjections     RPCProjectionReadModelCache
 	BaseUsers          BaseUserCache
 	BotProfiles        BotProfileReadModelCache
-	StarGifts          StarGiftCatalogCache
 	AccountSettings    AccountSettingsReadModelCache
-}
-
-type StarGiftCatalogCache interface {
-	InvalidateStarGiftCatalog()
-	FlushStarGiftCatalog()
 }
 
 type AccountSettingsReadModelCache interface {
@@ -251,7 +245,6 @@ func (l *ReadModelChangeListener) empty() bool {
 		l.caches.RPCProjections == nil &&
 		l.caches.BaseUsers == nil &&
 		l.caches.BotProfiles == nil &&
-		l.caches.StarGifts == nil &&
 		l.caches.AccountSettings == nil
 }
 
@@ -325,10 +318,6 @@ func (l *ReadModelChangeListener) flush(reasons ...string) {
 		l.caches.BotProfiles.FlushBotProfileReadModel()
 		flushed = append(flushed, "bot_profiles")
 	}
-	if l.caches.StarGifts != nil {
-		l.caches.StarGifts.FlushStarGiftCatalog()
-		flushed = append(flushed, "star_gifts")
-	}
 	if l.caches.AccountSettings != nil {
 		l.caches.AccountSettings.FlushAccountSettingsReadModel()
 		flushed = append(flushed, "account_settings")
@@ -373,10 +362,6 @@ func (l *ReadModelChangeListener) handlePayload(payload string) {
 						zap.Int64("owner_user_id", evt.OwnerUserID), zap.Error(err))
 				}
 			}
-		}
-	case "star_gift_catalog":
-		if l.caches.StarGifts != nil {
-			l.caches.StarGifts.InvalidateStarGiftCatalog()
 		}
 	case "user_base":
 		if evt.PeerType == "user" && evt.PeerID != 0 {

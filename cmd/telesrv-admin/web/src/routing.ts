@@ -20,7 +20,6 @@ export function routeTitle(pathname: string): string {
   if (pathname.startsWith("/bot-verification")) return "Third-party verification";
   if (pathname.startsWith("/verification")) return "Official Verification";
   if (pathname.startsWith("/collectible-usernames")) return "Collectible Usernames";
-  if (pathname.startsWith("/account-ratings")) return "Account Rating";
   if (pathname.startsWith("/storage")) return "Storage";
   if (pathname.startsWith("/accounts/shared-devices")) return "Shared Devices";
   if (pathname.startsWith("/accounts")) return "Accounts";
@@ -30,9 +29,6 @@ export function routeTitle(pathname: string): string {
   if (pathname.startsWith("/broadcasts")) return "Broadcasts";
   if (pathname.startsWith("/emoji")) return "Emoji";
   if (pathname.startsWith("/messages")) return "Message Audit";
-	if (pathname.startsWith("/give-gifts")) return "Give Gifts";
-	if (pathname.startsWith("/gifts")) return "Star Gifts";
 	if (pathname.startsWith("/stickers")) return "Stickers";
-	if (pathname.startsWith("/emoji")) return "Emoji";
   return "Operations Console";
 }

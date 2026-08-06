@@ -411,7 +411,7 @@ func (s *UserStore) UpdateEmojiStatus(_ context.Context, userID int64, status do
 		return domain.User{}, domain.ErrUserNotFound
 	}
 	if !status.Valid() {
-		return domain.User{}, domain.ErrStarGiftCollectibleInvalid
+		return domain.User{}, domain.ErrEmojiStatusCollectibleInvalid
 	}
 	u.EmojiStatusDocumentID = status.DocumentID
 	u.EmojiStatusUntil = status.Until

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,62 +18,47 @@ import (
 	"time"
 
 	"telesrv/internal/domain"
-	"telesrv/internal/officialgifts"
-	"telesrv/internal/seed/giftdemo"
 )
 
 const (
-	ActionSetAccountFrozen           = "account.set_frozen"
-	ActionGrantPremium               = "account.grant_premium"
-	ActionGrantStars                 = "account.grant_stars"
-	ActionSetVerified                = "account.set_verified"
-	ActionSetUserFlags               = "account.set_flags"
-	ActionSetSupport                 = "account.set_support"
-	ActionSetUsername                = "account.set_username"
-	ActionSetUserColor               = "account.set_color"
-	ActionSetUserEmojiStatus         = "account.set_emoji_status"
-	ActionSetProfile                 = "account.set_profile"
-	ActionSetPhone                   = "account.set_phone"
-	ActionSetLoginEmail              = "account.set_login_email"
-	ActionSetAccountAvatar           = "account.set_avatar"
-	ActionSetChannelAvatar           = "channel.set_avatar"
-	ActionSetChannelUsername         = "channel.set_username"
-	ActionSetChannelSettings         = "channel.set_settings"
-	ActionSetChannelColor            = "channel.set_color"
-	ActionSetChannelEmojiStatus      = "channel.set_emoji_status"
-	ActionSetChannelVerified         = "channel.set_verified"
-	ActionSetChannelFlags            = "channel.set_flags"
-	ActionRevokeSessions             = "account.revoke_sessions"
-	ActionDeletePrivateMessages      = "messages.delete_private_messages"
-	ActionDeletePrivateHistory       = "messages.delete_private_history"
-	ActionImportStarGift             = "gifts.import"
-	ActionImportOfficialStarGift     = "gifts.official.import"
-	ActionImportAllOfficialStarGifts = "gifts.official.import_all"
-	ActionImportDefaultStarGift      = "gifts.default.import"
-	ActionImportAllDefaultStarGifts  = "gifts.default.import_all"
-	ActionPublishGiftCollectibles    = "gifts.collectibles.publish"
-	ActionSetStarGiftEnabled         = "gifts.set_enabled"
-	ActionSetStarGiftSortOrder       = "gifts.set_sort_order"
-	ActionGiveGift                   = "gifts.give"
-	ActionCreateBot                  = "bot.create"
-	ActionCreateBroadcast            = "broadcast.create"
-	ActionDeleteBot                  = "bot.delete"
-	ActionExportBotToken             = "bot.export_token"
-	ActionSetStickerSetArchived      = "stickers.set_archived"
-	ActionSetStickerSetSortOrder     = "stickers.set_sort_order"
-	ActionRenameStickerSet           = "stickers.rename"
-	ActionDeleteStickerSet           = "stickers.delete"
-	ActionCreateStickerSet           = "stickers.create"
-	ActionAddStickerToSet            = "stickers.add_sticker"
-	ActionRemoveStickerFromSet       = "stickers.remove_sticker"
+	ActionSetAccountFrozen       = "account.set_frozen"
+	ActionGrantPremium           = "account.grant_premium"
+	ActionSetVerified            = "account.set_verified"
+	ActionSetUserFlags           = "account.set_flags"
+	ActionSetSupport             = "account.set_support"
+	ActionSetUsername            = "account.set_username"
+	ActionSetUserColor           = "account.set_color"
+	ActionSetUserEmojiStatus     = "account.set_emoji_status"
+	ActionSetProfile             = "account.set_profile"
+	ActionSetPhone               = "account.set_phone"
+	ActionSetLoginEmail          = "account.set_login_email"
+	ActionSetAccountAvatar       = "account.set_avatar"
+	ActionSetChannelAvatar       = "channel.set_avatar"
+	ActionSetChannelUsername     = "channel.set_username"
+	ActionSetChannelSettings     = "channel.set_settings"
+	ActionSetChannelColor        = "channel.set_color"
+	ActionSetChannelEmojiStatus  = "channel.set_emoji_status"
+	ActionSetChannelVerified     = "channel.set_verified"
+	ActionSetChannelFlags        = "channel.set_flags"
+	ActionRevokeSessions         = "account.revoke_sessions"
+	ActionDeletePrivateMessages  = "messages.delete_private_messages"
+	ActionDeletePrivateHistory   = "messages.delete_private_history"
+	ActionCreateBot              = "bot.create"
+	ActionCreateBroadcast        = "broadcast.create"
+	ActionDeleteBot              = "bot.delete"
+	ActionExportBotToken         = "bot.export_token"
+	ActionSetStickerSetArchived  = "stickers.set_archived"
+	ActionSetStickerSetSortOrder = "stickers.set_sort_order"
+	ActionRenameStickerSet       = "stickers.rename"
+	ActionDeleteStickerSet       = "stickers.delete"
+	ActionCreateStickerSet       = "stickers.create"
+	ActionAddStickerToSet        = "stickers.add_sticker"
+	ActionRemoveStickerFromSet   = "stickers.remove_sticker"
 	// Collectible (Fragment-style) username lifecycle.
 	ActionMintCollectibleUsername     = "usernames.collectible.mint"
 	ActionTransferCollectibleUsername = "usernames.collectible.transfer"
 	ActionRevokeCollectibleUsername   = "usernames.collectible.revoke"
 	ActionDeleteCollectibleUsername   = "usernames.collectible.delete"
-	// Composite account rating.
-	ActionRecomputeAccountRating = "rating.recompute"
-	ActionAdjustAccountRating    = "rating.adjust"
 	// Official platform verification review. Claim/approve/reject act on one
 	// application; revoke acts on a target, because clearing a badge is not a
 	// decision on the application that granted it.
@@ -101,12 +85,7 @@ const (
 	maxReasonLength          = 1000
 	maxHistoryBatches        = 100
 	maxPremiumMonths         = 120
-	maxStarsGrant            = 1_000_000_000
 	maxFreezeAppealURLLength = 2048
-	// maxAccountRatingAdjustment bounds one manual rating adjustment in either
-	// direction. The domain only rejects a zero delta, so the operator-facing
-	// bound lives here next to the other grant limits.
-	maxAccountRatingAdjustment = 1_000_000_000
 )
 
 // Stable admin error codes for the collectible-username and account-rating
@@ -123,9 +102,6 @@ const (
 	CodeCollectiblePeerLimit       = "COLLECTIBLE_PEER_LIMIT"
 	CodeCollectibleCurrencyInvalid = "COLLECTIBLE_CURRENCY_INVALID"
 	CodeCollectibleStateInvalid    = "COLLECTIBLE_STATE_INVALID"
-	CodeRatingNotFound             = "RATING_NOT_FOUND"
-	CodeRatingAdjustmentInvalid    = "RATING_ADJUSTMENT_INVALID"
-	CodeRatingWeightsInvalid       = "RATING_WEIGHTS_INVALID"
 	// Official platform verification review. CodeVerificationConflict is the lost
 	// optimistic-locking race -- two reviewers deciding at once -- and is the one
 	// the panel must render as "reload and look again" rather than as a bad
@@ -230,10 +206,6 @@ type AccountService interface {
 	ClearLoginEmail(ctx context.Context, userID int64) error
 }
 
-type StarsService interface {
-	Credit(ctx context.Context, userID, amount int64, reason domain.StarsTransactionReason, peer domain.Peer, title, desc string) (domain.StarsBalance, error)
-}
-
 // BroadcastService creates and lists system broadcast campaigns (a message
 // from domain.OfficialSystemUserID to all or a hand-picked list of users).
 // Delivery itself happens out-of-band via a worker draining the durable
@@ -247,10 +219,6 @@ type BroadcastService interface {
 	Create(ctx context.Context, message string, targetMode domain.BroadcastTargetMode, recipientUserIDs []int64, createdBy string) (domain.Broadcast, error)
 	List(ctx context.Context, beforeID int64, limit int) ([]domain.Broadcast, bool, error)
 	Get(ctx context.Context, id int64) (domain.Broadcast, bool, error)
-}
-
-type StarsNotifier interface {
-	NotifyStarsBalanceChanged(ctx context.Context, balance domain.StarsBalance) error
 }
 
 type UserNotifier interface {
@@ -285,29 +253,6 @@ type MessagesService interface {
 	GetHistory(ctx context.Context, userID int64, filter domain.MessageFilter) (domain.MessageList, error)
 	DeleteMessages(ctx context.Context, userID int64, req domain.DeleteMessagesRequest) (domain.DeleteMessagesResult, error)
 	DeleteHistory(ctx context.Context, userID int64, req domain.DeleteHistoryRequest) (domain.DeleteMessagesResult, error)
-}
-
-type GiftsService interface {
-	GiftByID(ctx context.Context, id int64) (domain.StarGift, bool, error)
-	PrepareAnimation(fileName string, data []byte) (domain.StarGiftAnimation, error)
-	PrepareOfficialAnimation(fileName string, data []byte) (domain.StarGiftAnimation, error)
-	Catalog(ctx context.Context) ([]domain.StarGift, error)
-	CreateCatalogRevision(ctx context.Context, write domain.StarGiftCatalogWrite) (domain.StarGiftCatalogEntry, error)
-	CreateCatalogBundle(ctx context.Context, write domain.StarGiftCatalogBundleWrite) (domain.StarGiftCatalogBundleResult, error)
-	SetCatalogEnabled(ctx context.Context, giftID int64, enabled bool) (bool, error)
-	SetCatalogSortOrder(ctx context.Context, giftID int64, sortOrder int) (bool, error)
-	AnimationJSON(ctx context.Context, giftID int64) ([]byte, bool, error)
-	CreateCollectibleRevision(ctx context.Context, write domain.StarGiftCollectibleWrite) (domain.StarGiftCollectibleRevision, error)
-	CollectiblePreview(ctx context.Context, giftID int64) (domain.StarGiftUpgradePreview, bool, error)
-	CollectibleAnimationJSON(ctx context.Context, giftID int64, kind domain.StarGiftCollectibleAttributeKind, attributeID int64) ([]byte, bool, error)
-}
-
-// OfficialGiftsSource reads a verified official Star Gift snapshot from disk
-// (see cmd/giftfetch) for explicit, operator-triggered import. Nothing here
-// is imported automatically — the snapshot directory can simply be empty.
-type OfficialGiftsSource interface {
-	List(ctx context.Context) ([]officialgifts.GiftSummary, error)
-	Bundle(ctx context.Context, giftID int64, includeCollectible bool) (officialgifts.Bundle, error)
 }
 
 // AvatarResolver is the same shape as internal/web's ProfilePhotoResolver, kept as its
@@ -394,49 +339,24 @@ type collectibleUsernameByIDLookup interface {
 	CollectibleUsernameByID(ctx context.Context, id int64) (domain.CollectibleUsername, error)
 }
 
-// AccountRatingService is the operator-facing slice of the composite account
-// rating use cases: read the stored projection, force a recompute, adjust the
-// manual component and page the ledger that explains a level.
-type AccountRatingService interface {
-	Rating(ctx context.Context, userID int64) (domain.AccountRating, error)
-	Recompute(ctx context.Context, userID int64) (domain.AccountRating, error)
-	Adjust(ctx context.Context, req domain.AdjustAccountRatingRequest) (domain.AccountRating, bool, error)
-	List(ctx context.Context, filter domain.AccountRatingFilter) ([]domain.AccountRating, error)
-	Events(ctx context.Context, userID int64, limit int) ([]domain.AccountRatingEvent, error)
-}
-
-// GiftGranter delivers a catalog gift to a recipient peer on behalf of a sender
-// without charging Stars. Implemented by the RPC router, it reuses the standard
-// gift-delivery path (service message for users, saved-gift + admin log for
-// channels) so granted gifts are indistinguishable from paid ones.
-type GiftGranter interface {
-	AdminGrantStarGift(ctx context.Context, grant domain.AdminStarGiftGrant) error
-}
-
 type Dependencies struct {
 	Commands               CommandRepository
 	Restrictions           RestrictionStore
 	Auth                   AuthService
 	Revoker                AuthKeyRevoker
 	Users                  UsersService
-	Stars                  StarsService
-	StarsNotifier          StarsNotifier
 	UserNotifier           UserNotifier
 	UserModerationNotifier UserModerationNotifier
 	FreezeNotifier         AccountFreezeNotifier
 	Channels               ChannelsService
 	ChannelNotifier        ChannelNotifier
 	Messages               MessagesService
-	Gifts                  GiftsService
-	GiftGranter            GiftGranter
-	OfficialGifts          OfficialGiftsSource
 	Photos                 AvatarResolver
 	StickerSets            StickerSetsService
 	Bots                   BotService
 	Emoji                  EmojiService
 	Moderation             ModerationService
 	Usernames              CollectibleUsernamesService
-	Rating                 AccountRatingService
 	Verification           VerificationService
 	// BotVerification is the third-party mechanism, wired separately from
 	// Verification: the two never read each other's state.
@@ -455,24 +375,18 @@ type Service struct {
 	auth                   AuthService
 	revoker                AuthKeyRevoker
 	users                  UsersService
-	stars                  StarsService
-	starsNotifier          StarsNotifier
 	userNotifier           UserNotifier
 	userModerationNotifier UserModerationNotifier
 	freezeNotifier         AccountFreezeNotifier
 	channels               ChannelsService
 	channelNotifier        ChannelNotifier
 	messages               MessagesService
-	gifts                  GiftsService
-	giftGranter            GiftGranter
-	officialGifts          OfficialGiftsSource
 	photos                 AvatarResolver
 	stickerSets            StickerSetsService
 	bots                   BotService
 	emoji                  EmojiService
 	moderation             ModerationService
 	usernames              CollectibleUsernamesService
-	rating                 AccountRatingService
 	verification           VerificationService
 	botVerification        BotVerificationService
 	account                AccountService
@@ -501,12 +415,6 @@ func (s *Service) Configure(deps Dependencies) *Service {
 	if deps.Users != nil {
 		s.users = deps.Users
 	}
-	if deps.Stars != nil {
-		s.stars = deps.Stars
-	}
-	if deps.StarsNotifier != nil {
-		s.starsNotifier = deps.StarsNotifier
-	}
 	if deps.UserNotifier != nil {
 		s.userNotifier = deps.UserNotifier
 	}
@@ -525,15 +433,6 @@ func (s *Service) Configure(deps Dependencies) *Service {
 	if deps.Messages != nil {
 		s.messages = deps.Messages
 	}
-	if deps.Gifts != nil {
-		s.gifts = deps.Gifts
-	}
-	if deps.GiftGranter != nil {
-		s.giftGranter = deps.GiftGranter
-	}
-	if deps.OfficialGifts != nil {
-		s.officialGifts = deps.OfficialGifts
-	}
 	if deps.Photos != nil {
 		s.photos = deps.Photos
 	}
@@ -551,9 +450,6 @@ func (s *Service) Configure(deps Dependencies) *Service {
 	}
 	if deps.Usernames != nil {
 		s.usernames = deps.Usernames
-	}
-	if deps.Rating != nil {
-		s.rating = deps.Rating
 	}
 	if deps.Verification != nil {
 		s.verification = deps.Verification
@@ -688,30 +584,6 @@ func (s *Service) CollectibleUsernameTransfers(ctx context.Context, collectibleI
 	return s.usernames.Transfers(ctx, collectibleID, limit)
 }
 
-// AccountRating returns one user's stored composite rating projection.
-func (s *Service) AccountRating(ctx context.Context, userID int64) (domain.AccountRating, error) {
-	if s == nil || s.rating == nil {
-		return domain.AccountRating{}, fmt.Errorf("account rating dependency is not configured")
-	}
-	return s.rating.Rating(ctx, userID)
-}
-
-// AccountRatings is the admin leaderboard read.
-func (s *Service) AccountRatings(ctx context.Context, filter domain.AccountRatingFilter) ([]domain.AccountRating, error) {
-	if s == nil || s.rating == nil {
-		return nil, fmt.Errorf("account rating dependency is not configured")
-	}
-	return s.rating.List(ctx, filter)
-}
-
-// AccountRatingEvents returns the contribution ledger that explains a level.
-func (s *Service) AccountRatingEvents(ctx context.Context, userID int64, limit int) ([]domain.AccountRatingEvent, error) {
-	if s == nil || s.rating == nil {
-		return nil, fmt.Errorf("account rating dependency is not configured")
-	}
-	return s.rating.Events(ctx, userID, limit)
-}
-
 type CommandMeta struct {
 	CommandID string `json:"command_id"`
 	Actor     string `json:"actor"`
@@ -734,64 +606,6 @@ type CommandResult struct {
 	// deliberately excluded from JSON so credentials can never enter command
 	// replay or audit storage.
 	transientDetails map[string]any
-}
-
-type ImportStarGiftRequest struct {
-	CommandMeta
-	GiftID       int64  `json:"gift_id,omitempty"`
-	Title        string `json:"title"`
-	Stars        int64  `json:"stars"`
-	ConvertStars int64  `json:"convert_stars"`
-	Enabled      bool   `json:"enabled"`
-	SortOrder    int    `json:"sort_order"`
-	FileName     string `json:"file_name"`
-	ContentSHA   string `json:"content_sha256"`
-	Data         []byte `json:"-"`
-}
-
-type ImportDefaultStarGiftRequest struct {
-	CommandMeta
-	ID      int  `json:"id"`
-	Enabled bool `json:"enabled"`
-}
-
-type ImportAllDefaultStarGiftsRequest struct {
-	CommandMeta
-	Enabled bool `json:"enabled"`
-}
-
-type ImportOfficialStarGiftRequest struct {
-	CommandMeta
-	SourceGiftID       string   `json:"source_gift_id"`
-	GiftID             int64    `json:"gift_id,omitempty"`
-	Title              string   `json:"title"`
-	Stars              int64    `json:"stars"`
-	ConvertStars       int64    `json:"convert_stars"`
-	Enabled            bool     `json:"enabled"`
-	SortOrder          int      `json:"sort_order"`
-	IncludeCollectible bool     `json:"include_collectible"`
-	UpgradeStars       int64    `json:"upgrade_stars,omitempty"`
-	SupplyTotal        int      `json:"supply_total,omitempty"`
-	SlugPrefix         string   `json:"slug_prefix,omitempty"`
-	ManifestSHA256     string   `json:"manifest_sha256,omitempty"`
-	AssetSHA256        []string `json:"asset_sha256,omitempty"`
-}
-
-type ImportAllOfficialStarGiftsRequest struct {
-	CommandMeta
-	Enabled bool `json:"enabled"`
-}
-
-type SetStarGiftEnabledRequest struct {
-	CommandMeta
-	GiftID  int64 `json:"gift_id"`
-	Enabled bool  `json:"enabled"`
-}
-
-type SetStarGiftSortOrderRequest struct {
-	CommandMeta
-	GiftID    int64 `json:"gift_id"`
-	SortOrder int   `json:"sort_order"`
 }
 
 type SetStickerSetArchivedRequest struct {
@@ -843,55 +657,6 @@ type RemoveStickerFromSetRequest struct {
 	DocumentID int64 `json:"document_id"`
 }
 
-// GiveGiftRequest grants a catalog gift to a recipient (user or channel) from
-// the official system account 777000 at no charge.
-// Exactly one of UserID / ChannelID identifies the recipient.
-type GiveGiftRequest struct {
-	CommandMeta
-	SenderUserID        int64  `json:"sender_user_id"`
-	UserID              int64  `json:"user_id"`
-	ChannelID           int64  `json:"channel_id"`
-	GiftID              int64  `json:"gift_id"`
-	HideName            bool   `json:"hide_name"`
-	Message             string `json:"message"`
-	Upgrade             bool   `json:"upgrade"`
-	ModelAttributeID    int64  `json:"model_attribute_id"`
-	PatternAttributeID  int64  `json:"pattern_attribute_id"`
-	BackdropAttributeID int64  `json:"backdrop_attribute_id"`
-}
-
-type StarGiftCollectibleAnimationUpload struct {
-	Name           string `json:"name"`
-	RarityPermille int    `json:"rarity_permille"`
-	SortOrder      int    `json:"sort_order"`
-	FileKey        string `json:"file_key"`
-	FileName       string `json:"file_name,omitempty"`
-	ContentSHA     string `json:"content_sha256,omitempty"`
-	Data           []byte `json:"-"`
-}
-
-type StarGiftCollectibleBackdropInput struct {
-	Name           string `json:"name"`
-	BackdropID     int    `json:"backdrop_id"`
-	CenterColor    int    `json:"center_color"`
-	EdgeColor      int    `json:"edge_color"`
-	PatternColor   int    `json:"pattern_color"`
-	TextColor      int    `json:"text_color"`
-	RarityPermille int    `json:"rarity_permille"`
-	SortOrder      int    `json:"sort_order"`
-}
-
-type PublishStarGiftCollectiblesRequest struct {
-	CommandMeta
-	GiftID       int64                                `json:"gift_id"`
-	UpgradeStars int64                                `json:"upgrade_stars"`
-	SupplyTotal  int                                  `json:"supply_total"`
-	SlugPrefix   string                               `json:"slug_prefix"`
-	Models       []StarGiftCollectibleAnimationUpload `json:"models"`
-	Patterns     []StarGiftCollectibleAnimationUpload `json:"patterns"`
-	Backdrops    []StarGiftCollectibleBackdropInput   `json:"backdrops"`
-}
-
 type SetAccountFrozenRequest struct {
 	CommandMeta
 	UserID    int64     `json:"user_id"`
@@ -904,12 +669,6 @@ type GrantPremiumRequest struct {
 	CommandMeta
 	UserID int64 `json:"user_id"`
 	Months int   `json:"months"`
-}
-
-type GrantStarsRequest struct {
-	CommandMeta
-	UserID int64 `json:"user_id"`
-	Amount int64 `json:"amount"`
 }
 
 type SetVerifiedRequest struct {
@@ -1114,22 +873,6 @@ type RevokeCollectibleUsernameRequest struct {
 type DeleteCollectibleUsernameRequest struct {
 	CommandMeta
 	Username string `json:"username"`
-}
-
-// RecomputeAccountRatingRequest forces one user's composite rating to be
-// recomputed from the current contribution signals.
-type RecomputeAccountRatingRequest struct {
-	CommandMeta
-	UserID int64 `json:"user_id,string"`
-}
-
-// AdjustAccountRatingRequest moves one user's manual rating component by a
-// signed delta. The delta survives recomputes, so it is the operator's durable
-// override rather than a one-off nudge.
-type AdjustAccountRatingRequest struct {
-	CommandMeta
-	UserID int64 `json:"user_id,string"`
-	Amount int64 `json:"amount,string"`
 }
 
 type RevokeSessionsRequest struct {
@@ -1402,46 +1145,6 @@ func (s *Service) GrantPremium(ctx context.Context, req GrantPremiumRequest) (Co
 	})
 }
 
-func (s *Service) GrantStars(ctx context.Context, req GrantStarsRequest) (CommandResult, error) {
-	if req.UserID <= 0 {
-		return CommandResult{}, fmt.Errorf("user_id is required")
-	}
-	if req.Amount <= 0 || req.Amount > maxStarsGrant {
-		return CommandResult{}, fmt.Errorf("amount must be between 1 and %d", maxStarsGrant)
-	}
-	if s == nil || s.users == nil || s.stars == nil {
-		return CommandResult{}, fmt.Errorf("admin stars dependencies are not configured")
-	}
-	return s.runCommand(ctx, req.CommandMeta, ActionGrantStars, req.UserID, domain.Peer{}, req, func() (CommandResult, error) {
-		u, found, err := s.users.AdminUser(ctx, req.UserID)
-		if err != nil {
-			return CommandResult{}, err
-		}
-		if !found {
-			return CommandResult{}, domain.ErrUserNotFound
-		}
-		details := map[string]any{
-			"amount":       req.Amount,
-			"username":     u.Username,
-			"phone":        u.Phone,
-			"would_credit": true,
-		}
-		if req.DryRun {
-			return CommandResult{Message: "dry-run completed", Details: details}, nil
-		}
-		balance, err := s.stars.Credit(ctx, req.UserID, req.Amount, domain.StarsReasonAdjust, domain.Peer{}, "Admin Stars grant", req.Reason)
-		if err != nil {
-			return CommandResult{}, err
-		}
-		details["updated_balance"] = balance.Balance
-		details["starting_grant_applied"] = balance.Granted
-		if err := s.notifyStarsBalanceChanged(ctx, balance); err != nil {
-			details["notify_error"] = err.Error()
-		}
-		return CommandResult{Message: "stars granted", Details: details}, nil
-	})
-}
-
 func (s *Service) SetVerified(ctx context.Context, req SetVerifiedRequest) (CommandResult, error) {
 	if req.UserID <= 0 {
 		return CommandResult{}, fmt.Errorf("user_id is required")
@@ -1550,133 +1253,6 @@ func (s *Service) SetSupport(ctx context.Context, req SetSupportRequest) (Comman
 	})
 }
 
-func collectibleAttrPresent(attrs []domain.StarGiftCollectibleAttribute, id int64) bool {
-	for _, attr := range attrs {
-		if attr.ID == id {
-			return true
-		}
-	}
-	return false
-}
-
-// GiveGift grants a catalog gift to a recipient (user or channel) from the
-// official system account 777000 without charging any Stars. Delivery reuses
-// the standard gift path via the GiftGranter dependency.
-func (s *Service) GiveGift(ctx context.Context, req GiveGiftRequest) (CommandResult, error) {
-	if req.GiftID <= 0 {
-		return CommandResult{}, fmt.Errorf("gift_id is required")
-	}
-	if (req.UserID > 0) == (req.ChannelID > 0) {
-		return CommandResult{}, fmt.Errorf("exactly one of user_id or channel_id is required")
-	}
-	if s == nil || s.giftGranter == nil {
-		return CommandResult{}, fmt.Errorf("gift granter dependency is not configured")
-	}
-	sender := req.SenderUserID
-	if sender <= 0 {
-		sender = domain.OfficialSystemUserID
-	}
-	if sender != domain.OfficialSystemUserID {
-		return CommandResult{}, fmt.Errorf("gift sender must be the official system account")
-	}
-	req.Message = strings.TrimSpace(req.Message)
-	if len([]rune(req.Message)) > 128 {
-		return CommandResult{}, fmt.Errorf("gift message must be <= 128 characters")
-	}
-	var recipient domain.Peer
-	if req.ChannelID > 0 {
-		recipient = domain.Peer{Type: domain.PeerTypeChannel, ID: req.ChannelID}
-	} else {
-		recipient = domain.Peer{Type: domain.PeerTypeUser, ID: req.UserID}
-	}
-	if req.Upgrade && recipient.Type != domain.PeerTypeUser {
-		return CommandResult{}, fmt.Errorf("upgraded gift delivery is supported for user recipients only")
-	}
-	if !req.Upgrade && (req.ModelAttributeID > 0 || req.PatternAttributeID > 0 || req.BackdropAttributeID > 0) {
-		return CommandResult{}, fmt.Errorf("collectible attributes require upgrade")
-	}
-	return s.runCommand(ctx, req.CommandMeta, ActionGiveGift, req.UserID, recipient, req, func() (CommandResult, error) {
-		details := map[string]any{
-			"sender_user_id": sender,
-			"gift_id":        req.GiftID,
-			"recipient_type": string(recipient.Type),
-			"recipient_id":   recipient.ID,
-			"hide_name":      req.HideName,
-			"upgrade":        req.Upgrade,
-		}
-		if req.Message != "" {
-			details["message"] = req.Message
-		}
-		if s.gifts != nil {
-			gift, found, err := s.gifts.GiftByID(ctx, req.GiftID)
-			if err != nil {
-				return CommandResult{}, err
-			}
-			if !found {
-				return CommandResult{}, fmt.Errorf("gift %d not found", req.GiftID)
-			}
-			details["gift_title"] = gift.Title
-			details["gift_stars"] = gift.Stars
-			if req.Upgrade {
-				preview, ok, err := s.gifts.CollectiblePreview(ctx, req.GiftID)
-				if err != nil {
-					return CommandResult{}, err
-				}
-				if !ok || preview.UpgradeStars <= 0 {
-					return CommandResult{}, fmt.Errorf("gift %d has no published collectible upgrade", req.GiftID)
-				}
-				if preview.Issued >= preview.SupplyTotal {
-					return CommandResult{}, fmt.Errorf("gift %d collectible supply is exhausted", req.GiftID)
-				}
-				if req.ModelAttributeID > 0 && !collectibleAttrPresent(preview.Models, req.ModelAttributeID) {
-					return CommandResult{}, fmt.Errorf("model attribute %d is not part of gift %d", req.ModelAttributeID, req.GiftID)
-				}
-				if req.PatternAttributeID > 0 && !collectibleAttrPresent(preview.Patterns, req.PatternAttributeID) {
-					return CommandResult{}, fmt.Errorf("pattern attribute %d is not part of gift %d", req.PatternAttributeID, req.GiftID)
-				}
-				if req.BackdropAttributeID > 0 && !collectibleAttrPresent(preview.Backdrops, req.BackdropAttributeID) {
-					return CommandResult{}, fmt.Errorf("backdrop attribute %d is not part of gift %d", req.BackdropAttributeID, req.GiftID)
-				}
-				details["collectible_supply_total"] = preview.SupplyTotal
-				details["collectible_issued"] = preview.Issued
-				if req.ModelAttributeID > 0 {
-					details["model_attribute_id"] = req.ModelAttributeID
-				}
-				if req.PatternAttributeID > 0 {
-					details["pattern_attribute_id"] = req.PatternAttributeID
-				}
-				if req.BackdropAttributeID > 0 {
-					details["backdrop_attribute_id"] = req.BackdropAttributeID
-				}
-			}
-		}
-		if req.DryRun {
-			return CommandResult{Message: "dry-run completed", Details: details}, nil
-		}
-		if err := s.giftGranter.AdminGrantStarGift(ctx, domain.AdminStarGiftGrant{
-			SenderID:            sender,
-			Recipient:           recipient,
-			GiftID:              req.GiftID,
-			HideName:            req.HideName,
-			Message:             req.Message,
-			Upgrade:             req.Upgrade,
-			CommandKey:          "admin-gift:" + req.CommandID,
-			ModelAttributeID:    req.ModelAttributeID,
-			PatternAttributeID:  req.PatternAttributeID,
-			BackdropAttributeID: req.BackdropAttributeID,
-		}); err != nil {
-			return CommandResult{}, err
-		}
-		msg := "gift granted"
-		if req.Upgrade {
-			msg = "collectible gift granted"
-		}
-		return CommandResult{Message: msg, Details: details}, nil
-	})
-}
-
-// SetUsername force-sets or clears (empty) a user/bot username. Format and
-// availability are validated by the users service.
 func (s *Service) SetUsername(ctx context.Context, req SetUsernameRequest) (CommandResult, error) {
 	if req.UserID <= 0 {
 		return CommandResult{}, fmt.Errorf("user_id is required")
@@ -2409,98 +1985,6 @@ func (s *Service) DeleteCollectibleUsername(ctx context.Context, req DeleteColle
 	})
 }
 
-// RecomputeAccountRating rebuilds one user's composite rating from the current
-// contribution signals. A dry-run only reports the stored projection, so the
-// operator can see what a recompute would start from without writing.
-func (s *Service) RecomputeAccountRating(ctx context.Context, req RecomputeAccountRatingRequest) (CommandResult, error) {
-	if s == nil || s.rating == nil {
-		return CommandResult{}, fmt.Errorf("admin account rating dependency is not configured")
-	}
-	if req.UserID <= 0 {
-		return CommandResult{}, fmt.Errorf("user_id is required")
-	}
-	return s.runCommand(ctx, req.CommandMeta, ActionRecomputeAccountRating, req.UserID, domain.Peer{}, req, func() (CommandResult, error) {
-		details := map[string]any{"user_id": strconv.FormatInt(req.UserID, 10)}
-		previous, err := s.rating.Rating(ctx, req.UserID)
-		switch {
-		case err == nil:
-			details["previous_found"] = true
-			details["previous_level"] = previous.Level
-			details["previous_stars"] = strconv.FormatInt(previous.Stars, 10)
-		case errors.Is(err, domain.ErrAccountRatingNotFound):
-			details["previous_found"] = false
-		default:
-			return CommandResult{Details: details}, accountRatingError(err)
-		}
-		if req.DryRun {
-			return CommandResult{Message: "account rating recompute validated", Details: details}, nil
-		}
-		rating, err := s.rating.Recompute(ctx, req.UserID)
-		if err != nil {
-			return CommandResult{Details: details}, accountRatingError(err)
-		}
-		mergeAccountRatingDetails(details, rating)
-		return CommandResult{Message: "account rating recomputed", Details: details}, nil
-	})
-}
-
-// AdjustAccountRating moves the manual component of one user's rating by a
-// signed delta and recomputes the projection so the change is visible at once.
-// The command id doubles as the ledger key, so a retried command records the
-// adjustment exactly once.
-func (s *Service) AdjustAccountRating(ctx context.Context, req AdjustAccountRatingRequest) (CommandResult, error) {
-	if s == nil || s.rating == nil {
-		return CommandResult{}, fmt.Errorf("admin account rating dependency is not configured")
-	}
-	if req.UserID <= 0 {
-		return CommandResult{}, fmt.Errorf("user_id is required")
-	}
-	if req.Amount == 0 || req.Amount < -maxAccountRatingAdjustment || req.Amount > maxAccountRatingAdjustment {
-		return CommandResult{}, codedError(CodeRatingAdjustmentInvalid, domain.ErrAccountRatingAdjustmentInvalid)
-	}
-	return s.runCommand(ctx, req.CommandMeta, ActionAdjustAccountRating, req.UserID, domain.Peer{}, req, func() (CommandResult, error) {
-		details := map[string]any{
-			"user_id": strconv.FormatInt(req.UserID, 10),
-			"amount":  strconv.FormatInt(req.Amount, 10),
-		}
-		previous, err := s.rating.Rating(ctx, req.UserID)
-		switch {
-		case err == nil:
-			details["previous_found"] = true
-			details["previous_level"] = previous.Level
-			details["previous_stars"] = strconv.FormatInt(previous.Stars, 10)
-			details["previous_manual_component"] = strconv.FormatInt(previous.ManualComponent, 10)
-		case errors.Is(err, domain.ErrAccountRatingNotFound):
-			details["previous_found"] = false
-		default:
-			return CommandResult{Details: details}, accountRatingError(err)
-		}
-		if req.DryRun {
-			return CommandResult{Message: "account rating adjustment validated", Details: details}, nil
-		}
-		rating, applied, err := s.rating.Adjust(ctx, domain.AdjustAccountRatingRequest{
-			UserID:     req.UserID,
-			Amount:     req.Amount,
-			Reason:     req.Reason,
-			Actor:      req.Actor,
-			CommandKey: "admin-rating-adjust:" + req.CommandID,
-		})
-		if err != nil {
-			return CommandResult{Details: details}, accountRatingError(err)
-		}
-		details["applied"] = applied
-		mergeAccountRatingDetails(details, rating)
-		message := "account rating adjusted"
-		if !applied {
-			message = "account rating adjustment replayed"
-		}
-		return CommandResult{Message: message, Details: details}, nil
-	})
-}
-
-// collectibleOwnerPeer resolves the optional owner of a collectible asset. At
-// most one identifier may be set; neither yields the zero peer, which the
-// lifecycle reads as "the operator vault".
 func collectibleOwnerPeer(userID, channelID int64) (domain.Peer, error) {
 	if userID < 0 || channelID < 0 {
 		return domain.Peer{}, fmt.Errorf("owner id must be positive")
@@ -2531,31 +2015,6 @@ func collectiblePurchaseDate(unix int64, now func() time.Time) (time.Time, error
 	return time.Unix(unix, 0).UTC(), nil
 }
 
-// mergeAccountRatingDetails records the computed projection in command details.
-// Every score component crosses the JSON boundary as a decimal string so an
-// audit entry reproduces the exact int64 the store holds.
-func mergeAccountRatingDetails(details map[string]any, rating domain.AccountRating) {
-	details["level"] = rating.Level
-	details["stars"] = strconv.FormatInt(rating.Stars, 10)
-	details["current_level_stars"] = strconv.FormatInt(rating.CurrentLevelStars, 10)
-	details["has_next_level"] = rating.HasNextLevel
-	if rating.HasNextLevel {
-		details["next_level_stars"] = strconv.FormatInt(rating.NextLevelStars, 10)
-	}
-	details["stars_component"] = strconv.FormatInt(rating.StarsComponent, 10)
-	details["activity_component"] = strconv.FormatInt(rating.ActivityComponent, 10)
-	details["penalty_component"] = strconv.FormatInt(rating.PenaltyComponent, 10)
-	details["manual_component"] = strconv.FormatInt(rating.ManualComponent, 10)
-	details["pending_stars"] = strconv.FormatInt(rating.PendingStars, 10)
-	if !rating.PendingDate.IsZero() {
-		details["pending_date"] = rating.PendingDate.UTC().Format(time.RFC3339)
-	}
-	details["version"] = strconv.FormatInt(rating.Version, 10)
-}
-
-// CollectibleUsernameErrorCode maps a collectible-username domain error onto the
-// stable code the admin panel switches on. An unmapped error returns "" so the
-// caller can fall back to a generic failure instead of inventing a code.
 func CollectibleUsernameErrorCode(err error) string {
 	switch {
 	case err == nil:
@@ -2583,37 +2042,8 @@ func CollectibleUsernameErrorCode(err error) string {
 	}
 }
 
-// AccountRatingErrorCode maps an account-rating domain error onto its stable
-// admin code. An unmapped error returns "".
-func AccountRatingErrorCode(err error) string {
-	switch {
-	case err == nil:
-		return ""
-	case errors.Is(err, domain.ErrAccountRatingNotFound):
-		return CodeRatingNotFound
-	case errors.Is(err, domain.ErrAccountRatingAdjustmentInvalid):
-		return CodeRatingAdjustmentInvalid
-	case errors.Is(err, domain.ErrAccountRatingWeightsInvalid):
-		return CodeRatingWeightsInvalid
-	default:
-		return ""
-	}
-}
-
-// collectibleUsernameError / accountRatingError prefix a recognised domain error
-// with its stable code, so the journalled command result and the operator both
-// see "CODE: message" instead of a bare Go string. Unrecognised errors are
-// returned untouched: inventing a code for an unknown failure would be worse
-// than reporting it verbatim.
 func collectibleUsernameError(err error) error {
 	if code := CollectibleUsernameErrorCode(err); code != "" {
-		return codedError(code, err)
-	}
-	return err
-}
-
-func accountRatingError(err error) error {
-	if code := AccountRatingErrorCode(err); code != "" {
 		return codedError(code, err)
 	}
 	return err
@@ -3027,62 +2457,6 @@ func (s *Service) DeletePrivateHistory(ctx context.Context, req DeletePrivateHis
 	})
 }
 
-func (s *Service) ImportStarGift(ctx context.Context, req ImportStarGiftRequest) (CommandResult, error) {
-	if s == nil || s.gifts == nil {
-		return CommandResult{}, fmt.Errorf("star gift service is not configured")
-	}
-	if req.GiftID < 0 || req.Stars <= 0 || req.ConvertStars < 0 || req.ConvertStars > req.Stars ||
-		req.SortOrder < math.MinInt32 || req.SortOrder > math.MaxInt32 ||
-		len([]rune(strings.TrimSpace(req.Title))) > domain.MaxStarGiftTitleRunes {
-		return CommandResult{}, domain.ErrStarGiftInvalid
-	}
-	animation, err := s.gifts.PrepareAnimation(req.FileName, req.Data)
-	if err != nil {
-		return CommandResult{}, err
-	}
-	req.ContentSHA = hex.EncodeToString(animation.SHA256)
-	return s.runCommand(ctx, req.CommandMeta, ActionImportStarGift, 0, domain.Peer{}, req, func() (CommandResult, error) {
-		details := map[string]any{
-			"gift_id": strconv.FormatInt(req.GiftID, 10), "title": strings.TrimSpace(req.Title),
-			"stars": strconv.FormatInt(req.Stars, 10), "convert_stars": strconv.FormatInt(req.ConvertStars, 10),
-			"enabled": req.Enabled, "sort_order": req.SortOrder,
-			"source_format": animation.SourceFormat, "source_name": animation.SourceName,
-			"sha256": req.ContentSHA, "width": animation.Width, "height": animation.Height,
-			"frame_rate": animation.FrameRate, "compressed_bytes": len(animation.TGS), "json_bytes": len(animation.JSON),
-		}
-		if req.DryRun {
-			return CommandResult{Message: "star gift import validated", Details: details}, nil
-		}
-		entry, err := s.gifts.CreateCatalogRevision(ctx, domain.StarGiftCatalogWrite{
-			GiftID: req.GiftID, Title: req.Title, Stars: req.Stars, ConvertStars: req.ConvertStars,
-			Enabled: req.Enabled, SortOrder: req.SortOrder, Animation: animation,
-			Actor: req.Actor, CommandID: req.CommandID,
-		})
-		if err != nil {
-			return CommandResult{Details: details}, err
-		}
-		details["gift_id"] = strconv.FormatInt(entry.Gift.ID, 10)
-		details["revision_id"] = strconv.FormatInt(entry.Gift.RevisionID, 10)
-		details["revision"] = entry.Revision
-		return CommandResult{Message: "star gift imported", Details: details}, nil
-	})
-}
-
-// DefaultStarGifts lists the built-in original demo gifts available to import.
-func (s *Service) DefaultStarGifts() []giftdemo.GiftInfo {
-	return giftdemo.List()
-}
-
-// OfficialStarGifts lists the verified official snapshot on disk (see
-// cmd/giftfetch), if one has been placed there. Nothing here is imported
-// automatically — this is purely for the admin console's picker.
-func (s *Service) OfficialStarGifts(ctx context.Context) ([]officialgifts.GiftSummary, error) {
-	if s == nil || s.officialGifts == nil {
-		return nil, officialgifts.ErrUnavailable
-	}
-	return s.officialGifts.List(ctx)
-}
-
 // MaxAccountAvatarBytes bounds both reading (AccountAvatar) and writing
 // (SetAccountAvatar) a user's profile photo through the admin console.
 const MaxAccountAvatarBytes = 4 << 20
@@ -3185,393 +2559,6 @@ func safeAccountImageType(value string) bool {
 	}
 }
 
-// DefaultStarGiftAnimation returns the base sticker animation JSON for a
-// built-in demo gift, used by the admin preview player.
-func (s *Service) DefaultStarGiftAnimation(_ context.Context, id int) ([]byte, bool, error) {
-	if s == nil || s.gifts == nil {
-		return nil, false, fmt.Errorf("gift service is not configured")
-	}
-	return giftdemo.BaseAnimationJSON(s.gifts, id)
-}
-
-func (s *Service) OfficialStarGiftAnimation(ctx context.Context, sourceGiftID string) ([]byte, bool, error) {
-	if s == nil || s.officialGifts == nil || s.gifts == nil {
-		return nil, false, officialgifts.ErrUnavailable
-	}
-	id, err := strconv.ParseInt(strings.TrimSpace(sourceGiftID), 10, 64)
-	if err != nil || id <= 0 {
-		return nil, false, officialgifts.ErrNotFound
-	}
-	bundle, err := s.officialGifts.Bundle(ctx, id, false)
-	if errors.Is(err, officialgifts.ErrNotFound) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	animation, err := s.gifts.PrepareOfficialAnimation(bundle.BaseDocument.FileName, bundle.BaseDocument.Data)
-	if err != nil {
-		return nil, false, err
-	}
-	return animation.JSON, true, nil
-}
-
-// ImportDefaultStarGift imports one built-in original demo gift (complete with
-// its collectible pool when upgradeable). Idempotent: a gift whose title is
-// already in the catalog is skipped rather than duplicated.
-func (s *Service) ImportDefaultStarGift(ctx context.Context, req ImportDefaultStarGiftRequest) (CommandResult, error) {
-	if s == nil || s.gifts == nil {
-		return CommandResult{}, fmt.Errorf("gift service is not configured")
-	}
-	write, title, err := giftdemo.BuildBundle(s.gifts, req.ID, req.ID)
-	if err != nil {
-		return CommandResult{}, domain.ErrStarGiftInvalid
-	}
-	write.Catalog.Enabled = req.Enabled
-	return s.runCommand(ctx, req.CommandMeta, ActionImportDefaultStarGift, 0, domain.Peer{}, req, func() (CommandResult, error) {
-		details := map[string]any{
-			"id": req.ID, "title": title,
-			"stars":       strconv.FormatInt(write.Catalog.Stars, 10),
-			"upgradeable": write.Collectible != nil,
-		}
-		if req.DryRun {
-			return CommandResult{Message: "default gift validated", Details: details}, nil
-		}
-		present, err := giftdemo.PresentTitles(ctx, s.gifts)
-		if err != nil {
-			return CommandResult{Details: details}, err
-		}
-		if _, ok := present[title]; ok {
-			details["skipped"] = true
-			return CommandResult{Message: "default gift already present", Details: details}, nil
-		}
-		result, err := s.gifts.CreateCatalogBundle(ctx, write)
-		if err != nil {
-			return CommandResult{Details: details}, err
-		}
-		details["gift_id"] = strconv.FormatInt(result.Catalog.Gift.ID, 10)
-		if result.Collectible != nil {
-			details["collectible_revision_id"] = strconv.FormatInt(result.Collectible.ID, 10)
-		}
-		return CommandResult{Message: "default gift imported", Details: details}, nil
-	})
-}
-
-// ImportAllDefaultStarGifts imports every built-in demo gift, one
-// ImportDefaultStarGift call each, inside this single admin command. Each
-// per-gift call uses a CommandID stable across confirmed runs
-// (bulk-default-gift-<id>), so re-running replays cached results instead of
-// duplicating catalog entries; already-present gifts are counted as skipped.
-func (s *Service) ImportAllDefaultStarGifts(ctx context.Context, req ImportAllDefaultStarGiftsRequest) (CommandResult, error) {
-	if s == nil || s.gifts == nil {
-		return CommandResult{}, fmt.Errorf("gift service is not configured")
-	}
-	items := giftdemo.List()
-	return s.runCommand(ctx, req.CommandMeta, ActionImportAllDefaultStarGifts, 0, domain.Peer{}, req, func() (CommandResult, error) {
-		details := map[string]any{"total": len(items)}
-		if req.DryRun {
-			details["note"] = "dry run does not import; confirming imports all, skipping gifts already present"
-			return CommandResult{Message: fmt.Sprintf("%d default gifts available to import", len(items)), Details: details}, nil
-		}
-		imported, skipped, failed := 0, 0, 0
-		perGift := make([]map[string]any, 0, len(items))
-		for _, item := range items {
-			perReq := ImportDefaultStarGiftRequest{
-				CommandMeta: CommandMeta{
-					CommandID: fmt.Sprintf("bulk-default-gift-%d", item.ID),
-					Actor:     req.Actor,
-					Reason:    req.Reason,
-				},
-				ID:      item.ID,
-				Enabled: req.Enabled,
-			}
-			result, opErr := s.ImportDefaultStarGift(ctx, perReq)
-			entry := map[string]any{"id": item.ID, "title": item.Title, "status": result.Status}
-			switch {
-			case opErr != nil:
-				failed++
-				entry["error"] = opErr.Error()
-			case result.AlreadyExecuted, result.Details["skipped"] == true:
-				skipped++
-			default:
-				imported++
-				entry["gift_id"] = result.Details["gift_id"]
-			}
-			perGift = append(perGift, entry)
-		}
-		details["imported"] = imported
-		details["skipped"] = skipped
-		details["failed"] = failed
-		details["gifts"] = perGift
-		return CommandResult{
-			Message: fmt.Sprintf("imported %d, skipped %d, failed %d of %d default gifts", imported, skipped, failed, len(items)),
-			Details: details,
-		}, nil
-	})
-}
-
-func (s *Service) ImportOfficialStarGift(ctx context.Context, req ImportOfficialStarGiftRequest) (CommandResult, error) {
-	if s == nil || s.gifts == nil || s.officialGifts == nil {
-		return CommandResult{}, fmt.Errorf("official star gift importer is not configured")
-	}
-	sourceID, err := strconv.ParseInt(strings.TrimSpace(req.SourceGiftID), 10, 64)
-	if err != nil || sourceID <= 0 || req.GiftID < 0 || req.SortOrder < math.MinInt32 || req.SortOrder > math.MaxInt32 {
-		return CommandResult{}, domain.ErrStarGiftInvalid
-	}
-	bundle, err := s.officialGifts.Bundle(ctx, sourceID, req.IncludeCollectible)
-	if err != nil {
-		return CommandResult{}, err
-	}
-	if req.Title = strings.TrimSpace(req.Title); req.Title == "" {
-		req.Title = strings.TrimSpace(bundle.Gift.Title)
-		if req.Title == "" {
-			req.Title = "Official gift " + req.SourceGiftID
-		}
-	}
-	if req.Stars <= 0 {
-		req.Stars = bundle.Gift.Stars
-	}
-	if req.ConvertStars <= 0 {
-		req.ConvertStars = bundle.Gift.ConvertStars
-	}
-	if req.ConvertStars < 0 || req.ConvertStars > req.Stars || len([]rune(req.Title)) > domain.MaxStarGiftTitleRunes {
-		return CommandResult{}, domain.ErrStarGiftInvalid
-	}
-	if req.UpgradeStars <= 0 {
-		req.UpgradeStars = bundle.Gift.UpgradeStars
-	}
-	if req.SupplyTotal <= 0 {
-		req.SupplyTotal = bundle.Gift.AvailabilityTotal
-	}
-	if req.SlugPrefix = strings.ToLower(strings.TrimSpace(req.SlugPrefix)); req.SlugPrefix == "" {
-		req.SlugPrefix = "official-" + req.SourceGiftID
-	}
-
-	baseAnimation, err := s.gifts.PrepareOfficialAnimation(bundle.BaseDocument.FileName, bundle.BaseDocument.Data)
-	if err != nil {
-		return CommandResult{}, fmt.Errorf("prepare official gift animation: %w", err)
-	}
-	assetHashes := []string{bundle.BaseDocument.SHA256}
-	rarityCounts := map[string]int{}
-	var background *domain.StarGiftBackground
-	if bundle.Gift.Background != nil {
-		background = &domain.StarGiftBackground{
-			CenterColor: bundle.Gift.Background.CenterColor,
-			EdgeColor:   bundle.Gift.Background.EdgeColor,
-			TextColor:   bundle.Gift.Background.TextColor,
-		}
-	}
-	var collectible *domain.StarGiftCollectibleWrite
-	if req.IncludeCollectible {
-		if bundle.Collectible == nil {
-			return CommandResult{}, domain.ErrStarGiftCollectibleInvalid
-		}
-		modelNames := map[string]int{}
-		models := make([]domain.StarGiftCollectibleAttribute, 0, len(bundle.Collectible.Models))
-		for index, value := range bundle.Collectible.Models {
-			animation, err := s.gifts.PrepareOfficialAnimation(value.Document.FileName, value.Document.Data)
-			if err != nil {
-				return CommandResult{}, fmt.Errorf("prepare official model %q: %w", value.Name, err)
-			}
-			rarityKind, permille, err := officialRarity(value.Rarity)
-			if err != nil {
-				return CommandResult{}, err
-			}
-			models = append(models, domain.StarGiftCollectibleAttribute{Kind: domain.StarGiftCollectibleModel,
-				Name: dedupeCollectibleAttributeName(modelNames, strings.TrimSpace(value.Name)), RarityKind: rarityKind, RarityPermille: permille,
-				Crafted: value.Crafted, OfficialDocumentID: value.DocumentID, SortOrder: index, Animation: &animation})
-			assetHashes = append(assetHashes, value.Document.SHA256)
-			rarityCounts[string(rarityKind)]++
-		}
-		patternNames := map[string]int{}
-		patterns := make([]domain.StarGiftCollectibleAttribute, 0, len(bundle.Collectible.Patterns))
-		for index, value := range bundle.Collectible.Patterns {
-			animation, err := s.gifts.PrepareOfficialAnimation(value.Document.FileName, value.Document.Data)
-			if err != nil {
-				return CommandResult{}, fmt.Errorf("prepare official pattern %q: %w", value.Name, err)
-			}
-			rarityKind, permille, err := officialRarity(value.Rarity)
-			if err != nil {
-				return CommandResult{}, err
-			}
-			patterns = append(patterns, domain.StarGiftCollectibleAttribute{Kind: domain.StarGiftCollectiblePattern,
-				Name: dedupeCollectibleAttributeName(patternNames, strings.TrimSpace(value.Name)), RarityKind: rarityKind, RarityPermille: permille,
-				OfficialDocumentID: value.DocumentID, SortOrder: index, Animation: &animation})
-			assetHashes = append(assetHashes, value.Document.SHA256)
-			rarityCounts[string(rarityKind)]++
-		}
-		backdropNames := map[string]int{}
-		backdrops := make([]domain.StarGiftCollectibleAttribute, 0, len(bundle.Collectible.Backdrops))
-		for index, value := range bundle.Collectible.Backdrops {
-			rarityKind, permille, err := officialRarity(value.Rarity)
-			if err != nil {
-				return CommandResult{}, err
-			}
-			backdrops = append(backdrops, domain.StarGiftCollectibleAttribute{Kind: domain.StarGiftCollectibleBackdrop,
-				Name: dedupeCollectibleAttributeName(backdropNames, strings.TrimSpace(value.Name)), BackdropID: value.BackdropID, CenterColor: value.CenterColor,
-				EdgeColor: value.EdgeColor, PatternColor: value.PatternColor, TextColor: value.TextColor,
-				RarityKind: rarityKind, RarityPermille: permille, SortOrder: index})
-			rarityCounts[string(rarityKind)]++
-		}
-		collectible = &domain.StarGiftCollectibleWrite{GiftID: req.GiftID, UpgradeStars: req.UpgradeStars,
-			SupplyTotal: req.SupplyTotal, SlugPrefix: req.SlugPrefix, Models: models, Patterns: patterns, Backdrops: backdrops,
-			Actor: req.Actor, CommandID: req.CommandID, OfficialGiftID: sourceID,
-			SourceManifestSHA256: append([]byte(nil), bundle.ManifestSHA256...)}
-		validation := *collectible
-		if validation.GiftID == 0 {
-			validation.GiftID = 1
-		}
-		if err := domain.ValidateStarGiftCollectibleDraft(validation); err != nil {
-			return CommandResult{}, err
-		}
-	}
-	req.ManifestSHA256 = hex.EncodeToString(bundle.ManifestSHA256)
-	sort.Strings(assetHashes)
-	req.AssetSHA256 = assetHashes
-	var auctionAvailabilityTotal int
-	if bundle.Gift.Auction {
-		auctionAvailabilityTotal = bundle.Gift.AvailabilityTotal
-	}
-	write := domain.StarGiftCatalogBundleWrite{Catalog: domain.StarGiftCatalogWrite{
-		GiftID: req.GiftID, Title: req.Title, Stars: req.Stars, ConvertStars: req.ConvertStars,
-		Enabled: req.Enabled, SortOrder: req.SortOrder, Animation: baseAnimation, Actor: req.Actor, CommandID: req.CommandID,
-		OfficialGiftID: sourceID, SourceManifestSHA256: append([]byte(nil), bundle.ManifestSHA256...),
-		OfficialSourceJSON: append([]byte(nil), bundle.SourceJSON...),
-		// The snapshot describes Telegram's global market, not this deployment's
-		// inventory. Keep the complete source JSON as provenance, while publishing
-		// regular official imports as a fresh, locally purchasable catalog entry.
-		// Local resale counters and sale dates are derived by lifecycle writes.
-		// Auction gifts are the one exception: star_gift_catalog_revision_auction_check
-		// requires limited=true whenever auction=true, so it can't be forced false here.
-		// limited=true in turn trips star_gift_catalog_revision_supply_check unless
-		// availability_total is positive, so an auction import also needs a real
-		// local supply figure — reuse the snapshot's total and open it at full stock.
-		Limited: bundle.Gift.Auction, SoldOut: false, Birthday: bundle.Gift.Birthday,
-		RequirePremium: bundle.Gift.RequirePremium, LimitedPerUser: bundle.Gift.LimitedPerUser,
-		PeerColorAvailable: bundle.Gift.PeerColorAvailable, Auction: bundle.Gift.Auction,
-		AvailabilityRemains: auctionAvailabilityTotal, AvailabilityTotal: auctionAvailabilityTotal,
-		AvailabilityResale: 0, FirstSaleDate: 0,
-		LastSaleDate: 0, ResellMinStars: 0,
-		PerUserTotal: bundle.Gift.PerUserTotal, LockedUntilDate: bundle.Gift.LockedUntilDate,
-		AuctionSlug: bundle.Gift.AuctionSlug, GiftsPerRound: bundle.Gift.GiftsPerRound,
-		AuctionStartDate: bundle.Gift.AuctionStartDate, UpgradeVariants: bundle.Gift.UpgradeVariants,
-		Background: background,
-	}, Collectible: collectible}
-	return s.runCommand(ctx, req.CommandMeta, ActionImportOfficialStarGift, 0, domain.Peer{}, req, func() (CommandResult, error) {
-		details := map[string]any{"source_gift_id": req.SourceGiftID, "gift_id": strconv.FormatInt(req.GiftID, 10),
-			"manifest_sha256": req.ManifestSHA256, "title": req.Title, "stars": strconv.FormatInt(req.Stars, 10),
-			"convert_stars": strconv.FormatInt(req.ConvertStars, 10), "include_collectible": req.IncludeCollectible,
-			"verified_asset_count": len(assetHashes), "rarity_counts": rarityCounts,
-			"official_limited": bundle.Gift.Limited, "official_sold_out": bundle.Gift.SoldOut,
-			"official_auction": bundle.Gift.Auction, "official_birthday": bundle.Gift.Birthday,
-			"official_require_premium":      bundle.Gift.RequirePremium,
-			"official_availability_remains": bundle.Gift.AvailabilityRemains,
-			"official_availability_total":   bundle.Gift.AvailabilityTotal,
-			"official_availability_resale":  bundle.Gift.AvailabilityResale,
-		}
-		if bundle.Collectible != nil {
-			details["models"] = len(bundle.Collectible.Models)
-			details["patterns"] = len(bundle.Collectible.Patterns)
-			details["backdrops"] = len(bundle.Collectible.Backdrops)
-			crafted := 0
-			for _, model := range bundle.Collectible.Models {
-				if model.Crafted {
-					crafted++
-				}
-			}
-			details["crafted_models"] = crafted
-		}
-		if req.DryRun {
-			return CommandResult{Message: "official star gift bundle validated", Details: details}, nil
-		}
-		result, err := s.gifts.CreateCatalogBundle(ctx, write)
-		if err != nil {
-			return CommandResult{Details: details}, err
-		}
-		details["gift_id"] = strconv.FormatInt(result.Catalog.Gift.ID, 10)
-		details["catalog_revision_id"] = strconv.FormatInt(result.Catalog.Gift.RevisionID, 10)
-		if result.Collectible != nil {
-			details["collectible_revision_id"] = strconv.FormatInt(result.Collectible.ID, 10)
-			details["collectible_revision"] = result.Collectible.Revision
-		}
-		return CommandResult{Message: "official star gift bundle imported", Details: details}, nil
-	})
-}
-
-// ImportAllOfficialStarGifts imports every gift in the official snapshot, one
-// ImportOfficialStarGift call each, all inside the single admin command this
-// request itself represents (so it gets the same dry-run/confirm handling
-// and audit trail as every other admin action; DryRun previews only report
-// the candidate count and do not touch the catalog). Each per-gift call gets
-// a CommandID stable across separate confirmed runs of this action
-// (bulk-official-gift-<source id>), so re-running the batch later is safe:
-// gifts already imported by a prior run replay their cached result
-// (CommandResult.AlreadyExecuted) instead of writing a duplicate catalog
-// entry — the catalog table has no unique constraint on official_gift_id, so
-// without this the same gift could otherwise be imported twice.
-func (s *Service) ImportAllOfficialStarGifts(ctx context.Context, req ImportAllOfficialStarGiftsRequest) (CommandResult, error) {
-	if s == nil || s.gifts == nil || s.officialGifts == nil {
-		return CommandResult{}, fmt.Errorf("official star gift importer is not configured")
-	}
-	items, err := s.officialGifts.List(ctx)
-	if err != nil {
-		return CommandResult{}, err
-	}
-	return s.runCommand(ctx, req.CommandMeta, ActionImportAllOfficialStarGifts, 0, domain.Peer{}, req, func() (CommandResult, error) {
-		details := map[string]any{"total": len(items)}
-		if req.DryRun {
-			details["note"] = "dry run does not import; confirming imports all, skipping gifts already imported by a prior run"
-			return CommandResult{
-				Message: fmt.Sprintf("%d official gifts available to import", len(items)),
-				Details: details,
-			}, nil
-		}
-		imported, skipped, failed := 0, 0, 0
-		perGift := make([]map[string]any, 0, len(items))
-		for _, item := range items {
-			perReq := ImportOfficialStarGiftRequest{
-				CommandMeta: CommandMeta{
-					CommandID: fmt.Sprintf("bulk-official-gift-%d", item.ID),
-					Actor:     req.Actor,
-					Reason:    req.Reason,
-				},
-				SourceGiftID: strconv.FormatInt(item.ID, 10),
-				// Every attribute the snapshot has for an upgradeable gift is
-				// worth importing; CanUpgrade() is exactly the precondition
-				// ImportOfficialStarGift enforces for IncludeCollectible.
-				IncludeCollectible: item.CanUpgrade(),
-				Enabled:            req.Enabled,
-			}
-			result, opErr := s.ImportOfficialStarGift(ctx, perReq)
-			entry := map[string]any{"source_gift_id": perReq.SourceGiftID, "status": result.Status}
-			if opErr != nil {
-				failed++
-				entry["error"] = opErr.Error()
-			} else if result.AlreadyExecuted {
-				skipped++
-			} else {
-				imported++
-				entry["gift_id"] = result.Details["gift_id"]
-			}
-			perGift = append(perGift, entry)
-		}
-		details["imported"] = imported
-		details["skipped"] = skipped
-		details["failed"] = failed
-		details["gifts"] = perGift
-		return CommandResult{
-			Message: fmt.Sprintf("imported %d, skipped %d, failed %d of %d official gifts", imported, skipped, failed, len(items)),
-			Details: details,
-		}, nil
-	})
-}
-
-// dedupeCollectibleAttributeName disambiguates attribute names within one kind (models,
-// patterns, or backdrops each need distinct names per collectible_revision — see the
-// star_gift_collectible_{model,pattern,backdrop}_name_uniq constraints). Official Telegram
-// data legitimately reuses a display name across two distinct attributes of the same kind
-// (seen in practice: two different "Strawberry" models on one gift), which the DB would
-// otherwise reject outright on insert.
 func dedupeCollectibleAttributeName(seen map[string]int, name string) string {
 	key := strings.ToLower(name)
 	seen[key]++
@@ -3579,138 +2566,6 @@ func dedupeCollectibleAttributeName(seen map[string]int, name string) string {
 		return name
 	}
 	return fmt.Sprintf("%s (%d)", name, seen[key])
-}
-
-func officialRarity(value officialgifts.Rarity) (domain.StarGiftAttributeRarityKind, int, error) {
-	kind := domain.StarGiftAttributeRarityKind(strings.ToLower(strings.TrimSpace(value.Kind)))
-	if !kind.Valid() {
-		return "", 0, domain.ErrStarGiftCollectibleInvalid
-	}
-	if kind == domain.StarGiftRarityPermille {
-		if value.Permille == nil || *value.Permille <= 0 || *value.Permille > 1000 {
-			return "", 0, domain.ErrStarGiftCollectibleInvalid
-		}
-		return kind, *value.Permille, nil
-	}
-	if value.Permille != nil {
-		return "", 0, domain.ErrStarGiftCollectibleInvalid
-	}
-	return kind, 0, nil
-}
-
-func (s *Service) PublishStarGiftCollectibles(ctx context.Context, req PublishStarGiftCollectiblesRequest) (CommandResult, error) {
-	if s == nil || s.gifts == nil {
-		return CommandResult{}, fmt.Errorf("star gift service is not configured")
-	}
-	toAttributes := func(kind domain.StarGiftCollectibleAttributeKind, uploads []StarGiftCollectibleAnimationUpload) ([]domain.StarGiftCollectibleAttribute, error) {
-		attributes := make([]domain.StarGiftCollectibleAttribute, len(uploads))
-		for i := range uploads {
-			animation, err := s.gifts.PrepareAnimation(uploads[i].FileName, uploads[i].Data)
-			if err != nil {
-				return nil, fmt.Errorf("prepare %s %q: %w", kind, uploads[i].Name, err)
-			}
-			uploads[i].ContentSHA = hex.EncodeToString(animation.SHA256)
-			attributes[i] = domain.StarGiftCollectibleAttribute{
-				Kind: kind, Name: strings.TrimSpace(uploads[i].Name), RarityKind: domain.StarGiftRarityPermille,
-				RarityPermille: uploads[i].RarityPermille,
-				SortOrder:      uploads[i].SortOrder, Animation: &animation,
-			}
-		}
-		return attributes, nil
-	}
-	models, err := toAttributes(domain.StarGiftCollectibleModel, req.Models)
-	if err != nil {
-		return CommandResult{}, err
-	}
-	patterns, err := toAttributes(domain.StarGiftCollectiblePattern, req.Patterns)
-	if err != nil {
-		return CommandResult{}, err
-	}
-	backdrops := make([]domain.StarGiftCollectibleAttribute, len(req.Backdrops))
-	for i, backdrop := range req.Backdrops {
-		backdrops[i] = domain.StarGiftCollectibleAttribute{
-			Kind: domain.StarGiftCollectibleBackdrop, Name: strings.TrimSpace(backdrop.Name), BackdropID: backdrop.BackdropID,
-			CenterColor: backdrop.CenterColor, EdgeColor: backdrop.EdgeColor, PatternColor: backdrop.PatternColor,
-			TextColor: backdrop.TextColor, RarityKind: domain.StarGiftRarityPermille,
-			RarityPermille: backdrop.RarityPermille, SortOrder: backdrop.SortOrder,
-		}
-	}
-	write := domain.StarGiftCollectibleWrite{
-		GiftID: req.GiftID, UpgradeStars: req.UpgradeStars, SupplyTotal: req.SupplyTotal,
-		SlugPrefix: strings.ToLower(strings.TrimSpace(req.SlugPrefix)), Models: models, Patterns: patterns, Backdrops: backdrops,
-		Actor: req.Actor, CommandID: req.CommandID,
-	}
-	if err := domain.ValidateStarGiftCollectibleDraft(write); err != nil {
-		return CommandResult{}, err
-	}
-	// Persist normalized content hashes in the command payload so retries with changed files are
-	// rejected by the shared idempotency boundary even though raw file bytes are not audit-logged.
-	for i := range req.Models {
-		req.Models[i].ContentSHA = hex.EncodeToString(models[i].Animation.SHA256)
-	}
-	for i := range req.Patterns {
-		req.Patterns[i].ContentSHA = hex.EncodeToString(patterns[i].Animation.SHA256)
-	}
-	return s.runCommand(ctx, req.CommandMeta, ActionPublishGiftCollectibles, 0, domain.Peer{}, req, func() (CommandResult, error) {
-		details := map[string]any{
-			"gift_id": strconv.FormatInt(req.GiftID, 10), "upgrade_stars": strconv.FormatInt(req.UpgradeStars, 10),
-			"supply_total": req.SupplyTotal,
-			"slug_prefix":  write.SlugPrefix, "models": collectibleUploadDetails(req.Models),
-			"patterns": collectibleUploadDetails(req.Patterns), "backdrops": len(req.Backdrops),
-		}
-		if req.DryRun {
-			return CommandResult{Message: "star gift collectible pool validated", Details: details}, nil
-		}
-		revision, err := s.gifts.CreateCollectibleRevision(ctx, write)
-		if err != nil {
-			return CommandResult{Details: details}, err
-		}
-		details["revision_id"] = strconv.FormatInt(revision.ID, 10)
-		details["revision"] = revision.Revision
-		details["published"] = revision.Published
-		return CommandResult{Message: "star gift collectible pool published", Details: details}, nil
-	})
-}
-
-func collectibleUploadDetails(uploads []StarGiftCollectibleAnimationUpload) []map[string]any {
-	details := make([]map[string]any, 0, len(uploads))
-	for _, upload := range uploads {
-		details = append(details, map[string]any{
-			"name": strings.TrimSpace(upload.Name), "rarity_permille": upload.RarityPermille,
-			"sort_order": upload.SortOrder, "source_name": upload.FileName, "sha256": upload.ContentSHA,
-		})
-	}
-	return details
-}
-
-func (s *Service) SetStarGiftEnabled(ctx context.Context, req SetStarGiftEnabledRequest) (CommandResult, error) {
-	if s == nil || s.gifts == nil || req.GiftID <= 0 {
-		return CommandResult{}, fmt.Errorf("valid star gift and service are required")
-	}
-	return s.runCommand(ctx, req.CommandMeta, ActionSetStarGiftEnabled, 0, domain.Peer{}, req, func() (CommandResult, error) {
-		details := map[string]any{"gift_id": strconv.FormatInt(req.GiftID, 10), "enabled": req.Enabled}
-		if req.DryRun {
-			return CommandResult{Message: "star gift state change validated", Details: details}, nil
-		}
-		changed, err := s.gifts.SetCatalogEnabled(ctx, req.GiftID, req.Enabled)
-		details["changed"] = changed
-		return CommandResult{Message: "star gift state updated", Details: details}, err
-	})
-}
-
-func (s *Service) SetStarGiftSortOrder(ctx context.Context, req SetStarGiftSortOrderRequest) (CommandResult, error) {
-	if s == nil || s.gifts == nil || req.GiftID <= 0 || req.SortOrder < math.MinInt32 || req.SortOrder > math.MaxInt32 {
-		return CommandResult{}, fmt.Errorf("valid star gift and service are required")
-	}
-	return s.runCommand(ctx, req.CommandMeta, ActionSetStarGiftSortOrder, 0, domain.Peer{}, req, func() (CommandResult, error) {
-		details := map[string]any{"gift_id": strconv.FormatInt(req.GiftID, 10), "sort_order": req.SortOrder}
-		if req.DryRun {
-			return CommandResult{Message: "star gift order change validated", Details: details}, nil
-		}
-		changed, err := s.gifts.SetCatalogSortOrder(ctx, req.GiftID, req.SortOrder)
-		details["changed"] = changed
-		return CommandResult{Message: "star gift order updated", Details: details}, err
-	})
 }
 
 func (s *Service) SetStickerSetArchived(ctx context.Context, req SetStickerSetArchivedRequest) (CommandResult, error) {
@@ -3933,36 +2788,11 @@ func isSafeStickerPreviewImageType(value string) bool {
 	}
 }
 
-func (s *Service) StarGiftAnimation(ctx context.Context, giftID int64) ([]byte, bool, error) {
-	if s == nil || s.gifts == nil || giftID <= 0 {
-		return nil, false, nil
-	}
-	return s.gifts.AnimationJSON(ctx, giftID)
-}
-
-// EmojiAnimation returns the Lottie JSON for a custom-emoji document (admin emoji browser preview).
 func (s *Service) EmojiAnimation(ctx context.Context, documentID int64) ([]byte, bool, error) {
 	if s == nil || s.emoji == nil || documentID <= 0 {
 		return nil, false, nil
 	}
 	return s.emoji.DocumentAnimationJSON(ctx, documentID)
-}
-
-func (s *Service) StarGiftCollectibles(ctx context.Context, giftID int64) (domain.StarGiftUpgradePreview, bool, error) {
-	if s == nil || s.gifts == nil || giftID <= 0 {
-		return domain.StarGiftUpgradePreview{}, false, nil
-	}
-	return s.gifts.CollectiblePreview(ctx, giftID)
-}
-
-func (s *Service) StarGiftCollectibleAnimation(ctx context.Context, giftID int64, kind domain.StarGiftCollectibleAttributeKind, attributeID int64) ([]byte, bool, error) {
-	if s == nil || s.gifts == nil || giftID <= 0 || attributeID <= 0 {
-		return nil, false, nil
-	}
-	if kind != domain.StarGiftCollectibleModel && kind != domain.StarGiftCollectiblePattern {
-		return nil, false, domain.ErrStarGiftCollectibleInvalid
-	}
-	return s.gifts.CollectibleAnimationJSON(ctx, giftID, kind, attributeID)
 }
 
 func (s *Service) runCommand(ctx context.Context, meta CommandMeta, action string, targetUserID int64, targetPeer domain.Peer, request any, fn func() (CommandResult, error)) (CommandResult, error) {
@@ -4096,13 +2926,6 @@ func (s *Service) notifyAccountFreezeChanged(ctx context.Context, freeze domain.
 		return nil
 	}
 	return s.freezeNotifier.NotifyAccountFreezeChanged(ctx, freeze)
-}
-
-func (s *Service) notifyStarsBalanceChanged(ctx context.Context, balance domain.StarsBalance) error {
-	if s == nil || s.starsNotifier == nil {
-		return nil
-	}
-	return s.starsNotifier.NotifyStarsBalanceChanged(ctx, balance)
 }
 
 func (s *Service) notifyChannelChanged(ctx context.Context, ch domain.Channel) error {
