@@ -57,6 +57,7 @@ const (
 	ActionSetStarGiftSortOrder       = "gifts.set_sort_order"
 	ActionGiveGift                   = "gifts.give"
 	ActionCreateBot                  = "bot.create"
+	ActionCreateBroadcast            = "broadcast.create"
 	ActionDeleteBot                  = "bot.delete"
 	ActionExportBotToken             = "bot.export_token"
 	ActionSetStickerSetArchived      = "stickers.set_archived"
@@ -231,6 +232,21 @@ type AccountService interface {
 
 type StarsService interface {
 	Credit(ctx context.Context, userID, amount int64, reason domain.StarsTransactionReason, peer domain.Peer, title, desc string) (domain.StarsBalance, error)
+}
+
+// BroadcastService creates and lists system broadcast campaigns (a message
+// from domain.OfficialSystemUserID to all or a hand-picked list of users).
+// Delivery itself happens out-of-band via a worker draining the durable
+// recipient outbox created here -- this interface only enqueues and reads
+// back, so CreateBroadcast never blocks on however many recipients there
+// are. Resolving "all users" into an explicit id list is the caller's job
+// (cmd/telesrv-admin's readstore, the same place every other account list
+// query already lives), not this service's -- it always receives an
+// already-resolved id list.
+type BroadcastService interface {
+	Create(ctx context.Context, message string, targetMode domain.BroadcastTargetMode, recipientUserIDs []int64, createdBy string) (domain.Broadcast, error)
+	List(ctx context.Context, beforeID int64, limit int) ([]domain.Broadcast, bool, error)
+	Get(ctx context.Context, id int64) (domain.Broadcast, bool, error)
 }
 
 type StarsNotifier interface {
@@ -428,7 +444,9 @@ type Dependencies struct {
 	// Account carries the login-email factor -- a separate app service from
 	// Users, since login email lives in account_passwords, not users.
 	Account AccountService
-	Now     func() time.Time
+	// Broadcast is the system-broadcast (777000) create/list/get surface.
+	Broadcast BroadcastService
+	Now       func() time.Time
 }
 
 type Service struct {
@@ -458,6 +476,7 @@ type Service struct {
 	verification           VerificationService
 	botVerification        BotVerificationService
 	account                AccountService
+	broadcast              BroadcastService
 	now                    func() time.Time
 }
 
@@ -544,6 +563,9 @@ func (s *Service) Configure(deps Dependencies) *Service {
 	}
 	if deps.Account != nil {
 		s.account = deps.Account
+	}
+	if deps.Broadcast != nil {
+		s.broadcast = deps.Broadcast
 	}
 	if deps.Now != nil {
 		s.now = deps.Now
@@ -1030,6 +1052,18 @@ type CreateBotRequest struct {
 type DeleteBotRequest struct {
 	CommandMeta
 	BotUserID int64 `json:"bot_user_id"`
+}
+
+// CreateBroadcastRequest's UserIDs is always an already-resolved recipient
+// list -- for TargetMode "all" the caller (cmd/telesrv-admin's readstore
+// proxy) has already turned "every user" into an explicit id list before
+// this reaches the admin service, so CreateBroadcast never has to know how
+// to enumerate accounts itself.
+type CreateBroadcastRequest struct {
+	CommandMeta
+	Message    string  `json:"message"`
+	TargetMode string  `json:"target_mode"`
+	UserIDs    []int64 `json:"user_ids"`
 }
 
 type ExportBotTokenRequest struct {
@@ -2047,6 +2081,55 @@ func (s *Service) DeleteBot(ctx context.Context, req DeleteBotRequest) (CommandR
 		}
 		return CommandResult{Message: "bot deleted", Details: details}, nil
 	})
+}
+
+// CreateBroadcast enqueues a system-broadcast (a message from
+// domain.OfficialSystemUserID) to an already-resolved recipient list.
+// Delivery happens out-of-band via the broadcast worker draining the durable
+// recipient rows this creates -- the command completes as soon as the
+// recipient snapshot is written, never waiting on however many sends that
+// implies.
+func (s *Service) CreateBroadcast(ctx context.Context, req CreateBroadcastRequest) (CommandResult, error) {
+	if s == nil || s.broadcast == nil {
+		return CommandResult{}, fmt.Errorf("admin broadcast dependency is not configured")
+	}
+	message := strings.TrimSpace(req.Message)
+	if message == "" {
+		return CommandResult{}, domain.ErrBroadcastMessageEmpty
+	}
+	targetMode := domain.BroadcastTargetMode(req.TargetMode)
+	if targetMode != domain.BroadcastTargetAll && targetMode != domain.BroadcastTargetSelected {
+		return CommandResult{}, domain.ErrBroadcastInvalid
+	}
+	if len(req.UserIDs) == 0 {
+		return CommandResult{}, domain.ErrBroadcastNoRecipients
+	}
+	return s.runCommand(ctx, req.CommandMeta, ActionCreateBroadcast, 0, domain.Peer{}, req, func() (CommandResult, error) {
+		details := map[string]any{
+			"target_mode":     string(targetMode),
+			"recipient_count": len(req.UserIDs),
+			"message_preview": truncateBroadcastPreview(message),
+		}
+		if req.DryRun {
+			return CommandResult{Message: "broadcast validated", Details: details}, nil
+		}
+		created, err := s.broadcast.Create(ctx, message, targetMode, req.UserIDs, req.CommandMeta.Actor)
+		if err != nil {
+			return CommandResult{Details: details}, err
+		}
+		details["broadcast_id"] = created.ID
+		details["total_count"] = created.TotalCount
+		return CommandResult{Message: "broadcast created", Details: details}, nil
+	})
+}
+
+func truncateBroadcastPreview(message string) string {
+	const maxPreview = 120
+	r := []rune(message)
+	if len(r) <= maxPreview {
+		return message
+	}
+	return string(r[:maxPreview]) + "…"
 }
 
 // ExportBotToken returns a non-system bot's current token (unrotated) via the

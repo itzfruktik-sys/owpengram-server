@@ -13,6 +13,7 @@ import type {
   BotListResponse,
   BotVerificationCountsResponse,
   BotVerifierListResponse,
+  BroadcastListResponse,
   ChannelDetail,
   CustomVerificationListResponse,
   CustomVerificationRequestDetail,
@@ -160,6 +161,7 @@ export const api = {
   channels: (params: URLSearchParams) => request<ChannelListResponse>(`/api/channels?${params.toString()}`),
   channel: (id: number) => request<ChannelDetail>(`/api/channels/${id}`),
   bots: (params: URLSearchParams) => request<BotListResponse>(`/api/bots?${params.toString()}`),
+  broadcasts: (params: URLSearchParams) => request<BroadcastListResponse>(`/api/broadcasts?${params.toString()}`),
   bot: (id: number) => request<BotDetail>(`/api/bots/${id}`),
   collectibleUsernames: (params: URLSearchParams) =>
     request<CollectibleUsernameListResponse>(`/api/collectible-usernames?${params.toString()}`),

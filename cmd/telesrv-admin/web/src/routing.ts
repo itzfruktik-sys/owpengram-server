@@ -27,6 +27,7 @@ export function routeTitle(pathname: string): string {
   if (pathname.startsWith("/channels")) return "Supergroups and Channels";
   if (pathname.startsWith("/bots")) return "Bots";
   if (pathname.startsWith("/moderation")) return "Reports and Moderation";
+  if (pathname.startsWith("/broadcasts")) return "Broadcasts";
   if (pathname.startsWith("/emoji")) return "Emoji";
   if (pathname.startsWith("/messages")) return "Message Audit";
 	if (pathname.startsWith("/give-gifts")) return "Give Gifts";

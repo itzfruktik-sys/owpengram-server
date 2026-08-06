@@ -50,6 +50,7 @@ type Service interface {
 	SetChannelVerified(ctx context.Context, req admin.SetChannelVerifiedRequest) (admin.CommandResult, error)
 	SetChannelFlags(ctx context.Context, req admin.SetChannelFlagsRequest) (admin.CommandResult, error)
 	CreateBot(ctx context.Context, req admin.CreateBotRequest) (admin.CommandResult, error)
+	CreateBroadcast(ctx context.Context, req admin.CreateBroadcastRequest) (admin.CommandResult, error)
 	DeleteBot(ctx context.Context, req admin.DeleteBotRequest) (admin.CommandResult, error)
 	ExportBotToken(ctx context.Context, req admin.ExportBotTokenRequest) (admin.CommandResult, error)
 	SetSupport(ctx context.Context, req admin.SetSupportRequest) (admin.CommandResult, error)
@@ -215,6 +216,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/channels/set-color", s.authenticated(s.handleSetChannelColor))
 	mux.HandleFunc("POST /v1/channels/set-emoji-status", s.authenticated(s.handleSetChannelEmojiStatus))
 	mux.HandleFunc("POST /v1/bots/create", s.authenticated(s.handleCreateBot))
+	mux.HandleFunc("POST /v1/broadcasts/create", s.authenticated(s.handleCreateBroadcast))
 	mux.HandleFunc("POST /v1/bots/delete", s.authenticated(s.handleDeleteBot))
 	mux.HandleFunc("POST /v1/bots/export-token", s.authenticated(s.handleExportBotToken))
 	mux.HandleFunc("POST /v1/messages/delete", s.authenticated(s.handleDeleteMessages))
@@ -575,6 +577,15 @@ func (s *Server) handleCreateBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.svc.CreateBot(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleCreateBroadcast(w http.ResponseWriter, r *http.Request) {
+	var req admin.CreateBroadcastRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	result, err := s.svc.CreateBroadcast(r.Context(), req)
 	writeCommandResult(w, result, err)
 }
 

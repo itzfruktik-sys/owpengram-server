@@ -30,6 +30,7 @@ import (
 	authdiagnosticsapp "telesrv/internal/app/authdiagnostics"
 	botsapp "telesrv/internal/app/bots"
 	botverificationapp "telesrv/internal/app/botverification"
+	broadcastapp "telesrv/internal/app/broadcast"
 	channelapp "telesrv/internal/app/channels"
 	chatlistsapp "telesrv/internal/app/chatlists"
 	clienttelemetryapp "telesrv/internal/app/clienttelemetry"
@@ -1396,6 +1397,10 @@ func run(logger *zap.Logger) error {
 	}, logger.Named("store").Named("read-model-listener"))
 	go readModelListener.Run(ctx)
 	activeSessions.SetLifecycleObserver(router)
+	broadcastStore := postgres.NewBroadcastStore(pool)
+	broadcastService := broadcastapp.NewService(broadcastStore,
+		broadcastapp.WithMessageSender(messageStore),
+		broadcastapp.WithLogger(logger.Named("broadcast")))
 	adminService.Configure(adminapp.Dependencies{
 		Auth:                   authService,
 		Revoker:                router,
@@ -1420,6 +1425,7 @@ func run(logger *zap.Logger) error {
 		Verification:           verificationService,
 		BotVerification:        botVerificationService,
 		Account:                accountService,
+		Broadcast:              broadcastService,
 	})
 	// The RPC edge owns the tg.* projection cache and the standard non-PTS
 	// updateUser/updateChannel refresh, so committed registry mutations are
@@ -1479,6 +1485,12 @@ func run(logger *zap.Logger) error {
 	// a message send.
 	go verificationapp.NewNotificationWorker(verificationService, logger.Named("verification").Named("notify"),
 		cfg.VerificationNotifyInterval, cfg.VerificationNotifyBatch).Run(ctx)
+	// System broadcasts (admin panel "Broadcasts" -- a message from 777000 to
+	// all/selected users) are delivered from the same kind of durable outbox as
+	// applicant notifications above: an admin creating one for every user must
+	// not wait on however long sending to all of them takes.
+	go broadcastapp.NewWorker(broadcastService, logger.Named("broadcast").Named("delivery"),
+		cfg.BroadcastWorkerInterval, cfg.BroadcastWorkerBatch).Run(ctx)
 	moderationActionOptions := []moderationapp.ActionExecutorOption{}
 	if cfg.PublicLinkWebAddr != "" {
 		moderationActionOptions = append(

@@ -548,6 +548,14 @@ type Config struct {
 	// verifier bots. 0 for either disables the budget.
 	BotVerificationRequestRateLimit  int
 	BotVerificationRequestRateWindow time.Duration
+	// BroadcastWorkerInterval / BroadcastWorkerBatch drive the system-broadcast
+	// delivery worker (internal/app/broadcast): an admin-created broadcast is
+	// snapshotted into a durable per-recipient outbox immediately, and this
+	// worker drains it in batches, so sending to thousands of users never blocks
+	// the admin action itself.
+	BroadcastWorkerInterval time.Duration
+	BroadcastWorkerBatch    int
+
 	// HideThirdPartyVerification hides third-party bot verification instead of
 	// removing it: the admin panel drops its "Third-party marks" nav entry and
 	// refuses every botverification.* route with 404 (regardless of session
@@ -946,6 +954,8 @@ func Load() (Config, error) {
 		// verifier bots, and filing with a second company is not a retry of the first.
 		BotVerificationRequestRateLimit:  envIntOr("TELESRV_BOT_VERIFICATION_REQUEST_RATE_LIMIT", 5),
 		BotVerificationRequestRateWindow: envDurationOr("TELESRV_BOT_VERIFICATION_REQUEST_RATE_WINDOW", 24*time.Hour),
+		BroadcastWorkerInterval:          envDurationOr("TELESRV_BROADCAST_WORKER_INTERVAL", 3*time.Second),
+		BroadcastWorkerBatch:             envIntOr("TELESRV_BROADCAST_WORKER_BATCH", 50),
 		HideThirdPartyVerification:       envBoolOr("TELESRV_HIDE_THIRD_PARTY_VERIFICATION", true),
 
 		GroupCallCheckTTL:        envDurationOr("TELESRV_GROUPCALL_CHECK_TTL", 45*time.Second),

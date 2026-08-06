@@ -55,6 +55,7 @@ func (s *server) routes() http.Handler {
 	mux.Handle("GET /api/accounts", s.requireAuthAPI(http.HandlerFunc(s.handleAccountsAPI)))
 	mux.Handle("GET /api/accounts/stats", s.requireAuthAPI(http.HandlerFunc(s.handleAccountsStatsAPI)))
 	mux.Handle("GET /api/accounts/shared-devices", s.requireAuthAPI(http.HandlerFunc(s.handleSharedDeviceGroupsAPI)))
+	mux.Handle("GET /api/broadcasts", s.requireAuthAPI(http.HandlerFunc(s.handleBroadcastsAPI)))
 	mux.Handle("GET /api/accounts/{id}", s.requireAuthAPI(http.HandlerFunc(s.handleAccountDetailAPI)))
 	mux.Handle("GET /api/accounts/{id}/avatar", s.requireAuthAPI(http.HandlerFunc(s.handleAccountAvatarAPI)))
 	mux.Handle("GET /api/channels", s.requireAuthAPI(http.HandlerFunc(s.handleChannelsAPI)))
@@ -108,6 +109,7 @@ func (s *server) routes() http.Handler {
 	mux.Handle("POST /api/actions/set-channel-color", s.requireAuthAPI(http.HandlerFunc(s.handleSetChannelColorAPI)))
 	mux.Handle("POST /api/actions/set-channel-emoji-status", s.requireAuthAPI(http.HandlerFunc(s.handleSetChannelEmojiStatusAPI)))
 	mux.Handle("POST /api/actions/create-bot", s.requireAuthAPI(http.HandlerFunc(s.handleCreateBotAPI)))
+	mux.Handle("POST /api/actions/create-broadcast", s.requireAuthAPI(http.HandlerFunc(s.handleCreateBroadcastAPI)))
 	mux.Handle("POST /api/actions/delete-bot", s.requireAuthAPI(http.HandlerFunc(s.handleDeleteBotAPI)))
 	mux.Handle("POST /api/actions/export-bot-token", s.requireAuthAPI(http.HandlerFunc(s.handleExportBotTokenAPI)))
 	mux.Handle("POST /api/actions/set-channel-verified", s.requireAuthAPI(http.HandlerFunc(s.handleSetChannelVerifiedAPI)))
@@ -662,6 +664,36 @@ func (s *server) handleSharedDeviceGroupsAPI(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+func (s *server) handleBroadcastsAPI(w http.ResponseWriter, r *http.Request) {
+	if s.read == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "read store is not configured")
+		return
+	}
+	beforeID, _ := parseInt64(r.URL.Query().Get("before_id"))
+	limit, _ := parseInt(r.URL.Query().Get("limit"))
+	rows, hasMore, err := s.read.ListBroadcasts(r.Context(), beforeID, limit)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	nextBeforeID := int64(0)
+	if hasMore && len(rows) > 0 {
+		nextBeforeID = rows[len(rows)-1].ID
+	}
+	if limit <= 0 {
+		limit = accountListDefaultLimit
+	}
+	if limit > accountListMaxLimit {
+		limit = accountListMaxLimit
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"limit":          limit,
+		"rows":           rows,
+		"has_more":       hasMore,
+		"next_before_id": nextBeforeID,
+	})
+}
+
 func (s *server) handleAccountsStatsAPI(w http.ResponseWriter, r *http.Request) {
 	if s.read == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "read store is not configured")
@@ -905,6 +937,47 @@ func (s *server) handleCreateBotAPI(w http.ResponseWriter, r *http.Request) {
 		Username:    body.Username,
 	}
 	result, err := s.callAdminAPI(r.Context(), "/v1/bots/create", req)
+	writeCommandResultAPI(w, result, err)
+}
+
+type createBroadcastAPIRequest struct {
+	CommandID  string  `json:"command_id"`
+	Reason     string  `json:"reason"`
+	Confirm    bool    `json:"confirm"`
+	Message    string  `json:"message"`
+	TargetMode string  `json:"target_mode"`
+	UserIDs    []int64 `json:"user_ids,omitempty"`
+}
+
+// handleCreateBroadcastAPI resolves "all users" into an explicit id list
+// before forwarding to the admin API: the admin service always receives an
+// already-resolved recipient list, never "every user" as a live concept it
+// would have to know how to enumerate itself.
+func (s *server) handleCreateBroadcastAPI(w http.ResponseWriter, r *http.Request) {
+	var body createBroadcastAPIRequest
+	if !decodeAction(w, r, &body) {
+		return
+	}
+	userIDs := body.UserIDs
+	if body.TargetMode == "all" {
+		if s.read == nil {
+			writeAPIError(w, http.StatusServiceUnavailable, "read store is not configured")
+			return
+		}
+		all, err := s.read.ListAllAccountIDs(r.Context())
+		if err != nil {
+			writeAPIError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		userIDs = all
+	}
+	req := admin.CreateBroadcastRequest{
+		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "create-broadcast"),
+		Message:     body.Message,
+		TargetMode:  body.TargetMode,
+		UserIDs:     userIDs,
+	}
+	result, err := s.callAdminAPI(r.Context(), "/v1/broadcasts/create", req)
 	writeCommandResultAPI(w, result, err)
 }
 

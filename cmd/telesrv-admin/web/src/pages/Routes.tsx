@@ -10,6 +10,7 @@ import { ChannelDetailPage } from "./ChannelDetailPage";
 import { ChannelsPage } from "./ChannelsPage";
 import { BotDetailPage } from "./BotDetailPage";
 import { BotsPage } from "./BotsPage";
+import { BroadcastsPage } from "./BroadcastsPage";
 import { Dashboard } from "./Dashboard";
 import { GroupMessageDetailPage } from "./GroupMessageDetailPage";
 import { GroupMessagesPage } from "./GroupMessagesPage";
@@ -120,6 +121,9 @@ export function Routes({ route, navigate }: { route: RouteState; navigate: Navig
   }
   if (route.path === "/moderation") {
     return <ModerationCasesPage navigate={navigate} />;
+  }
+  if (route.path === "/broadcasts") {
+    return <BroadcastsPage />;
   }
   if (route.path === "/emoji") {
     return <StickerSetsPage kind="emoji" />;

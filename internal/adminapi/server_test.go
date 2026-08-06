@@ -459,6 +459,10 @@ func (fakeService) CreateBot(_ context.Context, req admin.CreateBotRequest) (adm
 	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
 }
 
+func (fakeService) CreateBroadcast(_ context.Context, req admin.CreateBroadcastRequest) (admin.CommandResult, error) {
+	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
+}
+
 func (fakeService) DeleteBot(_ context.Context, req admin.DeleteBotRequest) (admin.CommandResult, error) {
 	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
 }

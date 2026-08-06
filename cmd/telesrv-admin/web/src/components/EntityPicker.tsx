@@ -98,6 +98,119 @@ export function UserPicker({
   );
 }
 
+// MultiUserPicker is UserPicker's search widget with a running selection
+// instead of a single slot -- clicking a result toggles it in or out of the
+// list, shown above the search box as removable chips.
+export function MultiUserPicker({
+  label,
+  selected,
+  onChange
+}: {
+  label: string;
+  selected: AccountRow[];
+  onChange: (rows: AccountRow[]) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [rows, setRows] = useState<AccountRow[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function search() {
+    setBusy(true);
+    setError("");
+    const params = new URLSearchParams({ limit: "20" });
+    if (query.trim()) {
+      params.set("q", query.trim());
+    }
+    try {
+      const result = await api.accounts(params);
+      setRows(result.rows);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    void search();
+  }, []);
+
+  function toggle(row: AccountRow) {
+    if (selected.some((entry) => entry.ID === row.ID)) {
+      onChange(selected.filter((entry) => entry.ID !== row.ID));
+    } else {
+      onChange([...selected, row]);
+    }
+  }
+
+  function remove(id: number) {
+    onChange(selected.filter((entry) => entry.ID !== id));
+  }
+
+  return (
+    <div className="entity-picker">
+      <div className="picker-head">
+        <span>{label}</span>
+        {selected.length > 0 ? (
+          <button className="link-button" type="button" onClick={() => onChange([])}>
+            <X size={13} /> {"Clear all"}
+          </button>
+        ) : null}
+      </div>
+      {selected.length > 0 ? (
+        <div className="picker-chip-list">
+          {selected.map((row) => (
+            <span key={row.ID} className="picker-chip">
+              {displayName(row)} <span className="mono">{row.ID}</span>
+              <button type="button" onClick={() => remove(row.ID)} aria-label={`Remove ${row.ID}`}>
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className="picker-search">
+        <Search size={15} />
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void search();
+            }
+          }}
+          placeholder={"Search user_id / phone / username"}
+        />
+        <button className="btn compact-btn" type="button" onClick={search} disabled={busy}>
+          {busy ? <Loader2 size={14} className="spin" /> : "Search"}
+        </button>
+      </div>
+      {error && <div className="picker-error">{error}</div>}
+      <div className="picker-results">
+        {rows.map((row) => {
+          const isSelected = selected.some((entry) => entry.ID === row.ID);
+          return (
+            <button
+              key={row.ID}
+              className={`picker-row ${isSelected ? "selected" : ""}`}
+              type="button"
+              onClick={() => toggle(row)}
+            >
+              <span className="mono">{row.ID}</span>
+              <strong>{displayName(row)}</strong>
+              <span>{displayUsername(row.Username) || displayPhone(row.Phone) || "-"}</span>
+              {isSelected ? <Check size={15} /> : null}
+            </button>
+          );
+        })}
+        {rows.length === 0 && !busy ? <div className="picker-empty">{"No results"}</div> : null}
+      </div>
+    </div>
+  );
+}
+
 // BotPicker is the same widget over /api/bots. Verifier status is granted to a bot
 // account, and an operator knows the handle rather than the id, so the grant form
 // resolves it here instead of asking for a raw number.

@@ -6,6 +6,7 @@ import {
   Database,
   LayoutDashboard,
   LogOut,
+  Megaphone,
   MessageSquareText,
   ShieldAlert,
   ShieldCheck,
@@ -92,6 +93,7 @@ export function Shell({
           <NavLink icon={<ShieldCheck size={16} />} href="/channels" route={route} navigate={navigate}>{"Supergroups / Channels"}</NavLink>
           <NavLink icon={<Bot size={16} />} href="/bots" route={route} navigate={navigate}>{"Bots"}</NavLink>
           <NavLink icon={<ShieldAlert size={16} />} href="/moderation" route={route} navigate={navigate}>{"Reports / Moderation"}</NavLink>
+          <NavLink icon={<Megaphone size={16} />} href="/broadcasts" route={route} navigate={navigate}>{"Broadcasts"}</NavLink>
           {canReviewVerification && (
             <NavLink icon={<BadgeCheck size={16} />} href="/verification" route={route} navigate={navigate}>{"Verification"}</NavLink>
           )}

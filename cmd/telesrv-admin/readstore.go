@@ -469,6 +469,31 @@ SELECT count(*) FROM users WHERE NOT is_bot AND id <> ALL($1::bigint[])`,
 	return n, nil
 }
 
+// ListAllAccountIDs resolves a "broadcast to all users" target into an
+// explicit id list -- the same real-account exclusion CountAccounts uses
+// (no bots, no built-in system accounts), so a broadcast never targets
+// @BotFather/@Stickers/@ChatBot or 777000 itself.
+func (s *readStore) ListAllAccountIDs(ctx context.Context) ([]int64, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT id FROM users WHERE NOT is_bot AND id <> ALL($1::bigint[])`, systemAccountIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list all account ids: %w", err)
+	}
+	defer rows.Close()
+	out := make([]int64, 0, 256)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan account id: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate account ids: %w", err)
+	}
+	return out, nil
+}
+
 // CountOnlineAccounts counts accounts the live server currently considers
 // online. Presence itself lives only in the live server's in-process
 // presenceTracker (internal/rpc/presence.go), unreachable from this
@@ -870,9 +895,9 @@ ORDER BY g.last_active_at DESC, g.device_model, g.system_version, g.platform, g.
 	for rows.Next() {
 		var (
 			deviceModel, systemVersion, platform, ip string
-			accountCount                              int
-			lastActiveAt                              time.Time
-			acc                                       SharedDeviceAccount
+			accountCount                             int
+			lastActiveAt                             time.Time
+			acc                                      SharedDeviceAccount
 		)
 		if err := rows.Scan(&deviceModel, &systemVersion, &platform, &ip, &accountCount, &lastActiveAt,
 			&acc.UserID, &acc.ActiveAt, &acc.Phone, &acc.Username, &acc.FirstName, &acc.LastName); err != nil {
@@ -894,6 +919,64 @@ ORDER BY g.last_active_at DESC, g.device_model, g.system_version, g.platform, g.
 		groups = groups[:limit]
 	}
 	return groups, hasMore, nil
+}
+
+// BroadcastRow is one system-broadcast campaign, with sent/failed counts
+// derived live from broadcast_recipients (never stored, so they can't drift).
+type BroadcastRow struct {
+	ID          int64
+	Message     string
+	TargetMode  string
+	TotalCount  int
+	SentCount   int
+	FailedCount int
+	CreatedBy   string
+	CreatedAt   time.Time
+}
+
+const broadcastRowColumns = `
+	b.id, b.message, b.target_mode, b.total_count, b.created_by, b.created_at,
+	count(*) FILTER (WHERE r.status = 'sent')::int AS sent_count,
+	count(*) FILTER (WHERE r.status = 'failed')::int AS failed_count`
+
+func scanBroadcastRow(row interface{ Scan(...any) error }, item *BroadcastRow) error {
+	return row.Scan(&item.ID, &item.Message, &item.TargetMode, &item.TotalCount, &item.CreatedBy, &item.CreatedAt,
+		&item.SentCount, &item.FailedCount)
+}
+
+// ListBroadcasts pages campaigns newest-first.
+func (s *readStore) ListBroadcasts(ctx context.Context, beforeID int64, limit int) ([]BroadcastRow, bool, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+SELECT `+broadcastRowColumns+`
+FROM broadcasts b
+LEFT JOIN broadcast_recipients r ON r.broadcast_id = b.id
+WHERE $1::bigint = 0 OR b.id < $1
+GROUP BY b.id
+ORDER BY b.id DESC
+LIMIT $2`, beforeID, limit+1)
+	if err != nil {
+		return nil, false, fmt.Errorf("list broadcasts: %w", err)
+	}
+	defer rows.Close()
+	out := make([]BroadcastRow, 0, limit+1)
+	for rows.Next() {
+		var item BroadcastRow
+		if err := scanBroadcastRow(rows, &item); err != nil {
+			return nil, false, fmt.Errorf("scan broadcast: %w", err)
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("iterate broadcasts: %w", err)
+	}
+	hasMore := len(out) > limit
+	if hasMore {
+		out = out[:limit]
+	}
+	return out, hasMore, nil
 }
 
 func (s *readStore) AccountDetail(ctx context.Context, userID int64) (AccountDetail, error) {
@@ -2727,7 +2810,7 @@ SELECT count(DISTINCT owner_user_id)::bigint FROM (`+perOwnerMediaSizeSQL+`) x W
 // AccountStorageRow is one account's row in the per-account storage
 // breakdown table.
 type AccountStorageRow struct {
-	UserID    int64  `json:"UserID,string"`
+	UserID    int64 `json:"UserID,string"`
 	Username  string
 	FirstName string
 	Bytes     int64 `json:"Bytes,string"`
