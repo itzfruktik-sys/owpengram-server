@@ -27,10 +27,19 @@ const (
 	// response -- mirrors MaxBotInlineResults, the TL-level cap the client
 	// itself enforces per messages.getInlineBotResults response.
 	MaxGifCatalogEntries = MaxBotInlineResults
-	// MaxGifCatalogUploadSize bounds one admin-uploaded catalog file.
-	// 20MB matches MaxBotInlineWebSize, the size a client-side inline GIF
-	// result is already allowed to be.
-	MaxGifCatalogUploadSize = MaxBotInlineWebSize
+	// MaxGifCatalogUploadSize bounds one admin-uploaded or seed-imported
+	// catalog file (the raw GIF/MP4 before transcoding, not the smaller MP4
+	// files.Service.AdminUploadGifMaterial produces from it).
+	//
+	// Deliberately its own constant, not MaxBotInlineWebSize: that bounds
+	// content a *client* submits as an inline result, an unrelated
+	// constraint. This one instead matches
+	// files.gifTranscodeMaxInputBytes -- the actual ceiling the ffmpeg
+	// transcoder accepts -- so a real download (unoptimized meme/reaction
+	// GIFs routinely run 20-50MB, frame-by-frame GIF encoding is notoriously
+	// space-inefficient) doesn't get rejected here before ever reaching a
+	// step that could actually handle it.
+	MaxGifCatalogUploadSize = 50 << 20
 )
 
 // GifCatalogEntry is one admin-curated GIF served by the built-in @gif inline

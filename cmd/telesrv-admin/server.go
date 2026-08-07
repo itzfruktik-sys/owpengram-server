@@ -1844,7 +1844,7 @@ type createGifCatalogEntryAPIRequest struct {
 
 func (s *server) handleCreateGifCatalogEntryAPI(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, 21<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, domain.MaxGifCatalogUploadSize+(1<<20))
 	if err := r.ParseMultipartForm(1 << 20); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid multipart form: "+err.Error())
 		return
@@ -1865,8 +1865,8 @@ func (s *server) handleCreateGifCatalogEntryAPI(w http.ResponseWriter, r *http.R
 		return
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, (20<<20)+1))
-	if err != nil || len(data) == 0 || len(data) > 20<<20 {
+	data, err := io.ReadAll(io.LimitReader(file, domain.MaxGifCatalogUploadSize+1))
+	if err != nil || len(data) == 0 || int64(len(data)) > domain.MaxGifCatalogUploadSize {
 		writeAPIError(w, http.StatusBadRequest, "gif file is empty or too large")
 		return
 	}
