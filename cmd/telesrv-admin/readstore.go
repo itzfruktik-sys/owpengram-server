@@ -282,6 +282,38 @@ ORDER BY set_kind, sort_order, id`, kind)
 	return out, rows.Err()
 }
 
+// GifCatalogRow is one entry of the admin-curated GIF catalog @gif serves for
+// the client's GIF picker.
+type GifCatalogRow struct {
+	ID         int64 `json:"ID,string"`
+	Title      string
+	DocumentID int64 `json:"DocumentID,string"`
+	Enabled    bool
+	SortOrder  int
+	CreatedBy  string
+	CreatedAt  time.Time
+}
+
+func (s *readStore) ListGifCatalog(ctx context.Context) ([]GifCatalogRow, error) {
+	rows, err := s.pool.Query(ctx, `
+SELECT id, title, document_id, enabled, sort_order, created_by, created_at
+FROM gif_catalog
+ORDER BY sort_order, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list gif catalog: %w", err)
+	}
+	defer rows.Close()
+	out := make([]GifCatalogRow, 0)
+	for rows.Next() {
+		var item GifCatalogRow
+		if err := rows.Scan(&item.ID, &item.Title, &item.DocumentID, &item.Enabled, &item.SortOrder, &item.CreatedBy, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 // StickerSetDocumentIDs returns document ids as strings, not int64 — a plain
 // JSON number array would let the browser silently round these snowflake ids
 // past 2^53 (see StickerSetRow.ID for the same issue on the set id itself).

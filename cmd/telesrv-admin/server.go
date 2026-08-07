@@ -119,6 +119,11 @@ func (s *server) routes() http.Handler {
 	mux.Handle("POST /api/actions/create-sticker-set", s.requireAuthAPI(http.HandlerFunc(s.handleCreateStickerSetAPI)))
 	mux.Handle("POST /api/actions/add-sticker-to-set", s.requireAuthAPI(http.HandlerFunc(s.handleAddStickerToSetAPI)))
 	mux.Handle("POST /api/actions/remove-sticker-from-set", s.requireAuthAPI(http.HandlerFunc(s.handleRemoveStickerFromSetAPI)))
+	mux.Handle("GET /api/gif-catalog", s.requireAuthAPI(http.HandlerFunc(s.handleGifCatalogAPI)))
+	mux.Handle("POST /api/actions/create-gif-catalog-entry", s.requireAuthAPI(http.HandlerFunc(s.handleCreateGifCatalogEntryAPI)))
+	mux.Handle("POST /api/actions/set-gif-catalog-enabled", s.requireAuthAPI(http.HandlerFunc(s.handleSetGifCatalogEnabledAPI)))
+	mux.Handle("POST /api/actions/set-gif-catalog-sort-order", s.requireAuthAPI(http.HandlerFunc(s.handleSetGifCatalogSortOrderAPI)))
+	mux.Handle("POST /api/actions/delete-gif-catalog-entry", s.requireAuthAPI(http.HandlerFunc(s.handleDeleteGifCatalogEntryAPI)))
 	mux.Handle("POST /api/actions/mint-collectible-username", s.requireAuthAPI(http.HandlerFunc(s.handleMintCollectibleUsernameAPI)))
 	mux.Handle("POST /api/actions/transfer-collectible-username", s.requireAuthAPI(http.HandlerFunc(s.handleTransferCollectibleUsernameAPI)))
 	mux.Handle("POST /api/actions/revoke-collectible-username", s.requireAuthAPI(http.HandlerFunc(s.handleRevokeCollectibleUsernameAPI)))
@@ -1813,6 +1818,124 @@ func (s *server) handleRemoveStickerFromSetAPI(w http.ResponseWriter, r *http.Re
 		SetID:       body.SetID, DocumentID: body.DocumentID,
 	}
 	result, err := s.callAdminAPI(r.Context(), "/v1/stickers/remove", req)
+	writeCommandResultAPI(w, result, err)
+}
+
+func (s *server) handleGifCatalogAPI(w http.ResponseWriter, r *http.Request) {
+	if s.read == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "read store is not configured")
+		return
+	}
+	rows, err := s.read.ListGifCatalog(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rows": rows})
+}
+
+type createGifCatalogEntryAPIRequest struct {
+	CommandID string `json:"command_id"`
+	Reason    string `json:"reason"`
+	Confirm   bool   `json:"confirm"`
+	Title     string `json:"title"`
+}
+
+func (s *server) handleCreateGifCatalogEntryAPI(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 21<<20)
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid multipart form: "+err.Error())
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	var body createGifCatalogEntryAPIRequest
+	dec := json.NewDecoder(strings.NewReader(r.FormValue("metadata")))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid metadata: "+err.Error())
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "gif file is required")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, (20<<20)+1))
+	if err != nil || len(data) == 0 || len(data) > 20<<20 {
+		writeAPIError(w, http.StatusBadRequest, "gif file is empty or too large")
+		return
+	}
+	req := admin.CreateGifCatalogEntryRequest{
+		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "create-gif-catalog-entry"),
+		Title:       body.Title, FileName: header.Filename,
+	}
+	result, err := s.callAdminMultipart(r.Context(), "/v1/gif-catalog/create", req, header.Filename, data)
+	writeCommandResultAPI(w, result, err)
+}
+
+type setGifCatalogEnabledAPIRequest struct {
+	CommandID string `json:"command_id"`
+	Reason    string `json:"reason"`
+	Confirm   bool   `json:"confirm"`
+	ID        int64  `json:"id,string"`
+	Enabled   bool   `json:"enabled"`
+}
+
+func (s *server) handleSetGifCatalogEnabledAPI(w http.ResponseWriter, r *http.Request) {
+	var body setGifCatalogEnabledAPIRequest
+	if !decodeAction(w, r, &body) {
+		return
+	}
+	req := admin.SetGifCatalogEnabledRequest{
+		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "set-gif-catalog-enabled"),
+		ID:          body.ID, Enabled: body.Enabled,
+	}
+	result, err := s.callAdminAPI(r.Context(), "/v1/gif-catalog/set-enabled", req)
+	writeCommandResultAPI(w, result, err)
+}
+
+type setGifCatalogSortOrderAPIRequest struct {
+	CommandID string `json:"command_id"`
+	Reason    string `json:"reason"`
+	Confirm   bool   `json:"confirm"`
+	ID        int64  `json:"id,string"`
+	SortOrder int    `json:"sort_order"`
+}
+
+func (s *server) handleSetGifCatalogSortOrderAPI(w http.ResponseWriter, r *http.Request) {
+	var body setGifCatalogSortOrderAPIRequest
+	if !decodeAction(w, r, &body) {
+		return
+	}
+	req := admin.SetGifCatalogSortOrderRequest{
+		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "set-gif-catalog-sort-order"),
+		ID:          body.ID, SortOrder: body.SortOrder,
+	}
+	result, err := s.callAdminAPI(r.Context(), "/v1/gif-catalog/set-sort-order", req)
+	writeCommandResultAPI(w, result, err)
+}
+
+type deleteGifCatalogEntryAPIRequest struct {
+	CommandID string `json:"command_id"`
+	Reason    string `json:"reason"`
+	Confirm   bool   `json:"confirm"`
+	ID        int64  `json:"id,string"`
+}
+
+func (s *server) handleDeleteGifCatalogEntryAPI(w http.ResponseWriter, r *http.Request) {
+	var body deleteGifCatalogEntryAPIRequest
+	if !decodeAction(w, r, &body) {
+		return
+	}
+	req := admin.DeleteGifCatalogEntryRequest{
+		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "delete-gif-catalog-entry"),
+		ID:          body.ID,
+	}
+	result, err := s.callAdminAPI(r.Context(), "/v1/gif-catalog/delete", req)
 	writeCommandResultAPI(w, result, err)
 }
 

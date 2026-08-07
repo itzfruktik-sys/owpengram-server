@@ -9,6 +9,7 @@ import (
 
 	"github.com/iamxvbaba/td/tg"
 	"github.com/iamxvbaba/td/tgerr"
+	"go.uber.org/zap"
 
 	"telesrv/internal/domain"
 	"telesrv/internal/store"
@@ -80,6 +81,27 @@ func (r *Router) onMessagesGetInlineBotResults(ctx context.Context, req *tg.Mess
 	peer, err := r.checkedDomainPeerFromInputPeer(ctx, userID, req.Peer)
 	if err != nil {
 		return nil, err
+	}
+	// 内置（进程内）service bot 分支：@gif 没有 MTProto session、也没有 Bot API 消费者，
+	// 走下面的「推 updateBotInlineQuery + 挂起 25s」必然超时，故同步问 responder。
+	//
+	// 结果仍必须登记进 inline registry：messages.sendInlineBotResult 用
+	// (query_id, result_id) 反查用户选中的那一条，query_id==0 会让每次发送都以
+	// QUERY_ID_EMPTY 失败。registerCachedContext 正是「已有结果、只需分配
+	// query_id」这条路径（与 cacheKey 命中时同一个函数），它不写 cacheKey 查询
+	// 缓存，因此管理员改动目录后下一次查询依旧立即生效。
+	if r.deps.ServiceBotInlineResults != nil && r.deps.ServiceBotInlineResults.HandlesInlineBot(bot.ID) {
+		results, handled, err := r.deps.ServiceBotInlineResults.OnInlineQuery(ctx, bot.ID, userID, req.Query, req.Offset)
+		if err != nil {
+			r.log.Warn("service bot inline query",
+				zap.Int64("bot_user_id", bot.ID), zap.Int64("user_id", userID), zap.Error(err))
+			return nil, internalErr()
+		}
+		if !handled {
+			return nil, botInvalidErr()
+		}
+		registered := r.inlines.registerCachedContext(ctx, r.clock.Now(), bot.ID, userID, peer, results)
+		return r.tgBotInlineResults(ctx, userID, registered), nil
 	}
 	cacheKey := inlineCacheKey{
 		botUserID: bot.ID,

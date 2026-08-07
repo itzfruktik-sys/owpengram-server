@@ -46,8 +46,8 @@ const (
 
 // Service 实现 upload 分片累积、blob 落盘、getFile 下载，并把上传文件组装成 Photo / Document。
 type Service struct {
-	media       store.MediaStore
-	blobs       BlobBackend
+	media store.MediaStore
+	blobs BlobBackend
 	// otherBackends holds additional, non-active BlobBackend instances keyed
 	// by Name() (e.g. "localfs" while s3 is active, or vice versa). Only
 	// used for reading/deleting rows written before the deployment switched
@@ -56,14 +56,14 @@ type Service struct {
 	// (the row/bytes still exist, but nothing would know how to reach them).
 	otherBackends map[string]BlobBackend
 	uploadParts   UploadPartBackend
-	dc          int
-	log         *zap.Logger
-	thumbs      VideoThumbnailer
-	thumbsSet   bool
-	gifs        GIFTranscoder
-	gifsSet     bool
-	blobCache   *blobMetaCache
-	byteCache   *blobBytesCache
+	dc            int
+	log           *zap.Logger
+	thumbs        VideoThumbnailer
+	thumbsSet     bool
+	gifs          GIFTranscoder
+	gifsSet       bool
+	blobCache     *blobMetaCache
+	byteCache     *blobBytesCache
 	// blobMetaSF/blobBytesSF 合并对同一热 blob 的并发首次访问：否则每个并发 getFile 都各打
 	// 一发 PG GetFileBlob + backend GetRange(热门贴纸/reaction/头像被大量用户同时拉时尤甚)。
 	blobMetaSF         singleflight.Group
@@ -87,6 +87,8 @@ type Service struct {
 	premiumPromoMu    sync.RWMutex
 	premiumPromo      domain.PremiumPromoCatalog
 	premiumPromoReady bool
+
+	gifCatalog store.GifCatalogStore
 }
 
 // Option 配置 files 服务的可选能力。
@@ -161,6 +163,19 @@ func WithUploadPartBackend(backend UploadPartBackend) Option {
 	return func(s *Service) {
 		if backend != nil {
 			s.uploadParts = backend
+		}
+	}
+}
+
+// WithGifCatalog injects the store backing the admin-curated GIF catalog
+// (AdminUploadGifMaterial/AdminCreateGifCatalogEntry and friends below, plus
+// the ListGifCatalog the built-in @gif inline bot reads through
+// bots.gifCatalogSource). Without it those methods report
+// domain.ErrGifCatalogUnavailable.
+func WithGifCatalog(c store.GifCatalogStore) Option {
+	return func(s *Service) {
+		if c != nil {
+			s.gifCatalog = c
 		}
 	}
 }

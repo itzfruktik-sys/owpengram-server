@@ -44,6 +44,14 @@ type userStickerSetInstaller interface {
 	InstallUserStickerSet(ctx context.Context, userID int64, setID int64, kind domain.StickerSetKind, archived bool, installedDate int) error
 }
 
+// gifCatalogSource is the built-in @gif inline bot's read-only view of the
+// admin-curated GIF catalog (app/files.Service satisfies it as-is: it already
+// exposes GetDocuments for the sticker-set responder above).
+type gifCatalogSource interface {
+	ListGifCatalog(ctx context.Context, onlyEnabled bool) ([]domain.GifCatalogEntry, error)
+	GetDocuments(ctx context.Context, ids []int64) ([]domain.Document, error)
+}
+
 type aiChatGenerator interface {
 	GenerateTextStream(ctx context.Context, req domain.AITextGenerationRequest, emit func(domain.AIComposeText) error) (domain.AIComposeText, error)
 }
@@ -110,6 +118,7 @@ type Service struct {
 	verification          verificationApplications
 	customVerification    customVerifications
 	verifierTargets       verifierBotTargets
+	gifCatalog            gifCatalogSource
 	telegramLogin         *telegramloginapp.Service
 	hooks                 RouterHooks
 	textDrafts            TextDraftPusher
@@ -203,6 +212,19 @@ func WithUserStickerSets(c userStickerSetInstaller) Option {
 	return func(s *Service) {
 		if c != nil {
 			s.installer = c
+		}
+	}
+}
+
+// WithGifCatalogSource injects the read-only catalog access used by the
+// built-in @gif inline bot. Without it, HandlesInlineBot still claims
+// GifBotUserID but OnInlineQuery reports handled=true with zero results
+// rather than erroring -- an unconfigured catalog is "nothing to show", not a
+// bot failure.
+func WithGifCatalogSource(c gifCatalogSource) Option {
+	return func(s *Service) {
+		if c != nil {
+			s.gifCatalog = c
 		}
 	}
 }

@@ -54,6 +54,10 @@ const (
 	ActionCreateStickerSet       = "stickers.create"
 	ActionAddStickerToSet        = "stickers.add_sticker"
 	ActionRemoveStickerFromSet   = "stickers.remove_sticker"
+	ActionCreateGifCatalogEntry  = "gif_catalog.create"
+	ActionSetGifCatalogEnabled   = "gif_catalog.set_enabled"
+	ActionSetGifCatalogSortOrder = "gif_catalog.set_sort_order"
+	ActionDeleteGifCatalogEntry  = "gif_catalog.delete"
 	// Collectible (Fragment-style) username lifecycle.
 	ActionMintCollectibleUsername     = "usernames.collectible.mint"
 	ActionTransferCollectibleUsername = "usernames.collectible.transfer"
@@ -289,6 +293,21 @@ type StickerSetsService interface {
 	AdminRemoveStickerFromSet(ctx context.Context, setID int64, documentID int64) (domain.StickerSet, []domain.Document, error)
 }
 
+// GifCatalogService is the admin-console management surface over the
+// admin-curated GIF catalog the built-in @gif inline bot serves for the
+// client's GIF picker.
+type GifCatalogService interface {
+	// ValidateGifUpload is a pure check (no store writes) so a dry-run preview
+	// can validate an uploaded file's shape without materializing it.
+	ValidateGifUpload(fileName string, data []byte) (mimeType string, ok bool)
+	AdminUploadGifMaterial(ctx context.Context, fileName string, data []byte) (domain.Document, error)
+	AdminCreateGifCatalogEntry(ctx context.Context, title string, documentID int64) (domain.GifCatalogEntry, error)
+	AdminListGifCatalog(ctx context.Context) ([]domain.GifCatalogEntry, error)
+	AdminSetGifCatalogEnabled(ctx context.Context, id int64, enabled bool) (bool, error)
+	AdminSetGifCatalogSortOrder(ctx context.Context, id int64, order int) (bool, error)
+	AdminDeleteGifCatalogEntry(ctx context.Context, id int64) (bool, error)
+}
+
 // BotService creates bot accounts on behalf of the admin. It mirrors the
 // owner-scoped /newbot flow: a bot is a users row (is_bot=true) plus a bots row
 // owned by ownerUserID, and the returned token is shown once to the operator.
@@ -353,6 +372,7 @@ type Dependencies struct {
 	Messages               MessagesService
 	Photos                 AvatarResolver
 	StickerSets            StickerSetsService
+	GifCatalog             GifCatalogService
 	Bots                   BotService
 	Emoji                  EmojiService
 	Moderation             ModerationService
@@ -383,6 +403,7 @@ type Service struct {
 	messages               MessagesService
 	photos                 AvatarResolver
 	stickerSets            StickerSetsService
+	gifCatalog             GifCatalogService
 	bots                   BotService
 	emoji                  EmojiService
 	moderation             ModerationService
@@ -438,6 +459,9 @@ func (s *Service) Configure(deps Dependencies) *Service {
 	}
 	if deps.StickerSets != nil {
 		s.stickerSets = deps.StickerSets
+	}
+	if deps.GifCatalog != nil {
+		s.gifCatalog = deps.GifCatalog
 	}
 	if deps.Bots != nil {
 		s.bots = deps.Bots
@@ -655,6 +679,30 @@ type RemoveStickerFromSetRequest struct {
 	CommandMeta
 	SetID      int64 `json:"set_id"`
 	DocumentID int64 `json:"document_id"`
+}
+
+type CreateGifCatalogEntryRequest struct {
+	CommandMeta
+	Title    string `json:"title"`
+	FileName string `json:"file_name"`
+	Data     []byte `json:"-"`
+}
+
+type SetGifCatalogEnabledRequest struct {
+	CommandMeta
+	ID      int64 `json:"id"`
+	Enabled bool  `json:"enabled"`
+}
+
+type SetGifCatalogSortOrderRequest struct {
+	CommandMeta
+	ID        int64 `json:"id"`
+	SortOrder int   `json:"sort_order"`
+}
+
+type DeleteGifCatalogEntryRequest struct {
+	CommandMeta
+	ID int64 `json:"id"`
 }
 
 type SetAccountFrozenRequest struct {
@@ -2734,6 +2782,83 @@ func (s *Service) RemoveStickerFromSet(ctx context.Context, req RemoveStickerFro
 		}
 		details["count"] = set.Count
 		return CommandResult{Message: "sticker removed", Details: details}, nil
+	})
+}
+
+func (s *Service) CreateGifCatalogEntry(ctx context.Context, req CreateGifCatalogEntryRequest) (CommandResult, error) {
+	if s == nil || s.gifCatalog == nil {
+		return CommandResult{}, fmt.Errorf("gif catalog service is not configured")
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		return CommandResult{}, domain.ErrGifCatalogEntryInvalid
+	}
+	mimeType, ok := s.gifCatalog.ValidateGifUpload(req.FileName, req.Data)
+	if !ok {
+		return CommandResult{}, domain.ErrGifCatalogFileInvalid
+	}
+	return s.runCommand(ctx, req.CommandMeta, ActionCreateGifCatalogEntry, 0, domain.Peer{}, req, func() (CommandResult, error) {
+		details := map[string]any{
+			"title": req.Title, "file_name": req.FileName, "mime_type": mimeType, "bytes": len(req.Data),
+		}
+		if req.DryRun {
+			return CommandResult{Message: "gif catalog entry validated", Details: details}, nil
+		}
+		doc, err := s.gifCatalog.AdminUploadGifMaterial(ctx, req.FileName, req.Data)
+		if err != nil {
+			return CommandResult{Details: details}, err
+		}
+		entry, err := s.gifCatalog.AdminCreateGifCatalogEntry(ctx, req.Title, doc.ID)
+		if err != nil {
+			return CommandResult{Details: details}, err
+		}
+		details["id"] = strconv.FormatInt(entry.ID, 10)
+		details["document_id"] = strconv.FormatInt(doc.ID, 10)
+		return CommandResult{Message: "gif catalog entry created", Details: details}, nil
+	})
+}
+
+func (s *Service) SetGifCatalogEnabled(ctx context.Context, req SetGifCatalogEnabledRequest) (CommandResult, error) {
+	if s == nil || s.gifCatalog == nil || req.ID <= 0 {
+		return CommandResult{}, fmt.Errorf("valid gif catalog entry and service are required")
+	}
+	return s.runCommand(ctx, req.CommandMeta, ActionSetGifCatalogEnabled, 0, domain.Peer{}, req, func() (CommandResult, error) {
+		details := map[string]any{"id": strconv.FormatInt(req.ID, 10), "enabled": req.Enabled}
+		if req.DryRun {
+			return CommandResult{Message: "gif catalog entry state change validated", Details: details}, nil
+		}
+		changed, err := s.gifCatalog.AdminSetGifCatalogEnabled(ctx, req.ID, req.Enabled)
+		details["changed"] = changed
+		return CommandResult{Message: "gif catalog entry state updated", Details: details}, err
+	})
+}
+
+func (s *Service) SetGifCatalogSortOrder(ctx context.Context, req SetGifCatalogSortOrderRequest) (CommandResult, error) {
+	if s == nil || s.gifCatalog == nil || req.ID <= 0 || req.SortOrder < math.MinInt32 || req.SortOrder > math.MaxInt32 {
+		return CommandResult{}, fmt.Errorf("valid gif catalog entry and service are required")
+	}
+	return s.runCommand(ctx, req.CommandMeta, ActionSetGifCatalogSortOrder, 0, domain.Peer{}, req, func() (CommandResult, error) {
+		details := map[string]any{"id": strconv.FormatInt(req.ID, 10), "sort_order": req.SortOrder}
+		if req.DryRun {
+			return CommandResult{Message: "gif catalog entry order change validated", Details: details}, nil
+		}
+		changed, err := s.gifCatalog.AdminSetGifCatalogSortOrder(ctx, req.ID, req.SortOrder)
+		details["changed"] = changed
+		return CommandResult{Message: "gif catalog entry order updated", Details: details}, err
+	})
+}
+
+func (s *Service) DeleteGifCatalogEntry(ctx context.Context, req DeleteGifCatalogEntryRequest) (CommandResult, error) {
+	if s == nil || s.gifCatalog == nil || req.ID <= 0 {
+		return CommandResult{}, fmt.Errorf("valid gif catalog entry and service are required")
+	}
+	return s.runCommand(ctx, req.CommandMeta, ActionDeleteGifCatalogEntry, 0, domain.Peer{}, req, func() (CommandResult, error) {
+		details := map[string]any{"id": strconv.FormatInt(req.ID, 10)}
+		if req.DryRun {
+			return CommandResult{Message: "gif catalog entry deletion validated", Details: details}, nil
+		}
+		changed, err := s.gifCatalog.AdminDeleteGifCatalogEntry(ctx, req.ID)
+		details["changed"] = changed
+		return CommandResult{Message: "gif catalog entry deleted", Details: details}, err
 	})
 }
 

@@ -619,8 +619,13 @@ func (s *Service) ResolveUsername(ctx context.Context, currentUserID int64, user
 	// Resolution covers both the editable username slot (5..32) and
 	// Fragment-style collectible usernames (4..32). Keep the stricter
 	// validUsername check on create/update paths; only lookup accepts the
-	// collectible lower bound.
-	if !domain.ValidCollectibleUsername(username) {
+	// collectible lower bound. Built-in system accounts (e.g. @gif, 3
+	// characters) are exempted from the floor itself -- they're fixed,
+	// server-controlled handles, not user input -- but still resolve through
+	// the normal DB-backed path below, so caching/projection/hidden-bot
+	// handling stay exactly as for any other account.
+	_, isSystemUsername := domain.SystemUserByUsername(username)
+	if !isSystemUsername && !domain.ValidCollectibleUsername(username) {
 		return domain.User{}, false, domain.ErrUsernameInvalid
 	}
 	u, found, err := s.users.ByUsername(ctx, username)

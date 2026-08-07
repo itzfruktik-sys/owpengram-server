@@ -75,6 +75,10 @@ type Service interface {
 	AddStickerToSet(ctx context.Context, req admin.AddStickerToSetRequest) (admin.CommandResult, error)
 	RemoveStickerFromSet(ctx context.Context, req admin.RemoveStickerFromSetRequest) (admin.CommandResult, error)
 	StickerDocumentAnimation(ctx context.Context, documentID int64) ([]byte, string, bool, error)
+	CreateGifCatalogEntry(ctx context.Context, req admin.CreateGifCatalogEntryRequest) (admin.CommandResult, error)
+	SetGifCatalogEnabled(ctx context.Context, req admin.SetGifCatalogEnabledRequest) (admin.CommandResult, error)
+	SetGifCatalogSortOrder(ctx context.Context, req admin.SetGifCatalogSortOrderRequest) (admin.CommandResult, error)
+	DeleteGifCatalogEntry(ctx context.Context, req admin.DeleteGifCatalogEntryRequest) (admin.CommandResult, error)
 	EmojiAnimation(ctx context.Context, documentID int64) ([]byte, bool, error)
 	ModerationCases(ctx context.Context, filter domain.ModerationCaseFilter) ([]domain.ModerationCase, error)
 	ModerationCase(ctx context.Context, caseID int64) (domain.ModerationCaseDetail, bool, error)
@@ -203,6 +207,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/stickers/create", s.authenticated(s.handleCreateStickerSet))
 	mux.HandleFunc("POST /v1/stickers/add", s.authenticated(s.handleAddStickerToSet))
 	mux.HandleFunc("POST /v1/stickers/remove", s.authenticated(s.handleRemoveStickerFromSet))
+	mux.HandleFunc("POST /v1/gif-catalog/create", s.authenticated(s.handleCreateGifCatalogEntry))
+	mux.HandleFunc("POST /v1/gif-catalog/set-enabled", s.authenticated(s.handleSetGifCatalogEnabled))
+	mux.HandleFunc("POST /v1/gif-catalog/set-sort-order", s.authenticated(s.handleSetGifCatalogSortOrder))
+	mux.HandleFunc("POST /v1/gif-catalog/delete", s.authenticated(s.handleDeleteGifCatalogEntry))
 	mux.HandleFunc("GET /v1/stickers/documents/{id}/animation", s.authenticated(s.handleStickerDocumentAnimation))
 	mux.HandleFunc("GET /v1/emoji/{id}/animation", s.authenticated(s.handleEmojiAnimation))
 	mux.HandleFunc("GET /v1/moderation/cases", s.authenticated(s.handleModerationCases))
@@ -690,6 +698,67 @@ func (s *Server) handleRemoveStickerFromSet(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	result, err := s.svc.RemoveStickerFromSet(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleCreateGifCatalogEntry(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, domain.MaxGifCatalogUploadSize+(1<<20))
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid multipart form: "+err.Error())
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	var req admin.CreateGifCatalogEntryRequest
+	dec := json.NewDecoder(strings.NewReader(r.FormValue("metadata")))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid metadata: "+err.Error())
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "gif file is required")
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, domain.MaxGifCatalogUploadSize+1))
+	if err != nil || len(data) == 0 || int64(len(data)) > domain.MaxGifCatalogUploadSize {
+		writeError(w, http.StatusBadRequest, "gif file is empty or too large")
+		return
+	}
+	req.FileName = header.Filename
+	req.Data = data
+	result, err := s.svc.CreateGifCatalogEntry(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleSetGifCatalogEnabled(w http.ResponseWriter, r *http.Request) {
+	var req admin.SetGifCatalogEnabledRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	result, err := s.svc.SetGifCatalogEnabled(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleSetGifCatalogSortOrder(w http.ResponseWriter, r *http.Request) {
+	var req admin.SetGifCatalogSortOrderRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	result, err := s.svc.SetGifCatalogSortOrder(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleDeleteGifCatalogEntry(w http.ResponseWriter, r *http.Request) {
+	var req admin.DeleteGifCatalogEntryRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	result, err := s.svc.DeleteGifCatalogEntry(r.Context(), req)
 	writeCommandResult(w, result, err)
 }
 

@@ -636,6 +636,20 @@ export type StickerSetRow = {
 
 export type StickerSetListResponse = { rows: StickerSetRow[] };
 
+export type GifCatalogRow = {
+  // String, not number: 18-19 digit snowflake ids, past JS's 2^53
+  // safe-integer limit.
+  ID: string;
+  Title: string;
+  DocumentID: string;
+  Enabled: boolean;
+  SortOrder: number;
+  CreatedBy: string;
+  CreatedAt: string;
+};
+
+export type GifCatalogListResponse = { rows: GifCatalogRow[] };
+
 export type AccountListResponse = {
   query: string;
   limit: number;

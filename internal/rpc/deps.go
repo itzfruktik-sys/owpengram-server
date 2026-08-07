@@ -360,6 +360,29 @@ type ServiceBotCallbacks interface {
 	OnCallbackQuery(ctx context.Context, query domain.BotCallbackQuery) (domain.BotCallbackAnswer, bool, error)
 }
 
+// ServiceBotInlineResults answers messages.getInlineBotResults for built-in
+// bots that run inside this process (@gif); app/bots implements it.
+//
+// Same rationale as ServiceBotCallbacks above: an internal bot has no MTProto
+// session to receive updateBotInlineQuery and no Bot API consumer to drain the
+// queue, so the ordinary push-and-wait-25s path could only ever time out. A bot
+// claimed here is answered synchronously by the responder that owns it, and
+// nothing is registered in the shared inline-query registry for it.
+//
+// A nil Deps.ServiceBotInlineResults keeps the edge behaviour exactly as it
+// was: every inline query is pushed to the bot's session and waited on.
+//
+// HandlesInlineBot is deliberately its own method, not a reuse of
+// ServiceBotCallbacks'/messages.BotResponder's shared HandlesBot: that one
+// method already drives both private-message and callback routing for the
+// bots it covers, and @gif should answer inline queries only, not also become
+// eligible for private-message/callback dispatch it was never given a case
+// for.
+type ServiceBotInlineResults interface {
+	HandlesInlineBot(botUserID int64) bool
+	OnInlineQuery(ctx context.Context, botUserID, userID int64, query, offset string) (domain.BotInlineResults, bool, error)
+}
+
 // UserIdentityService 是 UsersService 的资料扩展能力，用于 username/phone 解析。
 type UserIdentityService interface {
 	CheckUsername(ctx context.Context, userID int64, username string) (bool, error)
@@ -1043,49 +1066,50 @@ type Deps struct {
 	// AuthKeySessionLayers is the protocol-only durable ordering boundary for
 	// explicit invokeWithLayer evidence. Production must wire the same auth-key
 	// store used by the MTProto edge; nil is reserved for isolated router tests.
-	AuthKeySessionLayers store.AuthKeySessionLayerStore
-	Account              AccountService
-	Privacy              PrivacyService
-	Help                 HelpService
-	AccountFreeze        AccountFreezeService
-	AICompose            AIComposeService
-	Ephemeral            EphemeralService
-	EphemeralPush        store.EphemeralPushBroker
-	Moderation           ModerationService
-	Users                UsersService
-	Usernames            UsernameRegistryService
-	BotVerifications     BotVerificationService
-	TelegramLogin        TelegramLoginService
-	Updates              UpdatesService
-	BootstrapUpdates     store.BootstrapUpdateJobStore
-	BotAPIUpdates        store.BotAPIUpdateStore
-	BotCallbacks         store.BotCallbackRegistryStore
-	Contacts             ContactsService
-	Dialogs              DialogsService
-	Chatlists            ChatlistsService
-	Messages             MessagesService
-	Translation          TranslationService
-	Stories              StoriesService
-	Channels             ChannelsService
-	Communities          CommunitiesService
-	Files                FilesService
-	PremiumPromo         PremiumPromoService
-	Bots                 BotsService
-	ServiceBotCallbacks  ServiceBotCallbacks
-	Polls                PollsService
-	Phone                PhoneService
-	GroupCalls           GroupCallsService
-	LiveStreams          LiveStreamsService
-	SFU                  sfu.Service
-	TURN                 turnsrv.Service
-	LangPack             LangPackService
-	Sessions             SessionBinder
-	Inline               store.InlineRegistryStore
-	Limiter              RateLimiter
-	Metrics              Metrics
-	SecretChats          SecretChatService
-	Passkey              PasskeyService
-	Themes               ThemeService
+	AuthKeySessionLayers    store.AuthKeySessionLayerStore
+	Account                 AccountService
+	Privacy                 PrivacyService
+	Help                    HelpService
+	AccountFreeze           AccountFreezeService
+	AICompose               AIComposeService
+	Ephemeral               EphemeralService
+	EphemeralPush           store.EphemeralPushBroker
+	Moderation              ModerationService
+	Users                   UsersService
+	Usernames               UsernameRegistryService
+	BotVerifications        BotVerificationService
+	TelegramLogin           TelegramLoginService
+	Updates                 UpdatesService
+	BootstrapUpdates        store.BootstrapUpdateJobStore
+	BotAPIUpdates           store.BotAPIUpdateStore
+	BotCallbacks            store.BotCallbackRegistryStore
+	Contacts                ContactsService
+	Dialogs                 DialogsService
+	Chatlists               ChatlistsService
+	Messages                MessagesService
+	Translation             TranslationService
+	Stories                 StoriesService
+	Channels                ChannelsService
+	Communities             CommunitiesService
+	Files                   FilesService
+	PremiumPromo            PremiumPromoService
+	Bots                    BotsService
+	ServiceBotCallbacks     ServiceBotCallbacks
+	ServiceBotInlineResults ServiceBotInlineResults
+	Polls                   PollsService
+	Phone                   PhoneService
+	GroupCalls              GroupCallsService
+	LiveStreams             LiveStreamsService
+	SFU                     sfu.Service
+	TURN                    turnsrv.Service
+	LangPack                LangPackService
+	Sessions                SessionBinder
+	Inline                  store.InlineRegistryStore
+	Limiter                 RateLimiter
+	Metrics                 Metrics
+	SecretChats             SecretChatService
+	Passkey                 PasskeyService
+	Themes                  ThemeService
 }
 
 // ThemeService 抽象自定义云主题(app/themes):创建/更新/查询主题 + 维护每用户已安装列表。

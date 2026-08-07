@@ -66,5 +66,12 @@ func BuildConfig(dc int, ip string, port int, now time.Time, publicBaseURL strin
 		WebfileDCID:          dc,
 	}
 	config.SetReactionsDefault(&tg.ReactionEmoji{Emoticon: DefaultReactionEmoticon})
+	// The GIF picker's trending/search panel reads this from help.getConfig's
+	// typed Config (gifs_list_widget.cpp: session().serverConfig().gifSearchUsername)
+	// -- NOT from help.getAppConfig's loose JSON blob, which is a separate RPC/
+	// response entirely. Must match the built-in @gif system bot's username
+	// (domain.GifBotUser().Username), whose inline results are served
+	// synchronously in-process (see rpc.ServiceBotInlineResults).
+	config.SetGifSearchUsername("gif")
 	return config
 }

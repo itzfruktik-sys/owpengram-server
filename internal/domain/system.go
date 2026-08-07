@@ -1,6 +1,10 @@
 package domain
 
-import "telesrv/internal/branding"
+import (
+	"strings"
+
+	"telesrv/internal/branding"
+)
 
 const (
 	// OfficialSystemUserID 是 Telegram 兼容客户端识别的官方系统账号。
@@ -75,6 +79,17 @@ const (
 	// startup -- not a document minted specifically for this feature -- so it
 	// resolves the same way any other seeded custom emoji does.
 	VerifierBotDefaultIconDocumentID int64 = 5237699328843200968
+
+	// GifBotUserID is the built-in @gif inline bot: it answers
+	// messages.getInlineBotResults synchronously (no MTProto session, no Bot API
+	// process -- see rpc.ServiceBotInlineResults) with the admin-curated GIF
+	// catalog, the same role Telegram's own @gif plays for the client's GIF
+	// picker "trending"/search panel. The id is reserved and stable, so a
+	// restart never re-creates the account under a different identity.
+	GifBotUserID int64 = 1250000015
+	// GifBotAccessHash is fixed and double-written with the seed row in this
+	// feature's migration; the two must never drift.
+	GifBotAccessHash int64 = 7233282977235616768
 )
 
 // officialSystemUserPhotoDCID/Stripped 由 files.Service.SeedOfficialSystemAvatar
@@ -270,6 +285,19 @@ func VerifierBotUser() User {
 	}
 }
 
+// GifBotUser returns the built-in @gif account.
+func GifBotUser() User {
+	return User{
+		ID:             GifBotUserID,
+		AccessHash:     GifBotAccessHash,
+		FirstName:      "GIFs",
+		Username:       "gif",
+		Verified:       true,
+		Bot:            true,
+		BotInfoVersion: 1,
+	}
+}
+
 // SystemUserByID 返回内置系统账号；非系统账号返回 ok=false。
 // 所有对 777000 的硬编码注入点统一经此函数，新增内置账号只改这里。
 func SystemUserByID(id int64) (User, bool) {
@@ -286,6 +314,8 @@ func SystemUserByID(id int64) (User, bool) {
 		return VerifyBotUser(), true
 	case VerifierBotUserID:
 		return VerifierBotUser(), true
+	case GifBotUserID:
+		return GifBotUser(), true
 	}
 	return User{}, false
 }
@@ -308,7 +338,27 @@ func SystemUserIDs() []int64 {
 		ChatBotUserID,
 		VerifyBotUserID,
 		VerifierBotUserID,
+		GifBotUserID,
 	}
+}
+
+// SystemUserByUsername resolves a case-insensitive exact username match
+// against every built-in account, e.g. for username-lookup paths that
+// otherwise enforce a minimum length shorter than some reserved system
+// handles need (@gif is 3 characters -- shorter than
+// MinCollectibleUsernameLength's 4-character floor for an ordinary lookup).
+func SystemUserByUsername(username string) (User, bool) {
+	username = NormalizeUsername(username)
+	if username == "" {
+		return User{}, false
+	}
+	for _, id := range SystemUserIDs() {
+		u, ok := SystemUserByID(id)
+		if ok && strings.EqualFold(u.Username, username) {
+			return u, true
+		}
+	}
+	return User{}, false
 }
 
 func SystemUserByPhone(phone string) (User, bool) {

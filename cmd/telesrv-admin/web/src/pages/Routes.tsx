@@ -15,6 +15,7 @@ import { GroupMessagesPage } from "./GroupMessagesPage";
 import { MessageDetailPage } from "./MessageDetailPage";
 import { MessagesPage } from "./MessagesPage";
 import { StickerSetsPage } from "./StickerSetsPage";
+import { GifCatalogPage } from "./GifCatalogPage";
 import { ModerationCaseDetailPage } from "./ModerationCaseDetailPage";
 import { ModerationCasesPage } from "./ModerationCasesPage";
 import { StoragePage } from "./StoragePage";
@@ -120,6 +121,9 @@ export function Routes({ route, navigate }: { route: RouteState; navigate: Navig
 	if (route.path === "/stickers") {
 		return <StickerSetsPage kind="stickers" />;
 	}
+  if (route.path === "/gif-catalog") {
+    return <GifCatalogPage />;
+  }
   if (route.path === "/messages/detail" || route.path === "/messages/private/detail") {
     return (
       <MessageDetailPage
