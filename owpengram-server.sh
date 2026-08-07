@@ -30,15 +30,28 @@ fi
 # of launching real Python. Validate the version output too.
 PYTHON=""
 PYTHON_VERSION=""
-for cand in python3 python; do
-  if command -v "$cand" >/dev/null 2>&1; then
-    if VER_OUT="$("$cand" --version 2>&1)" && [[ "$VER_OUT" == Python\ 3* ]]; then
-      PYTHON="$cand"
-      PYTHON_VERSION="$VER_OUT"
-      break
-    fi
+# A local .venv/ (created per this script's own advice below, to install
+# tui-panel/requirements-panel.txt without touching a Debian/Ubuntu
+# system Python) takes priority over PATH -- once it exists, every later run
+# should keep using it instead of silently falling back to an older/
+# unrelated system interpreter.
+if [[ -x ".venv/bin/python" ]]; then
+  if VER_OUT="$(.venv/bin/python --version 2>&1)" && [[ "$VER_OUT" == Python\ 3* ]]; then
+    PYTHON=".venv/bin/python"
+    PYTHON_VERSION="$VER_OUT"
   fi
-done
+fi
+if [[ -z "$PYTHON" ]]; then
+  for cand in python3 python; do
+    if command -v "$cand" >/dev/null 2>&1; then
+      if VER_OUT="$("$cand" --version 2>&1)" && [[ "$VER_OUT" == Python\ 3* ]]; then
+        PYTHON="$cand"
+        PYTHON_VERSION="$VER_OUT"
+        break
+      fi
+    fi
+  done
+fi
 
 if [[ -z "$PYTHON" ]]; then
   warn "Python 3 is not installed (needed to run the server-panel TUI)"
@@ -52,8 +65,12 @@ fi
 if [[ -n "$PYTHON" ]]; then
   MISSING="$("$PYTHON" tui-panel/check_deps.py)"
   if [[ -n "$MISSING" ]]; then
-    warn "Missing Python packages: $(echo "$MISSING" | tr '\n' ' ')"
-    echo "       Install them with: $PYTHON -m pip install -r tui-panel/requirements-panel.txt"
+    warn "Missing or outdated Python packages: $(echo "$MISSING" | tr '\n' ' ')"
+    echo "       Install them with: $PYTHON -m pip install -U -r tui-panel/requirements-panel.txt"
+    echo "       On Debian/Ubuntu this usually fails with 'externally-managed-environment'"
+    echo "       against the system Python -- use a venv instead, then just re-run this script"
+    echo "       (it prefers .venv/ automatically once one exists):"
+    echo "         python3 -m venv .venv && .venv/bin/pip install -r tui-panel/requirements-panel.txt"
     PROBLEMS=1
   else
     ok "Python dependencies OK (textual, psutil, cryptography)"

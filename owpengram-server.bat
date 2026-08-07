@@ -55,8 +55,8 @@ if defined PYTHON (
     if not defined MISSING (set "MISSING=%%m") else (set "MISSING=!MISSING!, %%m")
   )
   if defined MISSING (
-    echo [WARN] Missing Python packages: !MISSING!
-    echo        Install them with: !PYTHON! -m pip install -r tui-panel\requirements-panel.txt
+    echo [WARN] Missing or outdated Python packages: !MISSING!
+    echo        Install them with: !PYTHON! -m pip install -U -r tui-panel\requirements-panel.txt
     set "PROBLEMS=1"
   ) else (
     echo [ok] Python dependencies OK ^(textual, psutil, cryptography^)
