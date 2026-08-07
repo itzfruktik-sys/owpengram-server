@@ -250,6 +250,7 @@ func (r *Router) onMessagesSendInlineBotResult(ctx context.Context, req *tg.Mess
 	if !duplicate {
 		r.pushInlineBotSendFeedback(ctx, userID, results, result, updates)
 		r.inlines.consumeContext(ctx, req.QueryID)
+		r.autoSaveSentGif(ctx, userID, media)
 	}
 	return updates, nil
 }

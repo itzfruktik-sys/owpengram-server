@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/iamxvbaba/td/tg"
+	"go.uber.org/zap"
 
 	"telesrv/internal/domain"
 )
@@ -123,6 +124,39 @@ func (r *Router) onMessagesSaveGif(ctx context.Context, req *tg.MessagesSaveGifR
 	}
 	r.pushStickerCollectionUpdate(ctx, userID, &tg.UpdateSavedGifs{})
 	return true, nil
+}
+
+// autoSaveSentGif mirrors official Telegram: sending a GIF adds it to the
+// sender's Saved GIFs, and re-sending an already-saved one bumps it back to the
+// front (SaveStickerCollectionItem's upsert refreshes used_at/order_key, so
+// both cases are the same call).
+//
+// The server has to do this: clients never save on send. TDesktop only issues
+// messages.saveGif for the explicit "Save GIF" toggle and its context-menu
+// entry (api/api_toggling_media.cpp, history_view_context_menu.cpp), so without
+// this a GIF picked out of @gif's catalog would send fine and still never show
+// up in the user's own GIFs tab.
+//
+// Best-effort by design: the message is already sent and acknowledged by the
+// time this runs, so a collection write failure is logged rather than turned
+// into a send error the client would retry.
+func (r *Router) autoSaveSentGif(ctx context.Context, userID int64, media *domain.MessageMedia) {
+	if media == nil || media.Kind != domain.MessageMediaKindDocument || media.Document == nil {
+		return
+	}
+	if !media.Document.IsGif() {
+		return
+	}
+	svc, ok := r.stickerCollectionSvc()
+	if !ok {
+		return
+	}
+	if err := svc.SaveStickerCollectionItem(ctx, userID, domain.StickerCollectionGif, media.Document.ID, false, int(r.clock.Now().Unix())); err != nil {
+		r.log.Warn("auto-save sent gif",
+			zap.Int64("user_id", userID), zap.Int64("document_id", media.Document.ID), zap.Error(err))
+		return
+	}
+	r.pushStickerCollectionUpdate(ctx, userID, &tg.UpdateSavedGifs{})
 }
 
 func (r *Router) onMessagesClearRecentStickers(ctx context.Context, req *tg.MessagesClearRecentStickersRequest) (bool, error) {
