@@ -166,6 +166,15 @@ class ServerManager:
             (f"{prefix}-{service}", self.container_status(f"{prefix}-{service}"))
             for service in ("postgres", "redis")
         ]
+        # MinIO is optional (only relevant when TELESRV_BLOB_BACKEND=s3 points
+        # at the self-hosted container rather than AWS S3), so unlike
+        # postgres/redis above it's only added to the list when the container
+        # actually exists -- no "not created" row cluttering a deployment that
+        # never uses it.
+        minio_name = f"{prefix}-minio"
+        minio_state = self.container_status(minio_name)
+        if minio_state is not None:
+            containers.append((minio_name, minio_state))
         return Status(
             server_pid=server_pid,
             server_alive=pid_alive(server_pid),
@@ -600,13 +609,36 @@ def copy_to_clipboard(text: str) -> bool:
     return False
 
 
-def system_stats() -> tuple[float, float, float]:
-    """Returns (cpu_percent, ram_percent, disk_percent) for the drive this
-    project lives on."""
+@dataclass
+class SystemStats:
+    cpu_percent: float
+    ram_percent: float
+    ram_used_gb: float
+    ram_total_gb: float
+    disk_percent: float
+    disk_used_gb: float
+    disk_total_gb: float
+
+
+def system_stats() -> SystemStats:
+    """CPU/RAM/disk usage for the drive this project lives on. RAM/disk carry
+    used/total GB alongside the percentage -- the percentage alone doesn't say
+    whether "83%" is 8GB of 10 or 800GB of 1000, and the progress bar widget
+    itself already renders the percentage, so the label is where that actually
+    useful number belongs."""
+    gib = 1024**3
     cpu = psutil.cpu_percent(interval=None)
-    ram = psutil.virtual_memory().percent
-    disk = psutil.disk_usage(str(ROOT)).percent
-    return cpu, ram, disk
+    vm = psutil.virtual_memory()
+    du = psutil.disk_usage(str(ROOT))
+    return SystemStats(
+        cpu_percent=cpu,
+        ram_percent=vm.percent,
+        ram_used_gb=vm.used / gib,
+        ram_total_gb=vm.total / gib,
+        disk_percent=du.percent,
+        disk_used_gb=du.used / gib,
+        disk_total_gb=du.total / gib,
+    )
 
 
 # --- UI -----------------------------------------------------------------
@@ -615,16 +647,14 @@ def system_stats() -> tuple[float, float, float]:
 class CopyButton(Static):
     """A clickable label that copies `value` to the clipboard on click. The
     actual value is never shown on screen -- just the label and a "click to
-    copy" hint (optionally masked with dots for secret-looking fields, purely
-    cosmetic since nothing is ever displayed either way). value=None renders
-    as "not available" and isn't clickable -- used before the first Start,
-    when e.g. the RSA public key file doesn't exist yet."""
+    copy" hint. value=None renders as "not available" and isn't clickable --
+    used before the first Start, when e.g. the RSA public key file doesn't
+    exist yet."""
 
-    def __init__(self, label: str, value: str | None, on_copy_callback, *, masked: bool = False, **kwargs):
+    def __init__(self, label: str, value: str | None, on_copy_callback, **kwargs):
         super().__init__(**kwargs)
         self.label = label
         self.value = value
-        self.masked = masked
         self._on_copy_callback = on_copy_callback
 
     def on_mount(self) -> None:
@@ -639,8 +669,6 @@ class CopyButton(Static):
         # no attribute 'get_height'` crash.
         if self.value is None:
             self.update(f"{self.label}: [dim]not available[/]")
-        elif self.masked:
-            self.update(f"{self.label}: [dim]{'•' * 10}[/]  [i](click to copy)[/]")
         else:
             self.update(f"{self.label}: [dim](click to copy)[/]")
 
@@ -1162,7 +1190,7 @@ class MainScreen(Screen):
                 with Vertical(id="server-info-section"):
                     yield Label("Server", classes="panel-title")
                     yield CopyButton("Address", server_address(), self._handle_copy_click, id="server-address")
-                    yield CopyButton("Public key", server_public_key_pem(), self._handle_copy_click, masked=True, id="server-public-key")
+                    yield CopyButton("Public key", server_public_key_pem(), self._handle_copy_click, id="server-public-key")
                     yield Label("Admin UI", classes="panel-title")
                     yield Static(id="admin-link")
                     yield self._admin_password_widget()
@@ -1185,7 +1213,7 @@ class MainScreen(Screen):
     def _admin_password_widget(self) -> CopyButton:
         info = admin_ui_info()
         password = info[1] if info else None
-        return CopyButton("Password", password, self._handle_copy_click, masked=True, id="admin-password")
+        return CopyButton("Password", password, self._handle_copy_click, id="admin-password")
 
     def _handle_copy_click(self, widget: CopyButton) -> None:
         if copy_to_clipboard(widget.value):
@@ -1259,13 +1287,21 @@ class MainScreen(Screen):
         self.query_one("#server-info-section").display = status.server_alive
 
     def refresh_stats(self) -> None:
-        cpu, ram, disk = system_stats()
-        self.query_one("#cpu-bar", ProgressBar).update(progress=cpu)
-        self.query_one("#ram-bar", ProgressBar).update(progress=ram)
-        self.query_one("#disk-bar", ProgressBar).update(progress=disk)
-        self.query_one("#cpu-label", Label).update(f"CPU   {cpu:5.1f}%")
-        self.query_one("#ram-label", Label).update(f"RAM   {ram:5.1f}%")
-        self.query_one("#disk-label", Label).update(f"Disk  {disk:5.1f}%")
+        stats = system_stats()
+        self.query_one("#cpu-bar", ProgressBar).update(progress=stats.cpu_percent)
+        self.query_one("#ram-bar", ProgressBar).update(progress=stats.ram_percent)
+        self.query_one("#disk-bar", ProgressBar).update(progress=stats.disk_percent)
+        # The bar itself already renders the percentage (ProgressBar's built-in
+        # PercentageStatus) -- repeating it here would be the exact duplication
+        # this label is for, so CPU (no byte total to show) is caption-only,
+        # and RAM/Disk show used/total GB instead of the percent a second time.
+        self.query_one("#cpu-label", Label).update("CPU")
+        self.query_one("#ram-label", Label).update(
+            f"RAM   {stats.ram_used_gb:.1f} / {stats.ram_total_gb:.1f} GB"
+        )
+        self.query_one("#disk-label", Label).update(
+            f"Disk  {stats.disk_used_gb:.1f} / {stats.disk_total_gb:.1f} GB"
+        )
 
     def refresh_admin_link(self) -> None:
         info = admin_ui_info()
