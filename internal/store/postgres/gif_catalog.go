@@ -21,10 +21,10 @@ func (s *GifCatalogStore) CreateGifCatalogEntry(ctx context.Context, entry domai
 		return domain.GifCatalogEntry{}, fmt.Errorf("create gif catalog entry: id and document_id are required")
 	}
 	row := s.db.QueryRow(ctx, `
-INSERT INTO gif_catalog (id, title, document_id, enabled, sort_order, created_by)
-VALUES ($1, $2, $3, true, $4, $5)
-RETURNING id, title, document_id, enabled, sort_order, created_by, created_at, updated_at`,
-		entry.ID, entry.Title, entry.DocumentID, entry.SortOrder, entry.CreatedBy)
+INSERT INTO gif_catalog (id, title, document_id, enabled, sort_order, created_by, source_filename)
+VALUES ($1, $2, $3, true, $4, $5, $6)
+RETURNING id, title, document_id, enabled, sort_order, created_by, created_at, updated_at, source_filename`,
+		entry.ID, entry.Title, entry.DocumentID, entry.SortOrder, entry.CreatedBy, entry.SourceFilename)
 	out, err := scanGifCatalogEntry(row.Scan)
 	if err != nil {
 		return domain.GifCatalogEntry{}, fmt.Errorf("create gif catalog entry: %w", err)
@@ -32,9 +32,25 @@ RETURNING id, title, document_id, enabled, sort_order, created_by, created_at, u
 	return out, nil
 }
 
+// HasGifCatalogSourceFilename reports whether a seed-imported entry for this
+// filename already exists. Deliberately not folded into CreateGifCatalogEntry
+// as an ON CONFLICT DO NOTHING: SeedGifs needs to know *before* transcoding
+// whether a file is new, not just fail silently after paying for ffmpeg work
+// that turns out to be wasted.
+func (s *GifCatalogStore) HasGifCatalogSourceFilename(ctx context.Context, filename string) (bool, error) {
+	if filename == "" {
+		return false, nil
+	}
+	var exists bool
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM gif_catalog WHERE source_filename = $1)`, filename).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check gif catalog source filename: %w", err)
+	}
+	return exists, nil
+}
+
 func (s *GifCatalogStore) ListGifCatalog(ctx context.Context, onlyEnabled bool) ([]domain.GifCatalogEntry, error) {
 	rows, err := s.db.Query(ctx, `
-SELECT id, title, document_id, enabled, sort_order, created_by, created_at, updated_at
+SELECT id, title, document_id, enabled, sort_order, created_by, created_at, updated_at, source_filename
 FROM gif_catalog
 WHERE NOT $1 OR enabled
 ORDER BY sort_order, id
@@ -80,7 +96,7 @@ func (s *GifCatalogStore) DeleteGifCatalogEntry(ctx context.Context, id int64) (
 
 func scanGifCatalogEntry(scan func(dest ...any) error) (domain.GifCatalogEntry, error) {
 	var e domain.GifCatalogEntry
-	if err := scan(&e.ID, &e.Title, &e.DocumentID, &e.Enabled, &e.SortOrder, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt); err != nil {
+	if err := scan(&e.ID, &e.Title, &e.DocumentID, &e.Enabled, &e.SortOrder, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.SourceFilename); err != nil {
 		return domain.GifCatalogEntry{}, err
 	}
 	return e, nil

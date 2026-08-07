@@ -111,6 +111,13 @@ func detectGifCatalogUploadMime(data []byte) (string, bool) {
 // AdminCreateGifCatalogEntry adds an already-materialized document (from
 // AdminUploadGifMaterial) to the catalog @gif serves.
 func (s *Service) AdminCreateGifCatalogEntry(ctx context.Context, title string, documentID int64) (domain.GifCatalogEntry, error) {
+	return s.createGifCatalogEntry(ctx, title, documentID, "")
+}
+
+// createGifCatalogEntry is the shared insert path for both the admin-panel
+// upload (AdminCreateGifCatalogEntry, sourceFilename="") and the filesystem
+// seed import (SeedGifs, sourceFilename=the imported file's name).
+func (s *Service) createGifCatalogEntry(ctx context.Context, title string, documentID int64, sourceFilename string) (domain.GifCatalogEntry, error) {
 	if s.gifCatalog == nil {
 		return domain.GifCatalogEntry{}, domain.ErrGifCatalogUnavailable
 	}
@@ -124,9 +131,10 @@ func (s *Service) AdminCreateGifCatalogEntry(ctx context.Context, title string, 
 		return domain.GifCatalogEntry{}, domain.ErrGifCatalogEntryInvalid
 	}
 	entry, err := s.gifCatalog.CreateGifCatalogEntry(ctx, domain.GifCatalogEntry{
-		ID:         randomID(),
-		Title:      title,
-		DocumentID: documentID,
+		ID:             randomID(),
+		Title:          title,
+		DocumentID:     documentID,
+		SourceFilename: sourceFilename,
 	})
 	if err != nil {
 		return domain.GifCatalogEntry{}, err

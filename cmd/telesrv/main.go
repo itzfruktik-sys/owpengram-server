@@ -798,6 +798,16 @@ func run(logger *zap.Logger) error {
 			zap.Int("blobs", stats.Blobs),
 		)
 	}
+	if stats, err := filesService.SeedGifs(ctx, cfg.GifSeedDir); err != nil {
+		return fmt.Errorf("seed gifs: %w", err)
+	} else if stats.Imported > 0 || stats.Failed > 0 {
+		logger.Info("gif catalog seed import complete",
+			zap.String("dir", cfg.GifSeedDir),
+			zap.Int("imported", stats.Imported),
+			zap.Int("skipped", stats.Skipped),
+			zap.Int("failed", stats.Failed),
+		)
+	}
 	if stats, err := filesService.SeedPremiumPromo(ctx, cfg.PremiumPromoSeedDir); err != nil {
 		return fmt.Errorf("seed premium promo: %w", err)
 	} else if !stats.Skipped {

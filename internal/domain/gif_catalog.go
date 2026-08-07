@@ -45,6 +45,12 @@ type GifCatalogEntry struct {
 	Enabled    bool
 	SortOrder  int
 	CreatedBy  string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// SourceFilename is set only for entries files.Service.SeedGifs imported
+	// from the data/gifs/ drop directory -- empty for anything created through
+	// the admin panel. It exists purely so a restart can tell "this file was
+	// already imported" from "this is a new file" without re-transcoding
+	// every GIF on every startup; it carries no meaning once imported.
+	SourceFilename string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }

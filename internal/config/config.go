@@ -294,6 +294,11 @@ type Config struct {
 	// PremiumPromoSeedDir 是 help.getPremiumPromo 视频与缩略图导出目录。
 	// 目录缺失时保留无视频兼容响应；目录存在但内容非法时启动失败。
 	PremiumPromoSeedDir string
+	// GifSeedDir is a directory of plain .gif/.mp4 files to import into the
+	// admin-curated GIF catalog on startup (files.Service.SeedGifs) -- unlike
+	// StickerSeedDir, this expects no export manifest, just raw files dropped
+	// in. Missing directory is skipped, not an error.
+	GifSeedDir string
 	// BusinessAIProvider 控制服务端 Business automation 回复生成器。
 	// 空值/"echo" 回显触发私聊文本，用于跑通后续 AI provider 链路；
 	// "template" 使用 quick reply 模板。
@@ -770,6 +775,7 @@ func Load() (Config, error) {
 		StickerSeedDir:                envOr("TELESRV_STICKER_SEED_DIR", "data/sticker-seed"),
 		StickerSeedMaxSets:            envIntOr("TELESRV_STICKER_SEED_MAX_SETS", 300),
 		PremiumPromoSeedDir:           envOr("TELESRV_PREMIUM_PROMO_SEED_DIR", "data/premium-promo"),
+		GifSeedDir:                    envOr("TELESRV_GIF_SEED_DIR", "data/gifs"),
 		MapboxToken:                   envOr("TELESRV_MAPBOX_TOKEN", ""),
 		MapTileCacheDir:               envOr("TELESRV_MAPTILE_CACHE_DIR", "data/maptiles"),
 		ExternalMediaEnable:           envBoolOr("TELESRV_EXTERNAL_MEDIA_ENABLE", true),
