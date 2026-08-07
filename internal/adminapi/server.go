@@ -75,6 +75,7 @@ type Service interface {
 	AddStickerToSet(ctx context.Context, req admin.AddStickerToSetRequest) (admin.CommandResult, error)
 	RemoveStickerFromSet(ctx context.Context, req admin.RemoveStickerFromSetRequest) (admin.CommandResult, error)
 	StickerDocumentAnimation(ctx context.Context, documentID int64) ([]byte, string, bool, error)
+	GifCatalogDocumentPreview(ctx context.Context, documentID int64) ([]byte, string, bool, error)
 	CreateGifCatalogEntry(ctx context.Context, req admin.CreateGifCatalogEntryRequest) (admin.CommandResult, error)
 	SetGifCatalogEnabled(ctx context.Context, req admin.SetGifCatalogEnabledRequest) (admin.CommandResult, error)
 	SetGifCatalogSortOrder(ctx context.Context, req admin.SetGifCatalogSortOrderRequest) (admin.CommandResult, error)
@@ -212,6 +213,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/gif-catalog/set-sort-order", s.authenticated(s.handleSetGifCatalogSortOrder))
 	mux.HandleFunc("POST /v1/gif-catalog/delete", s.authenticated(s.handleDeleteGifCatalogEntry))
 	mux.HandleFunc("GET /v1/stickers/documents/{id}/animation", s.authenticated(s.handleStickerDocumentAnimation))
+	mux.HandleFunc("GET /v1/gif-catalog/documents/{id}/preview", s.authenticated(s.handleGifCatalogDocumentPreview))
 	mux.HandleFunc("GET /v1/emoji/{id}/animation", s.authenticated(s.handleEmojiAnimation))
 	mux.HandleFunc("GET /v1/moderation/cases", s.authenticated(s.handleModerationCases))
 	mux.HandleFunc("GET /v1/moderation/cases/{id}", s.authenticated(s.handleModerationCase))
@@ -775,6 +777,27 @@ func (s *Server) handleStickerDocumentAnimation(w http.ResponseWriter, r *http.R
 	}
 	if !found {
 		writeError(w, http.StatusNotFound, "document animation not found")
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
+}
+
+func (s *Server) handleGifCatalogDocumentPreview(w http.ResponseWriter, r *http.Request) {
+	documentID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || documentID <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid document id")
+		return
+	}
+	raw, contentType, found, err := s.svc.GifCatalogDocumentPreview(r.Context(), documentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "gif document not found")
 		return
 	}
 	w.Header().Set("Content-Type", contentType)

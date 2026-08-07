@@ -115,7 +115,14 @@ export function Dashboard({ navigate }: { navigate: Navigate }) {
           href="/emoji"
           navigate={navigate}
         />
-        <StatTile icon={<Film />} label="GIFs" value={counts ? formatQuantity(String(counts.Gifs)) : "…"} sub="saved by users" />
+        <StatTile
+          icon={<Film />}
+          label="GIFs"
+          value={counts ? formatQuantity(String(counts.Gifs)) : "…"}
+          sub="saved by users"
+          href="/gif-catalog"
+          navigate={navigate}
+        />
         <StatTile
           icon={<Database />}
           label="Media storage used"

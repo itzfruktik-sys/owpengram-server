@@ -225,6 +225,7 @@ export const api = {
 	stickerSets: (kind: string) => request<StickerSetListResponse>(`/api/stickers?kind=${encodeURIComponent(kind)}`),
 	stickerSetDocuments: (setID: string) => request<{ document_ids: string[] }>(`/api/stickers/${encodeURIComponent(setID)}/documents`),
 	stickerDocumentAnimationURL: (documentID: string) => `/api/stickers/documents/${encodeURIComponent(documentID)}/animation`,
+	gifCatalogDocumentPreviewURL: (documentID: string) => `/api/gif-catalog/documents/${encodeURIComponent(documentID)}/preview`,
 	createStickerSet: (form: FormData) => request<CommandResult>("/api/actions/create-sticker-set", { method: "POST", body: form }),
 	setAccountAvatar: (form: FormData) => request<CommandResult>("/api/actions/set-account-avatar", { method: "POST", body: form }),
 	setChannelAvatar: (form: FormData) => request<CommandResult>("/api/actions/set-channel-avatar", { method: "POST", body: form }),

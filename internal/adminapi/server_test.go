@@ -444,6 +444,10 @@ func (fakeService) StickerDocumentAnimation(context.Context, int64) ([]byte, str
 	return nil, "", false, nil
 }
 
+func (fakeService) GifCatalogDocumentPreview(context.Context, int64) ([]byte, string, bool, error) {
+	return nil, "", false, nil
+}
+
 func (fakeService) CreateGifCatalogEntry(_ context.Context, req admin.CreateGifCatalogEntryRequest) (admin.CommandResult, error) {
 	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
 }

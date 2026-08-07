@@ -2904,6 +2904,32 @@ func (s *Service) StickerDocumentAnimation(ctx context.Context, documentID int64
 	return data, detected, true, nil
 }
 
+// GifCatalogDocumentPreview returns a gif_catalog entry's document bytes for
+// the admin panel's list-page preview, plus the content type to serve it as.
+// Unlike StickerDocumentAnimation there is no gzip/Lottie branch to consider:
+// every document AdminUploadGifMaterial creates is already a plain H.264 MP4
+// (see gif_admin.go), so this only needs to fetch and sanity-check the blob.
+func (s *Service) GifCatalogDocumentPreview(ctx context.Context, documentID int64) ([]byte, string, bool, error) {
+	if s == nil || s.photos == nil || documentID <= 0 {
+		return nil, "", false, nil
+	}
+	chunk, found, err := s.photos.GetFile(ctx, domain.FileDownloadRequest{
+		LocationKey: fmt.Sprintf("doc:%d", documentID),
+		Limit:       domain.MaxGifCatalogUploadSize + 1,
+	})
+	if err != nil {
+		return nil, "", false, err
+	}
+	if !found || chunk.Total <= 0 || chunk.Total > domain.MaxGifCatalogUploadSize || int64(len(chunk.Bytes)) != chunk.Total {
+		return nil, "", false, nil
+	}
+	detected := http.DetectContentType(chunk.Bytes)
+	if detected != "video/mp4" && !strings.HasPrefix(detected, "video/") {
+		return nil, "", false, nil
+	}
+	return chunk.Bytes, detected, true, nil
+}
+
 func isSafeStickerPreviewImageType(value string) bool {
 	switch value {
 	case "image/webp", "image/png", "image/jpeg", "image/gif":

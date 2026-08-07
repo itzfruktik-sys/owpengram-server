@@ -112,6 +112,7 @@ func (s *server) routes() http.Handler {
 	mux.Handle("GET /api/stickers", s.requireAuthAPI(http.HandlerFunc(s.handleStickerSetsAPI)))
 	mux.Handle("GET /api/stickers/{id}/documents", s.requireAuthAPI(http.HandlerFunc(s.handleStickerSetDocumentsAPI)))
 	mux.Handle("GET /api/stickers/documents/{id}/animation", s.requireAuthAPI(http.HandlerFunc(s.handleStickerDocumentAnimationAPI)))
+	mux.Handle("GET /api/gif-catalog/documents/{id}/preview", s.requireAuthAPI(http.HandlerFunc(s.handleGifCatalogDocumentPreviewAPI)))
 	mux.Handle("POST /api/actions/set-sticker-set-archived", s.requireAuthAPI(http.HandlerFunc(s.handleSetStickerSetArchivedAPI)))
 	mux.Handle("POST /api/actions/set-sticker-set-sort-order", s.requireAuthAPI(http.HandlerFunc(s.handleSetStickerSetSortOrderAPI)))
 	mux.Handle("POST /api/actions/rename-sticker-set", s.requireAuthAPI(http.HandlerFunc(s.handleRenameStickerSetAPI)))
@@ -2007,6 +2008,47 @@ func (s *server) handleStickerDocumentAnimationAPI(w http.ResponseWriter, r *htt
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
+}
+
+// handleGifCatalogDocumentPreviewAPI proxies one gif_catalog document's raw
+// MP4 bytes from the real telesrv admin API, for the panel list page's
+// preview cell.
+func (s *server) handleGifCatalogDocumentPreviewAPI(w http.ResponseWriter, r *http.Request) {
+	documentID, err := parseInt64(r.PathValue("id"))
+	if err != nil || documentID <= 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid document id")
+		return
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet,
+		fmt.Sprintf("%s/v1/gif-catalog/documents/%d/preview", s.cfg.AdminAPIURL, documentID), nil)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+s.cfg.AdminAPIToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, (20<<20)+1))
+	if err != nil || len(raw) > 20<<20 {
+		writeAPIError(w, http.StatusBadGateway, "invalid preview response")
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		writeAPIError(w, resp.StatusCode, string(raw))
+		return
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "video/mp4"
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "private, max-age=300")

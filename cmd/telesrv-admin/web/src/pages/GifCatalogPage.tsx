@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Loader2, Plus, RefreshCw, Search, Upload, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ImageOff, Loader2, Plus, RefreshCw, Search, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, errorMessage } from "../api";
@@ -7,6 +7,33 @@ import { Alert, Badge, EmptyRow, Metric, PageFrame, QueryPanel } from "../compon
 import type { GifCatalogRow } from "../types";
 
 type GifPageSize = 10 | 20 | 50 | 100 | "all";
+
+// One list-row preview cell. The backend always stores a plain H.264 MP4 (see
+// files.Service.AdminUploadGifMaterial), so this is just a small looping
+// <video> -- no Lottie/canvas work needed the way StickerDocumentPreview
+// needs for TGS. onError falls back to a placeholder rather than a broken
+// player if the document is somehow missing.
+function GifPreviewThumb({ documentID }: { documentID: string }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) {
+    return (
+      <div className="sticker-list-thumb-empty">
+        <ImageOff size={14} />
+      </div>
+    );
+  }
+  return (
+    <video
+      className="gif-catalog-thumb"
+      src={api.gifCatalogDocumentPreviewURL(documentID)}
+      muted
+      loop
+      autoPlay
+      playsInline
+      onError={() => setBroken(true)}
+    />
+  );
+}
 
 // Manage view for the admin-curated GIF catalog the built-in @gif inline bot
 // serves for the client's GIF picker trending/search panel.
@@ -105,6 +132,7 @@ export function GifCatalogPage() {
         <table className="data-table">
           <thead>
             <tr>
+              <th>{"Preview"}</th>
               <th>{"ID"}</th>
               <th>{"Title"}</th>
               <th>{"Document ID"}</th>
@@ -117,6 +145,7 @@ export function GifCatalogPage() {
           <tbody>
             {paged.map((row) => (
               <tr className={row.Enabled ? "" : "gift-row-disabled"} key={row.ID}>
+                <td><GifPreviewThumb documentID={row.DocumentID} /></td>
                 <td className="mono">{row.ID}</td>
                 <td>{row.Title || <span className="muted-cell">{"Untitled"}</span>}</td>
                 <td className="mono">{row.DocumentID}</td>
@@ -162,7 +191,7 @@ export function GifCatalogPage() {
                 </td>
               </tr>
             ))}
-            {paged.length === 0 && <EmptyRow colSpan={7} />}
+            {paged.length === 0 && <EmptyRow colSpan={8} />}
           </tbody>
         </table>
       </div>
