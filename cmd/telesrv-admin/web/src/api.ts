@@ -5,6 +5,7 @@ import type {
   AccountStorageListResponse,
   SharedDeviceGroupListResponse,
   StorageStatsResponse,
+  DashboardResponse,
   AdminLoginResult,
   AdminSession,
   BotDetail,
@@ -161,6 +162,7 @@ export const api = {
     request<CollectibleUsernameListResponse>(`/api/collectible-usernames?${params.toString()}`),
   collectibleUsername: (id: string) =>
     request<CollectibleUsernameDetail>(`/api/collectible-usernames/${encodeURIComponent(id)}`),
+  dashboard: () => request<DashboardResponse>("/api/dashboard"),
   storageStats: () => request<StorageStatsResponse>("/api/storage/stats"),
   storageAccounts: (params: URLSearchParams) =>
     request<AccountStorageListResponse>(`/api/storage/accounts?${params.toString()}`),

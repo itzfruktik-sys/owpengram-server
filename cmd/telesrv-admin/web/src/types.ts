@@ -694,6 +694,34 @@ export type StorageStatsResponse = {
   BackendKind: string;
 };
 
+export type DashboardCounts = {
+  Users: number;
+  OnlineUsers: number;
+  Bots: number;
+  BroadcastChannels: number;
+  Supergroups: number;
+  StickerSets: number;
+  EmojiSets: number;
+  Gifs: number;
+  PendingReports: number;
+  PendingVerifications: number;
+};
+
+export type HostStatsSnapshot = {
+  CPUPercent: number;
+  MemUsedBytes: number;
+  MemTotalBytes: number;
+  DiskFreeBytes: number;
+  DiskTotalBytes: number;
+  Ready: boolean;
+};
+
+export type DashboardResponse = {
+  counts: DashboardCounts;
+  storage: StorageStatsResponse;
+  host?: HostStatsSnapshot;
+};
+
 export type AccountStorageRow = {
   UserID: string;
   Username: string;

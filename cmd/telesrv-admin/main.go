@@ -17,7 +17,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"telesrv/internal/config"
+	"telesrv/internal/hoststats"
 )
+
+// hostStatsPollInterval is how often the dashboard's CPU/RAM/disk snapshot
+// refreshes. A few seconds is frequent enough for an operator glancing at
+// the panel without polling disk/proc on every tick.
+const hostStatsPollInterval = 5 * time.Second
 
 const defaultAdminAPIAddr = "127.0.0.1:2599"
 
@@ -41,7 +47,10 @@ func run() error {
 	}
 	defer pool.Close()
 
-	srv, err := newServer(cfg, newReadStore(pool))
+	hs := hoststats.NewPoller(cfg.BlobDir)
+	go hs.Run(ctx, hostStatsPollInterval)
+
+	srv, err := newServer(cfg, newReadStore(pool), hs)
 	if err != nil {
 		return err
 	}
@@ -71,6 +80,10 @@ type uiConfig struct {
 	Password      string
 	Token         string
 	SessionKey    []byte
+	// BlobDir is the local blob-storage root, reused only to pick which
+	// filesystem the dashboard's disk-free reading statfs's -- irrelevant when
+	// TELESRV_BLOB_BACKEND=s3, where disk space isn't the storage constraint.
+	BlobDir string
 	// Permissions is the right set a panel session is issued with, from
 	// TELESRV_ADMIN_UI_PERMISSIONS. The shipped default is the single wildcard
 	// entry, so introducing the permission model never locks an operator out of a
@@ -118,6 +131,7 @@ func loadConfig() (uiConfig, error) {
 		SessionKey:                 sum[:],
 		Permissions:                appCfg.AdminUIPermissions,
 		HideThirdPartyVerification: appCfg.HideThirdPartyVerification,
+		BlobDir:                    appCfg.BlobDir,
 	}, nil
 }
 

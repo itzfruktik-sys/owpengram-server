@@ -19,6 +19,7 @@ import (
 
 	"telesrv/internal/admin"
 	"telesrv/internal/domain"
+	"telesrv/internal/hoststats"
 )
 
 //go:embed web/dist
@@ -27,11 +28,12 @@ var webDist embed.FS
 type server struct {
 	cfg       uiConfig
 	read      *readStore
+	hostStats *hoststats.Poller
 	web       fs.FS
 	webServer http.Handler
 }
 
-func newServer(cfg uiConfig, read *readStore) (*server, error) {
+func newServer(cfg uiConfig, read *readStore, hostStats *hoststats.Poller) (*server, error) {
 	web, err := fs.Sub(webDist, "web/dist")
 	if err != nil {
 		return nil, err
@@ -39,6 +41,7 @@ func newServer(cfg uiConfig, read *readStore) (*server, error) {
 	return &server{
 		cfg:       cfg,
 		read:      read,
+		hostStats: hostStats,
 		web:       web,
 		webServer: http.FileServer(http.FS(web)),
 	}, nil
@@ -52,6 +55,7 @@ func (s *server) routes() http.Handler {
 	// itself, so nothing is stranded by protecting it.
 	mux.Handle("POST /api/logout", s.requireAuthAPI(http.HandlerFunc(s.handleAPILogout)))
 	mux.Handle("GET /api/session", s.requireAuthAPI(http.HandlerFunc(s.handleSession)))
+	mux.Handle("GET /api/dashboard", s.requireAuthAPI(http.HandlerFunc(s.handleDashboardAPI)))
 	mux.Handle("GET /api/accounts", s.requireAuthAPI(http.HandlerFunc(s.handleAccountsAPI)))
 	mux.Handle("GET /api/accounts/stats", s.requireAuthAPI(http.HandlerFunc(s.handleAccountsStatsAPI)))
 	mux.Handle("GET /api/accounts/shared-devices", s.requireAuthAPI(http.HandlerFunc(s.handleSharedDeviceGroupsAPI)))
@@ -262,6 +266,34 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 		"permissions":                   permissionsFromContext(r.Context()).List(),
 		"hide_third_party_verification": s.cfg.HideThirdPartyVerification,
 	})
+}
+
+// handleDashboardAPI backs the overview page: entity/queue counts from
+// Postgres, blob storage usage, and the last host CPU/RAM/disk sample (0/not
+// ready until the poller's first tick after startup).
+func (s *server) handleDashboardAPI(w http.ResponseWriter, r *http.Request) {
+	if s.read == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "read store is not configured")
+		return
+	}
+	counts, err := s.read.DashboardCounts(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	storage, err := s.read.StorageStats(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp := map[string]any{
+		"counts":  counts,
+		"storage": storage,
+	}
+	if s.hostStats != nil {
+		resp["host"] = s.hostStats.Snapshot()
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *server) handleEmojiAPI(w http.ResponseWriter, r *http.Request) {

@@ -457,6 +457,66 @@ WHERE NOT is_bot
 	return n, nil
 }
 
+// DashboardCounts is the entity/queue counts shown on the admin panel's
+// overview page. Each field is its own COUNT(*)/GROUP BY against an indexed
+// column, run sequentially -- this endpoint is opened occasionally by an
+// operator, not on a request hot path, so the extra round trips cost far
+// less than the complexity of parallelizing them.
+type DashboardCounts struct {
+	Users                int64
+	OnlineUsers          int64
+	Bots                 int64
+	BroadcastChannels    int64
+	Supergroups          int64
+	StickerSets          int64
+	EmojiSets            int64
+	Gifs                 int64
+	PendingReports       int64
+	PendingVerifications int64
+}
+
+func (s *readStore) DashboardCounts(ctx context.Context) (DashboardCounts, error) {
+	var out DashboardCounts
+	var err error
+	if out.Users, err = s.CountAccounts(ctx); err != nil {
+		return out, err
+	}
+	if out.OnlineUsers, err = s.CountOnlineAccounts(ctx); err != nil {
+		return out, err
+	}
+	if err := s.pool.QueryRow(ctx, `
+SELECT count(*) FROM users WHERE is_bot AND deleted_at IS NULL`).Scan(&out.Bots); err != nil {
+		return out, fmt.Errorf("count bots: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, `
+SELECT count(*) FILTER (WHERE broadcast), count(*) FILTER (WHERE megagroup)
+FROM channels WHERE NOT deleted AND NOT monoforum`).Scan(&out.BroadcastChannels, &out.Supergroups); err != nil {
+		return out, fmt.Errorf("count channels: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, `
+SELECT count(*) FILTER (WHERE set_kind = 'stickers'), count(*) FILTER (WHERE set_kind = 'emoji')
+FROM sticker_sets WHERE deleted = false`).Scan(&out.StickerSets, &out.EmojiSets); err != nil {
+		return out, fmt.Errorf("count sticker sets: %w", err)
+	}
+	// There's no global GIF catalog -- a GIF is just a document a user saved to
+	// their personal collection (messages.saveGif). This counts distinct
+	// documents saved by anyone, the closest thing to "how many GIFs does this
+	// server know about."
+	if err := s.pool.QueryRow(ctx, `
+SELECT count(DISTINCT document_id) FROM user_sticker_collections WHERE kind = 'gif'`).Scan(&out.Gifs); err != nil {
+		return out, fmt.Errorf("count gifs: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, `
+SELECT count(*) FROM moderation_cases WHERE status NOT IN ('resolved', 'dismissed')`).Scan(&out.PendingReports); err != nil {
+		return out, fmt.Errorf("count pending moderation cases: %w", err)
+	}
+	if err := s.pool.QueryRow(ctx, `
+SELECT count(*) FROM verification_applications WHERE status IN ('submitted', 'in_review')`).Scan(&out.PendingVerifications); err != nil {
+		return out, fmt.Errorf("count pending verification applications: %w", err)
+	}
+	return out, nil
+}
+
 type BotRow struct {
 	ID          int64
 	Username    string
