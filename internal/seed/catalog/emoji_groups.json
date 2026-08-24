@@ -2,7 +2,7 @@
   "groups": [
     {
       "title": "Love",
-      "icon_emoji_id": 5355088357070218139,
+      "icon_emoji_id": 9000000000001,
       "emoticons": [
         "❤",
         "😍",
@@ -46,7 +46,7 @@
     },
     {
       "title": "Approval",
-      "icon_emoji_id": 5357465415310124060,
+      "icon_emoji_id": 9000000000002,
       "emoticons": [
         "👍",
         "👏",
@@ -62,7 +62,7 @@
     },
     {
       "title": "Disapproval",
-      "icon_emoji_id": 5357216259962315463,
+      "icon_emoji_id": 9000000000003,
       "emoticons": [
         "👎",
         "😒",
@@ -76,7 +76,7 @@
     },
     {
       "title": "Cheers",
-      "icon_emoji_id": 5357257143756005264,
+      "icon_emoji_id": 9000000000004,
       "emoticons": [
         "🎉",
         "🥳",
@@ -93,7 +93,7 @@
     },
     {
       "title": "Laughter",
-      "icon_emoji_id": 5354785574760753200,
+      "icon_emoji_id": 9000000000005,
       "emoticons": [
         "😄",
         "😁",
@@ -110,7 +110,7 @@
     },
     {
       "title": "Astonishment",
-      "icon_emoji_id": 5354978715145085779,
+      "icon_emoji_id": 9000000000006,
       "emoticons": [
         "😨",
         "😦",
@@ -128,7 +128,7 @@
     },
     {
       "title": "Sadness",
-      "icon_emoji_id": 5355181227148059369,
+      "icon_emoji_id": 9000000000007,
       "emoticons": [
         "😔",
         "😪",
@@ -152,7 +152,7 @@
     },
     {
       "title": "Anger",
-      "icon_emoji_id": 5355125405458113381,
+      "icon_emoji_id": 9000000000008,
       "emoticons": [
         "😡",
         "🤬",
@@ -165,7 +165,7 @@
     },
     {
       "title": "Neutral",
-      "icon_emoji_id": 5357252827313874903,
+      "icon_emoji_id": 9000000000009,
       "emoticons": [
         "😐",
         "😑",
@@ -180,7 +180,7 @@
     },
     {
       "title": "Doubt",
-      "icon_emoji_id": 5354848362887653592,
+      "icon_emoji_id": 9000000000010,
       "emoticons": [
         "🤔",
         "🤨",
@@ -195,7 +195,7 @@
     },
     {
       "title": "Silly",
-      "icon_emoji_id": 5354832952544993830,
+      "icon_emoji_id": 9000000000011,
       "emoticons": [
         "🤪",
         "😜",

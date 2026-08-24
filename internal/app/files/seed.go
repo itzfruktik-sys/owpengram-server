@@ -111,6 +111,15 @@ func (s *Service) SeedMedia(ctx context.Context, root string, maxRegularSets int
 	}
 	s.logSeedPhase("effects", phaseStarted, phaseBefore, stats)
 
+	phaseStarted = time.Now()
+	phaseBefore = stats
+	// messages.getEmojiGroups 分类图标的影子自定义 emoji 文档,依赖上面 sticker sets 阶段
+	// 已 seed 的源文档,故放在其后。
+	if err := s.seedEmojiGroupIcons(ctx, &stats); err != nil {
+		return stats, fmt.Errorf("seed emoji group icons: %w", err)
+	}
+	s.logSeedPhase("emoji_group_icons", phaseStarted, phaseBefore, stats)
+
 	if stats.Reactions == 0 && stats.StickerSets == 0 && stats.Effects == 0 {
 		stats.Skipped = true
 	}

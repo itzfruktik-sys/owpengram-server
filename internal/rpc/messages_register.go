@@ -363,6 +363,12 @@ func (r *Router) registerMessages(d *tlprofile.Dispatcher) {
 	registerRPC[*tg.MessagesSearchStickersRequest](d, tlprofile.SemanticMethodMessagesSearchStickers, func(ctx context.Context, layerRequest *tg.MessagesSearchStickersRequest) (any, error) {
 		return r.onMessagesSearchStickers(ctx, layerRequest)
 	})
+	registerRPC[*tg.MessagesSearchCustomEmojiRequest](d, tlprofile.SemanticMethodMessagesSearchCustomEmoji, func(ctx context.Context, layerRequest *tg.MessagesSearchCustomEmojiRequest) (any, error) {
+		return r.onMessagesSearchCustomEmoji(ctx, layerRequest)
+	})
+	registerRPC[*tg.MessagesSearchEmojiStickerSetsRequest](d, tlprofile.SemanticMethodMessagesSearchEmojiStickerSets, func(ctx context.Context, layerRequest *tg.MessagesSearchEmojiStickerSetsRequest) (any, error) {
+		return r.onMessagesSearchEmojiStickerSets(ctx, layerRequest)
+	})
 	registerRPC[*tg.MessagesGetAttachMenuBotsRequest](d, tlprofile.SemanticMethodMessagesGetAttachMenuBots, func(ctx context.Context, layerRequest *tg.MessagesGetAttachMenuBotsRequest) (any, error) {
 		return r.onMessagesGetAttachMenuBots(ctx, layerRequest.
 			Hash)

@@ -4,12 +4,32 @@ import (
 	"context"
 	"errors"
 	"github.com/iamxvbaba/td/tg"
+	"github.com/iamxvbaba/td/tgerr"
 	"sort"
 	"telesrv/internal/domain"
 	"unicode/utf8"
 )
 
 func (r *Router) onMessagesSearchStickerSets(ctx context.Context, req *tg.MessagesSearchStickerSetsRequest) (tg.MessagesFoundStickerSetsClass, error) {
+	if _, _, err := r.currentUserID(ctx); err != nil {
+		return nil, internalErr()
+	}
+	if utf8.RuneCountInString(req.Q) > maxStickerSearchQLength {
+		return nil, limitInvalidErr()
+	}
+	if req.Hash != 0 {
+		return &tg.MessagesFoundStickerSetsNotModified{}, nil
+	}
+	return &tg.MessagesFoundStickerSets{
+		Hash: 0,
+		Sets: []tg.StickerSetCoveredClass{},
+	}, nil
+}
+
+// onMessagesSearchEmojiStickerSets 之前完全未注册,Android 的 emoji 分类点击/搜索会
+// 无限重试这个方法(每次都拿 NOT_IMPLEMENTED,客户端不认为这是终态错误,一直重发),
+// 表现为分类点击后结果区永远不出来。和 onMessagesSearchStickerSets 同策略,返回合法空结果。
+func (r *Router) onMessagesSearchEmojiStickerSets(ctx context.Context, req *tg.MessagesSearchEmojiStickerSetsRequest) (tg.MessagesFoundStickerSetsClass, error) {
 	if _, _, err := r.currentUserID(ctx); err != nil {
 		return nil, internalErr()
 	}
@@ -50,6 +70,28 @@ func (r *Router) onMessagesSearchStickers(ctx context.Context, req *tg.MessagesS
 		Hash:     0,
 		Stickers: []tg.DocumentClass{},
 	}, nil
+}
+
+func emoticonEmptyErr() error { return tgerr.New(400, "EMOTICON_EMPTY") }
+
+// onMessagesSearchCustomEmoji 目前没有按 emoticon 反查自定义 emoji 的索引,故与
+// onMessagesSearchStickers/onMessagesSearchStickerSets 同策略:返回合法的空结果而非
+// NOT_IMPLEMENTED——之前完全未注册此方法时,Android 的 emoji 分类/搜索会拿到
+// notImplementedErr(),表现为一直转圈(客户端没有为这个具体错误重置搜索 UI 状态)。
+func (r *Router) onMessagesSearchCustomEmoji(ctx context.Context, req *tg.MessagesSearchCustomEmojiRequest) (tg.EmojiListClass, error) {
+	if _, _, err := r.currentUserID(ctx); err != nil {
+		return nil, internalErr()
+	}
+	if req.Emoticon == "" {
+		return nil, emoticonEmptyErr()
+	}
+	if utf8.RuneCountInString(req.Emoticon) > maxStickerSearchQLength {
+		return nil, limitInvalidErr()
+	}
+	if req.Hash != 0 {
+		return &tg.EmojiListNotModified{}, nil
+	}
+	return &tg.EmojiList{Hash: 0, DocumentID: []int64{}}, nil
 }
 
 func (r *Router) onMessagesGetSearchResultsCalendar(ctx context.Context, req *tg.MessagesGetSearchResultsCalendarRequest) (*tg.MessagesSearchResultsCalendar, error) {

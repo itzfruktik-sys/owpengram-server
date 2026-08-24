@@ -78,9 +78,16 @@ func (r *Router) onMessagesGetInlineBotResults(ctx context.Context, req *tg.Mess
 			return nil, err
 		}
 	}
-	peer, err := r.checkedDomainPeerFromInputPeer(ctx, userID, req.Peer)
-	if err != nil {
-		return nil, err
+	// inputPeerEmpty 是合法输入:客户端在未绑定具体聊天的全局搜索场景(如 GIF 面板的
+	// 类目/搜索,尚未选定发送目标)会这样发。之前这里无条件走 checkedDomainPeerFromInputPeer,
+	// 把它当无效 peer 拒绝(PEER_ID_INVALID),导致 Android 的 GIF 类目/搜索请求每次都
+	// 400,客户端只能一直转圈——真实 Telegram 服务端接受这种"无聊天上下文"的查询。
+	var peer domain.Peer
+	if _, empty := req.Peer.(*tg.InputPeerEmpty); !empty {
+		peer, err = r.checkedDomainPeerFromInputPeer(ctx, userID, req.Peer)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// 内置（进程内）service bot 分支：@gif 没有 MTProto session、也没有 Bot API 消费者，
 	// 走下面的「推 updateBotInlineQuery + 挂起 25s」必然超时，故同步问 responder。
