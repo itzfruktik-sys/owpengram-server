@@ -275,6 +275,23 @@ class ServerManager:
     def build(self) -> tuple[bool, str]:
         BIN_DIR.mkdir(exist_ok=True)
         log = []
+        # cmd/telesrv-admin embeds web/dist via go:embed -- `go build` alone
+        # just re-embeds whatever dist/ already happens to be on disk, so a
+        # frontend-only change (edit TSX, restart) silently ships the old
+        # bundle unless we rebuild it here first, every time.
+        admin_web_dir = ROOT / "cmd" / "telesrv-admin" / "web"
+        if (admin_web_dir / "package.json").exists():
+            npm = shutil.which("npm")
+            if npm:
+                r = subprocess.run(
+                    [npm, "run", "build"],
+                    cwd=admin_web_dir, capture_output=True, text=True,
+                )
+                log.append(f"$ npm run build (admin web)\n{r.stdout}{r.stderr}")
+                if r.returncode != 0:
+                    return False, "\n".join(log)
+            else:
+                log.append("! npm not found on PATH -- skipping admin web frontend rebuild (go:embed will reuse the existing web/dist)")
         for out_path, pkg in ((SERVER_EXE, "./cmd/telesrv"), (ADMIN_EXE, "./cmd/telesrv-admin")):
             r = subprocess.run(
                 ["go", "build", "-o", str(out_path), pkg],
