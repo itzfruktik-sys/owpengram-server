@@ -124,6 +124,8 @@ func (s *server) routes() http.Handler {
 	mux.Handle("POST /api/actions/create-gif-catalog-entry", s.requireAuthAPI(http.HandlerFunc(s.handleCreateGifCatalogEntryAPI)))
 	mux.Handle("POST /api/actions/set-gif-catalog-enabled", s.requireAuthAPI(http.HandlerFunc(s.handleSetGifCatalogEnabledAPI)))
 	mux.Handle("POST /api/actions/set-gif-catalog-sort-order", s.requireAuthAPI(http.HandlerFunc(s.handleSetGifCatalogSortOrderAPI)))
+	mux.Handle("POST /api/actions/set-gif-catalog-category", s.requireAuthAPI(http.HandlerFunc(s.handleSetGifCatalogCategoryAPI)))
+	mux.Handle("POST /api/actions/auto-categorize-gif-catalog", s.requireAuthAPI(http.HandlerFunc(s.handleAutoCategorizeGifCatalogAPI)))
 	mux.Handle("POST /api/actions/delete-gif-catalog-entry", s.requireAuthAPI(http.HandlerFunc(s.handleDeleteGifCatalogEntryAPI)))
 	mux.Handle("POST /api/actions/mint-collectible-username", s.requireAuthAPI(http.HandlerFunc(s.handleMintCollectibleUsernameAPI)))
 	mux.Handle("POST /api/actions/transfer-collectible-username", s.requireAuthAPI(http.HandlerFunc(s.handleTransferCollectibleUsernameAPI)))
@@ -1917,6 +1919,45 @@ func (s *server) handleSetGifCatalogSortOrderAPI(w http.ResponseWriter, r *http.
 		ID:          body.ID, SortOrder: body.SortOrder,
 	}
 	result, err := s.callAdminAPI(r.Context(), "/v1/gif-catalog/set-sort-order", req)
+	writeCommandResultAPI(w, result, err)
+}
+
+type setGifCatalogCategoryAPIRequest struct {
+	CommandID string `json:"command_id"`
+	Reason    string `json:"reason"`
+	Confirm   bool   `json:"confirm"`
+	ID        int64  `json:"id,string"`
+	Category  string `json:"category"`
+}
+
+func (s *server) handleSetGifCatalogCategoryAPI(w http.ResponseWriter, r *http.Request) {
+	var body setGifCatalogCategoryAPIRequest
+	if !decodeAction(w, r, &body) {
+		return
+	}
+	req := admin.SetGifCatalogCategoryRequest{
+		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "set-gif-catalog-category"),
+		ID:          body.ID, Category: body.Category,
+	}
+	result, err := s.callAdminAPI(r.Context(), "/v1/gif-catalog/set-category", req)
+	writeCommandResultAPI(w, result, err)
+}
+
+type autoCategorizeGifCatalogAPIRequest struct {
+	CommandID string `json:"command_id"`
+	Reason    string `json:"reason"`
+	Confirm   bool   `json:"confirm"`
+}
+
+func (s *server) handleAutoCategorizeGifCatalogAPI(w http.ResponseWriter, r *http.Request) {
+	var body autoCategorizeGifCatalogAPIRequest
+	if !decodeAction(w, r, &body) {
+		return
+	}
+	req := admin.AutoCategorizeGifCatalogRequest{
+		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "auto-categorize-gif-catalog"),
+	}
+	result, err := s.callAdminAPI(r.Context(), "/v1/gif-catalog/auto-categorize", req)
 	writeCommandResultAPI(w, result, err)
 }
 

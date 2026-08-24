@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { api, errorMessage } from "../api";
 import { ActionButton } from "../components/ActionButton";
 import { Alert, Badge, EmptyRow, Metric, PageFrame, QueryPanel } from "../components/ui";
-import type { GifCatalogRow } from "../types";
+import { GIF_CATALOG_CATEGORIES, type GifCatalogRow } from "../types";
 
 type GifPageSize = 10 | 20 | 50 | 100 | "all";
 
@@ -45,6 +45,7 @@ export function GifCatalogPage() {
   const [pageSize, setPageSize] = useState<GifPageSize>(10);
   const [page, setPage] = useState(1);
   const [orderDrafts, setOrderDrafts] = useState<Record<string, string>>({});
+  const [categoryDrafts, setCategoryDrafts] = useState<Record<string, string>>({});
   const [createOpen, setCreateOpen] = useState(false);
 
   async function load() {
@@ -83,7 +84,8 @@ export function GifCatalogPage() {
 
   const counts = useMemo(() => ({
     total: rows.length,
-    enabled: rows.filter((row) => row.Enabled).length
+    enabled: rows.filter((row) => row.Enabled).length,
+    uncategorized: rows.filter((row) => !row.Category).length
   }), [rows]);
 
   return (
@@ -95,6 +97,13 @@ export function GifCatalogPage() {
           <button className="btn" type="button" onClick={() => load()} disabled={busy}>
             <RefreshCw size={15} /> {"Refresh"}
           </button>
+          <ActionButton
+            tone="neutral"
+            label={"Auto-categorize"}
+            path="/api/actions/auto-categorize-gif-catalog"
+            payload={() => ({})}
+            onDone={() => void load()}
+          />
           <button className="btn primary" type="button" onClick={() => setCreateOpen(true)}>
             <Plus size={15} /> {"Add GIF"}
           </button>
@@ -105,6 +114,7 @@ export function GifCatalogPage() {
       <div className="metric-row">
         <Metric label={"Total GIFs"} value={String(counts.total)} />
         <Metric label={"Enabled"} value={String(counts.enabled)} tone="good" />
+        <Metric label={"Uncategorized"} value={String(counts.uncategorized)} tone={counts.uncategorized > 0 ? "warn" : undefined} />
       </div>
       <QueryPanel>
         <div className="toolbar">
@@ -138,6 +148,7 @@ export function GifCatalogPage() {
               <th>{"Document ID"}</th>
               <th>{"Added by"}</th>
               <th>{"Status"}</th>
+              <th>{"Category"}</th>
               <th>{"Sort order"}</th>
               <th>{"Actions"}</th>
             </tr>
@@ -151,6 +162,28 @@ export function GifCatalogPage() {
                 <td className="mono">{row.DocumentID}</td>
                 <td>{row.CreatedBy || <span className="muted-cell">{"—"}</span>}</td>
                 <td>{row.Enabled ? <Badge tone="good">{"Enabled"}</Badge> : <Badge tone="danger">{"Disabled"}</Badge>}</td>
+                <td>
+                  <div className="sort-order-editor">
+                    <select
+                      className="small-input"
+                      value={categoryDrafts[row.ID] ?? row.Category}
+                      onChange={(event) => setCategoryDrafts((prev) => ({ ...prev, [row.ID]: event.target.value }))}
+                    >
+                      <option value="">{"Uncategorized"}</option>
+                      {GIF_CATALOG_CATEGORIES.map((category) => (
+                        <option key={category} value={category}>{category}</option>
+                      ))}
+                    </select>
+                    <ActionButton
+                      compact
+                      tone="neutral"
+                      label={"Save"}
+                      path="/api/actions/set-gif-catalog-category"
+                      payload={() => ({ id: row.ID, category: categoryDrafts[row.ID] ?? row.Category })}
+                      onDone={() => void load()}
+                    />
+                  </div>
+                </td>
                 <td>
                   <div className="sort-order-editor">
                     <input
@@ -191,7 +224,7 @@ export function GifCatalogPage() {
                 </td>
               </tr>
             ))}
-            {paged.length === 0 && <EmptyRow colSpan={8} />}
+            {paged.length === 0 && <EmptyRow colSpan={9} />}
           </tbody>
         </table>
       </div>

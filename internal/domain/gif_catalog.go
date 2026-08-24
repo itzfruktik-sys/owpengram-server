@@ -42,6 +42,29 @@ const (
 	MaxGifCatalogUploadSize = 50 << 20
 )
 
+// GifCatalogCategories are the valid values for GifCatalogEntry.Category --
+// exactly the titles internal/seed/catalog/emoji_groups.json uses, so a
+// category tap in the client's GIF picker (see files.ClassifyGifCategory and
+// bots.rankGifCatalogEntries) maps onto them with no translation step.
+var GifCatalogCategories = []string{
+	"Love", "Approval", "Disapproval", "Cheers", "Laughter",
+	"Astonishment", "Sadness", "Anger", "Neutral", "Doubt", "Silly",
+}
+
+// ValidGifCatalogCategory reports whether category is "" (uncategorized) or
+// one of GifCatalogCategories.
+func ValidGifCatalogCategory(category string) bool {
+	if category == "" {
+		return true
+	}
+	for _, c := range GifCatalogCategories {
+		if c == category {
+			return true
+		}
+	}
+	return false
+}
+
 // GifCatalogEntry is one admin-curated GIF served by the built-in @gif inline
 // bot (see rpc.ServiceBotInlineResults) for the client's GIF picker
 // trending/search panel. DocumentID references an already-uploaded document
@@ -54,6 +77,9 @@ type GifCatalogEntry struct {
 	Enabled    bool
 	SortOrder  int
 	CreatedBy  string
+	// Category is one of GifCatalogCategories, or "" if uncategorized. Set
+	// manually via the admin panel or in bulk via files.ClassifyGifCategory.
+	Category string
 	// SourceFilename is set only for entries files.Service.SeedGifs imported
 	// from the data/gifs/ drop directory -- empty for anything created through
 	// the admin panel. It exists purely so a restart can tell "this file was

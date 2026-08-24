@@ -636,6 +636,14 @@ export type StickerSetRow = {
 
 export type StickerSetListResponse = { rows: StickerSetRow[] };
 
+// GifCatalogCategories mirrors domain.GifCatalogCategories -- the titles
+// internal/seed/catalog/emoji_groups.json uses for the GIF picker's category
+// icons. "" (rendered as "Uncategorized") is always a valid value too.
+export const GIF_CATALOG_CATEGORIES = [
+  "Love", "Approval", "Disapproval", "Cheers", "Laughter",
+  "Astonishment", "Sadness", "Anger", "Neutral", "Doubt", "Silly",
+];
+
 export type GifCatalogRow = {
   // String, not number: 18-19 digit snowflake ids, past JS's 2^53
   // safe-integer limit.
@@ -644,6 +652,7 @@ export type GifCatalogRow = {
   DocumentID: string;
   Enabled: boolean;
   SortOrder: number;
+  Category: string;
   CreatedBy: string;
   CreatedAt: string;
 };

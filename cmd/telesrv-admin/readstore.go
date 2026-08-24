@@ -290,13 +290,14 @@ type GifCatalogRow struct {
 	DocumentID int64 `json:"DocumentID,string"`
 	Enabled    bool
 	SortOrder  int
+	Category   string
 	CreatedBy  string
 	CreatedAt  time.Time
 }
 
 func (s *readStore) ListGifCatalog(ctx context.Context) ([]GifCatalogRow, error) {
 	rows, err := s.pool.Query(ctx, `
-SELECT id, title, document_id, enabled, sort_order, created_by, created_at
+SELECT id, title, document_id, enabled, sort_order, category, created_by, created_at
 FROM gif_catalog
 ORDER BY sort_order, id`)
 	if err != nil {
@@ -306,7 +307,7 @@ ORDER BY sort_order, id`)
 	out := make([]GifCatalogRow, 0)
 	for rows.Next() {
 		var item GifCatalogRow
-		if err := rows.Scan(&item.ID, &item.Title, &item.DocumentID, &item.Enabled, &item.SortOrder, &item.CreatedBy, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Title, &item.DocumentID, &item.Enabled, &item.SortOrder, &item.Category, &item.CreatedBy, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, item)

@@ -27,6 +27,9 @@ type GifCatalogStore interface {
 	SetGifCatalogEnabled(ctx context.Context, id int64, enabled bool) (bool, error)
 	// SetGifCatalogSortOrder rewrites an entry's display position.
 	SetGifCatalogSortOrder(ctx context.Context, id int64, order int) (bool, error)
+	// SetGifCatalogCategory sets (or clears, via "") an entry's category.
+	// changed=false if the id doesn't exist.
+	SetGifCatalogCategory(ctx context.Context, id int64, category string) (bool, error)
 	// DeleteGifCatalogEntry removes an entry. The referenced document is left
 	// alone -- catalog membership, not the document itself, is what's deleted.
 	DeleteGifCatalogEntry(ctx context.Context, id int64) (bool, error)

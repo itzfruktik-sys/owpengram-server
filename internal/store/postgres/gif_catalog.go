@@ -21,10 +21,10 @@ func (s *GifCatalogStore) CreateGifCatalogEntry(ctx context.Context, entry domai
 		return domain.GifCatalogEntry{}, fmt.Errorf("create gif catalog entry: id and document_id are required")
 	}
 	row := s.db.QueryRow(ctx, `
-INSERT INTO gif_catalog (id, title, document_id, enabled, sort_order, created_by, source_filename)
-VALUES ($1, $2, $3, true, $4, $5, $6)
-RETURNING id, title, document_id, enabled, sort_order, created_by, created_at, updated_at, source_filename`,
-		entry.ID, entry.Title, entry.DocumentID, entry.SortOrder, entry.CreatedBy, entry.SourceFilename)
+INSERT INTO gif_catalog (id, title, document_id, enabled, sort_order, created_by, source_filename, category)
+VALUES ($1, $2, $3, true, $4, $5, $6, $7)
+RETURNING id, title, document_id, enabled, sort_order, created_by, created_at, updated_at, source_filename, category`,
+		entry.ID, entry.Title, entry.DocumentID, entry.SortOrder, entry.CreatedBy, entry.SourceFilename, entry.Category)
 	out, err := scanGifCatalogEntry(row.Scan)
 	if err != nil {
 		return domain.GifCatalogEntry{}, fmt.Errorf("create gif catalog entry: %w", err)
@@ -50,7 +50,7 @@ func (s *GifCatalogStore) HasGifCatalogSourceFilename(ctx context.Context, filen
 
 func (s *GifCatalogStore) ListGifCatalog(ctx context.Context, onlyEnabled bool) ([]domain.GifCatalogEntry, error) {
 	rows, err := s.db.Query(ctx, `
-SELECT id, title, document_id, enabled, sort_order, created_by, created_at, updated_at, source_filename
+SELECT id, title, document_id, enabled, sort_order, created_by, created_at, updated_at, source_filename, category
 FROM gif_catalog
 WHERE NOT $1 OR enabled
 ORDER BY sort_order, id
@@ -86,6 +86,14 @@ func (s *GifCatalogStore) SetGifCatalogSortOrder(ctx context.Context, id int64, 
 	return tag.RowsAffected() > 0, nil
 }
 
+func (s *GifCatalogStore) SetGifCatalogCategory(ctx context.Context, id int64, category string) (bool, error) {
+	tag, err := s.db.Exec(ctx, `UPDATE gif_catalog SET category = $2, updated_at = now() WHERE id = $1`, id, category)
+	if err != nil {
+		return false, fmt.Errorf("set gif catalog entry category: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 func (s *GifCatalogStore) DeleteGifCatalogEntry(ctx context.Context, id int64) (bool, error) {
 	tag, err := s.db.Exec(ctx, `DELETE FROM gif_catalog WHERE id = $1`, id)
 	if err != nil {
@@ -96,7 +104,7 @@ func (s *GifCatalogStore) DeleteGifCatalogEntry(ctx context.Context, id int64) (
 
 func scanGifCatalogEntry(scan func(dest ...any) error) (domain.GifCatalogEntry, error) {
 	var e domain.GifCatalogEntry
-	if err := scan(&e.ID, &e.Title, &e.DocumentID, &e.Enabled, &e.SortOrder, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.SourceFilename); err != nil {
+	if err := scan(&e.ID, &e.Title, &e.DocumentID, &e.Enabled, &e.SortOrder, &e.CreatedBy, &e.CreatedAt, &e.UpdatedAt, &e.SourceFilename, &e.Category); err != nil {
 		return domain.GifCatalogEntry{}, err
 	}
 	return e, nil

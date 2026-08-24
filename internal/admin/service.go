@@ -21,43 +21,45 @@ import (
 )
 
 const (
-	ActionSetAccountFrozen       = "account.set_frozen"
-	ActionGrantPremium           = "account.grant_premium"
-	ActionSetVerified            = "account.set_verified"
-	ActionSetUserFlags           = "account.set_flags"
-	ActionSetSupport             = "account.set_support"
-	ActionSetUsername            = "account.set_username"
-	ActionSetUserColor           = "account.set_color"
-	ActionSetUserEmojiStatus     = "account.set_emoji_status"
-	ActionSetProfile             = "account.set_profile"
-	ActionSetPhone               = "account.set_phone"
-	ActionSetLoginEmail          = "account.set_login_email"
-	ActionSetAccountAvatar       = "account.set_avatar"
-	ActionSetChannelAvatar       = "channel.set_avatar"
-	ActionSetChannelUsername     = "channel.set_username"
-	ActionSetChannelSettings     = "channel.set_settings"
-	ActionSetChannelColor        = "channel.set_color"
-	ActionSetChannelEmojiStatus  = "channel.set_emoji_status"
-	ActionSetChannelVerified     = "channel.set_verified"
-	ActionSetChannelFlags        = "channel.set_flags"
-	ActionRevokeSessions         = "account.revoke_sessions"
-	ActionDeletePrivateMessages  = "messages.delete_private_messages"
-	ActionDeletePrivateHistory   = "messages.delete_private_history"
-	ActionCreateBot              = "bot.create"
-	ActionCreateBroadcast        = "broadcast.create"
-	ActionDeleteBot              = "bot.delete"
-	ActionExportBotToken         = "bot.export_token"
-	ActionSetStickerSetArchived  = "stickers.set_archived"
-	ActionSetStickerSetSortOrder = "stickers.set_sort_order"
-	ActionRenameStickerSet       = "stickers.rename"
-	ActionDeleteStickerSet       = "stickers.delete"
-	ActionCreateStickerSet       = "stickers.create"
-	ActionAddStickerToSet        = "stickers.add_sticker"
-	ActionRemoveStickerFromSet   = "stickers.remove_sticker"
-	ActionCreateGifCatalogEntry  = "gif_catalog.create"
-	ActionSetGifCatalogEnabled   = "gif_catalog.set_enabled"
-	ActionSetGifCatalogSortOrder = "gif_catalog.set_sort_order"
-	ActionDeleteGifCatalogEntry  = "gif_catalog.delete"
+	ActionSetAccountFrozen         = "account.set_frozen"
+	ActionGrantPremium             = "account.grant_premium"
+	ActionSetVerified              = "account.set_verified"
+	ActionSetUserFlags             = "account.set_flags"
+	ActionSetSupport               = "account.set_support"
+	ActionSetUsername              = "account.set_username"
+	ActionSetUserColor             = "account.set_color"
+	ActionSetUserEmojiStatus       = "account.set_emoji_status"
+	ActionSetProfile               = "account.set_profile"
+	ActionSetPhone                 = "account.set_phone"
+	ActionSetLoginEmail            = "account.set_login_email"
+	ActionSetAccountAvatar         = "account.set_avatar"
+	ActionSetChannelAvatar         = "channel.set_avatar"
+	ActionSetChannelUsername       = "channel.set_username"
+	ActionSetChannelSettings       = "channel.set_settings"
+	ActionSetChannelColor          = "channel.set_color"
+	ActionSetChannelEmojiStatus    = "channel.set_emoji_status"
+	ActionSetChannelVerified       = "channel.set_verified"
+	ActionSetChannelFlags          = "channel.set_flags"
+	ActionRevokeSessions           = "account.revoke_sessions"
+	ActionDeletePrivateMessages    = "messages.delete_private_messages"
+	ActionDeletePrivateHistory     = "messages.delete_private_history"
+	ActionCreateBot                = "bot.create"
+	ActionCreateBroadcast          = "broadcast.create"
+	ActionDeleteBot                = "bot.delete"
+	ActionExportBotToken           = "bot.export_token"
+	ActionSetStickerSetArchived    = "stickers.set_archived"
+	ActionSetStickerSetSortOrder   = "stickers.set_sort_order"
+	ActionRenameStickerSet         = "stickers.rename"
+	ActionDeleteStickerSet         = "stickers.delete"
+	ActionCreateStickerSet         = "stickers.create"
+	ActionAddStickerToSet          = "stickers.add_sticker"
+	ActionRemoveStickerFromSet     = "stickers.remove_sticker"
+	ActionCreateGifCatalogEntry    = "gif_catalog.create"
+	ActionSetGifCatalogEnabled     = "gif_catalog.set_enabled"
+	ActionSetGifCatalogSortOrder   = "gif_catalog.set_sort_order"
+	ActionSetGifCatalogCategory    = "gif_catalog.set_category"
+	ActionAutoCategorizeGifCatalog = "gif_catalog.auto_categorize"
+	ActionDeleteGifCatalogEntry    = "gif_catalog.delete"
 	// Collectible (Fragment-style) username lifecycle.
 	ActionMintCollectibleUsername     = "usernames.collectible.mint"
 	ActionTransferCollectibleUsername = "usernames.collectible.transfer"
@@ -305,6 +307,11 @@ type GifCatalogService interface {
 	AdminListGifCatalog(ctx context.Context) ([]domain.GifCatalogEntry, error)
 	AdminSetGifCatalogEnabled(ctx context.Context, id int64, enabled bool) (bool, error)
 	AdminSetGifCatalogSortOrder(ctx context.Context, id int64, order int) (bool, error)
+	AdminSetGifCatalogCategory(ctx context.Context, id int64, category string) (bool, error)
+	// AdminAutoCategorizeGifCatalog runs files.ClassifyGifCategory over every
+	// currently-uncategorized entry's title and returns how many got a
+	// category assigned.
+	AdminAutoCategorizeGifCatalog(ctx context.Context) (int, error)
 	AdminDeleteGifCatalogEntry(ctx context.Context, id int64) (bool, error)
 }
 
@@ -698,6 +705,16 @@ type SetGifCatalogSortOrderRequest struct {
 	CommandMeta
 	ID        int64 `json:"id"`
 	SortOrder int   `json:"sort_order"`
+}
+
+type SetGifCatalogCategoryRequest struct {
+	CommandMeta
+	ID       int64  `json:"id"`
+	Category string `json:"category"`
+}
+
+type AutoCategorizeGifCatalogRequest struct {
+	CommandMeta
 }
 
 type DeleteGifCatalogEntryRequest struct {
@@ -2844,6 +2861,39 @@ func (s *Service) SetGifCatalogSortOrder(ctx context.Context, req SetGifCatalogS
 		changed, err := s.gifCatalog.AdminSetGifCatalogSortOrder(ctx, req.ID, req.SortOrder)
 		details["changed"] = changed
 		return CommandResult{Message: "gif catalog entry order updated", Details: details}, err
+	})
+}
+
+func (s *Service) SetGifCatalogCategory(ctx context.Context, req SetGifCatalogCategoryRequest) (CommandResult, error) {
+	if s == nil || s.gifCatalog == nil || req.ID <= 0 {
+		return CommandResult{}, fmt.Errorf("valid gif catalog entry and service are required")
+	}
+	if !domain.ValidGifCatalogCategory(req.Category) {
+		return CommandResult{}, domain.ErrGifCatalogEntryInvalid
+	}
+	return s.runCommand(ctx, req.CommandMeta, ActionSetGifCatalogCategory, 0, domain.Peer{}, req, func() (CommandResult, error) {
+		details := map[string]any{"id": strconv.FormatInt(req.ID, 10), "category": req.Category}
+		if req.DryRun {
+			return CommandResult{Message: "gif catalog entry category change validated", Details: details}, nil
+		}
+		changed, err := s.gifCatalog.AdminSetGifCatalogCategory(ctx, req.ID, req.Category)
+		details["changed"] = changed
+		return CommandResult{Message: "gif catalog entry category updated", Details: details}, err
+	})
+}
+
+func (s *Service) AutoCategorizeGifCatalog(ctx context.Context, req AutoCategorizeGifCatalogRequest) (CommandResult, error) {
+	if s == nil || s.gifCatalog == nil {
+		return CommandResult{}, fmt.Errorf("gif catalog service is not configured")
+	}
+	return s.runCommand(ctx, req.CommandMeta, ActionAutoCategorizeGifCatalog, 0, domain.Peer{}, req, func() (CommandResult, error) {
+		details := map[string]any{}
+		if req.DryRun {
+			return CommandResult{Message: "gif catalog auto-categorize validated", Details: details}, nil
+		}
+		count, err := s.gifCatalog.AdminAutoCategorizeGifCatalog(ctx)
+		details["categorized"] = count
+		return CommandResult{Message: "gif catalog auto-categorized", Details: details}, err
 	})
 }
 

@@ -190,6 +190,59 @@ func (s *Service) AdminSetGifCatalogSortOrder(ctx context.Context, id int64, ord
 	return true, nil
 }
 
+// AdminSetGifCatalogCategory sets (or clears, via "") an entry's category.
+func (s *Service) AdminSetGifCatalogCategory(ctx context.Context, id int64, category string) (bool, error) {
+	if s.gifCatalog == nil {
+		return false, domain.ErrGifCatalogUnavailable
+	}
+	if !domain.ValidGifCatalogCategory(category) {
+		return false, domain.ErrGifCatalogEntryInvalid
+	}
+	changed, err := s.gifCatalog.SetGifCatalogCategory(ctx, id, category)
+	if err != nil {
+		return false, err
+	}
+	if !changed {
+		return false, domain.ErrGifCatalogEntryNotFound
+	}
+	return true, nil
+}
+
+// AdminAutoCategorizeGifCatalog runs ClassifyGifCategory against every
+// currently-uncategorized entry's title and assigns whatever category it
+// guesses (category stays "" -- i.e. the entry is left for manual tagging --
+// when nothing matches). Already-categorized entries are left untouched, so
+// this is safe to re-run after every new batch of GIFs lands (seeded or
+// admin-uploaded) without clobbering an operator's manual corrections.
+// Returns how many entries got a category assigned.
+func (s *Service) AdminAutoCategorizeGifCatalog(ctx context.Context) (int, error) {
+	if s.gifCatalog == nil {
+		return 0, domain.ErrGifCatalogUnavailable
+	}
+	entries, err := s.gifCatalog.ListGifCatalog(ctx, false)
+	if err != nil {
+		return 0, err
+	}
+	changed := 0
+	for _, e := range entries {
+		if e.Category != "" {
+			continue
+		}
+		category := ClassifyGifCategory(e.Title)
+		if category == "" {
+			continue
+		}
+		ok, err := s.gifCatalog.SetGifCatalogCategory(ctx, e.ID, category)
+		if err != nil {
+			return changed, err
+		}
+		if ok {
+			changed++
+		}
+	}
+	return changed, nil
+}
+
 // AdminDeleteGifCatalogEntry removes an entry from the catalog. The
 // referenced document is left alone.
 func (s *Service) AdminDeleteGifCatalogEntry(ctx context.Context, id int64) (bool, error) {

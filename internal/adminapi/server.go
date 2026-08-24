@@ -79,6 +79,8 @@ type Service interface {
 	CreateGifCatalogEntry(ctx context.Context, req admin.CreateGifCatalogEntryRequest) (admin.CommandResult, error)
 	SetGifCatalogEnabled(ctx context.Context, req admin.SetGifCatalogEnabledRequest) (admin.CommandResult, error)
 	SetGifCatalogSortOrder(ctx context.Context, req admin.SetGifCatalogSortOrderRequest) (admin.CommandResult, error)
+	SetGifCatalogCategory(ctx context.Context, req admin.SetGifCatalogCategoryRequest) (admin.CommandResult, error)
+	AutoCategorizeGifCatalog(ctx context.Context, req admin.AutoCategorizeGifCatalogRequest) (admin.CommandResult, error)
 	DeleteGifCatalogEntry(ctx context.Context, req admin.DeleteGifCatalogEntryRequest) (admin.CommandResult, error)
 	EmojiAnimation(ctx context.Context, documentID int64) ([]byte, bool, error)
 	ModerationCases(ctx context.Context, filter domain.ModerationCaseFilter) ([]domain.ModerationCase, error)
@@ -211,6 +213,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/gif-catalog/create", s.authenticated(s.handleCreateGifCatalogEntry))
 	mux.HandleFunc("POST /v1/gif-catalog/set-enabled", s.authenticated(s.handleSetGifCatalogEnabled))
 	mux.HandleFunc("POST /v1/gif-catalog/set-sort-order", s.authenticated(s.handleSetGifCatalogSortOrder))
+	mux.HandleFunc("POST /v1/gif-catalog/set-category", s.authenticated(s.handleSetGifCatalogCategory))
+	mux.HandleFunc("POST /v1/gif-catalog/auto-categorize", s.authenticated(s.handleAutoCategorizeGifCatalog))
 	mux.HandleFunc("POST /v1/gif-catalog/delete", s.authenticated(s.handleDeleteGifCatalogEntry))
 	mux.HandleFunc("GET /v1/stickers/documents/{id}/animation", s.authenticated(s.handleStickerDocumentAnimation))
 	mux.HandleFunc("GET /v1/gif-catalog/documents/{id}/preview", s.authenticated(s.handleGifCatalogDocumentPreview))
@@ -752,6 +756,24 @@ func (s *Server) handleSetGifCatalogSortOrder(w http.ResponseWriter, r *http.Req
 		return
 	}
 	result, err := s.svc.SetGifCatalogSortOrder(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleSetGifCatalogCategory(w http.ResponseWriter, r *http.Request) {
+	var req admin.SetGifCatalogCategoryRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	result, err := s.svc.SetGifCatalogCategory(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleAutoCategorizeGifCatalog(w http.ResponseWriter, r *http.Request) {
+	var req admin.AutoCategorizeGifCatalogRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	result, err := s.svc.AutoCategorizeGifCatalog(r.Context(), req)
 	writeCommandResult(w, result, err)
 }
 
