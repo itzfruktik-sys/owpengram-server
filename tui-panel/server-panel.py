@@ -283,6 +283,14 @@ class ServerManager:
         if (admin_web_dir / "package.json").exists():
             npm = shutil.which("npm")
             if npm:
+                if not (admin_web_dir / "node_modules").exists():
+                    r = subprocess.run(
+                        [npm, "install"],
+                        cwd=admin_web_dir, capture_output=True, text=True,
+                    )
+                    log.append(f"$ npm install (admin web)\n{r.stdout}{r.stderr}")
+                    if r.returncode != 0:
+                        return False, "\n".join(log)
                 r = subprocess.run(
                     [npm, "run", "build"],
                     cwd=admin_web_dir, capture_output=True, text=True,
