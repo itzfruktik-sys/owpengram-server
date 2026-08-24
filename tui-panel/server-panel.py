@@ -275,26 +275,10 @@ class ServerManager:
     def build(self) -> tuple[bool, str]:
         BIN_DIR.mkdir(exist_ok=True)
         log = []
-        # cmd/telesrv-admin embeds web/dist via go:embed -- `go build` alone
-        # just re-embeds whatever dist/ already happens to be on disk. dist/
-        # is committed to git precisely so prod (older Node, no JS toolchain
-        # by design) never needs to build it; only rebuild here when
-        # node_modules already exists -- i.e. a dev explicitly set this up on
-        # a machine with a compatible Node/npm. Never auto-`npm install`:
-        # that's what actually invokes vite, and vite 8 requires a newer
-        # Node than prod ships, so an implicit install-then-build would just
-        # fail there instead of silently doing nothing.
-        admin_web_dir = ROOT / "cmd" / "telesrv-admin" / "web"
-        if (admin_web_dir / "node_modules").exists():
-            npm = shutil.which("npm")
-            if npm:
-                r = subprocess.run(
-                    [npm, "run", "build"],
-                    cwd=admin_web_dir, capture_output=True, text=True,
-                )
-                log.append(f"$ npm run build (admin web)\n{r.stdout}{r.stderr}")
-                if r.returncode != 0:
-                    return False, "\n".join(log)
+        # cmd/telesrv-admin embeds web/dist via go:embed -- that dist/ is
+        # committed to git, built manually (npm run build in
+        # cmd/telesrv-admin/web) and staged like any other change whenever
+        # the frontend changes. This step intentionally never touches it.
         for out_path, pkg in ((SERVER_EXE, "./cmd/telesrv"), (ADMIN_EXE, "./cmd/telesrv-admin")):
             r = subprocess.run(
                 ["go", "build", "-o", str(out_path), pkg],
