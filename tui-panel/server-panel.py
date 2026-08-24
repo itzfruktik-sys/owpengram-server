@@ -25,7 +25,9 @@ import secrets
 import shutil
 import signal
 import subprocess
+import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -271,6 +273,20 @@ class ServerManager:
                 return True
             time.sleep(2)
         return False
+
+    def git_pull(self) -> tuple[bool, str]:
+        """--ff-only, deliberately: this runs unattended from the panel, with
+        no way to resolve a merge conflict or review a merge commit before it
+        happens. A diverged branch or dirty tree just fails cleanly here
+        instead of silently rewriting history or leaving a merge commit
+        nobody asked for -- the operator resolves it by hand (git status)
+        and re-runs Update."""
+        r = subprocess.run(
+            ["git", "pull", "--ff-only"],
+            cwd=ROOT, capture_output=True, text=True,
+        )
+        ok = r.returncode == 0
+        return ok, f"$ git pull --ff-only\n{r.stdout}{r.stderr}"
 
     def build(self) -> tuple[bool, str]:
         BIN_DIR.mkdir(exist_ok=True)
@@ -1108,6 +1124,10 @@ RESTART_STEPS: list[tuple[str, str]] = [
     ("stop", "Stopping current instance"),
     *START_STEPS,
 ]
+UPDATE_STEPS: list[tuple[str, str]] = [
+    ("pull", "Pulling latest code (git pull)"),
+    *RESTART_STEPS,
+]
 
 _STEP_ICONS = {
     "active": "[b yellow]●[/]",
@@ -1122,11 +1142,13 @@ class StartupProgressScreen(Screen):
     (success or failure) -- there's no Escape binding while it's running,
     just the Close button, which stays disabled until then."""
 
-    def __init__(self, title: str, steps: list[tuple[str, str]]) -> None:
+    def __init__(self, title: str, steps: list[tuple[str, str]], on_close: Callable[[bool], None] | None = None) -> None:
         super().__init__()
         self._title = title
         self._steps = steps
         self._labels = dict(steps)
+        self._on_close = on_close
+        self._success = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -1150,6 +1172,7 @@ class StartupProgressScreen(Screen):
             pass
 
     def finish(self, success: bool, message: str) -> None:
+        self._success = success
         try:
             result = self.query_one("#startup-result", Static)
             result.update(f"[b green]{message}[/]" if success else f"[b red]{message}[/]")
@@ -1160,6 +1183,8 @@ class StartupProgressScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "startup-close-button":
             self.dismiss()
+            if self._on_close:
+                self._on_close(self._success)
 
 
 class MainScreen(Screen):
@@ -1167,8 +1192,9 @@ class MainScreen(Screen):
         Binding("1", "start", "Start"),
         Binding("2", "stop", "Stop"),
         Binding("3", "restart", "Restart"),
-        Binding("4", "logs", "Logs"),
-        Binding("5", "env", "Configure .env"),
+        Binding("4", "update", "Update"),
+        Binding("5", "logs", "Logs"),
+        Binding("6", "env", "Configure .env"),
         Binding("q", "quit_panel", "Exit"),
     ]
 
@@ -1203,6 +1229,7 @@ class MainScreen(Screen):
                 Option("Start server", id="start"),
                 Option("Stop server", id="stop"),
                 Option("Restart server", id="restart"),
+                Option("Update (git pull + rebuild + restart)", id="update"),
                 Option("View logs", id="logs"),
                 Option("Configure .env", id="env"),
                 Option("Exit panel (server keeps running)", id="exit"),
@@ -1334,6 +1361,8 @@ class MainScreen(Screen):
             self.action_stop()
         elif option_id == "restart":
             self.action_restart()
+        elif option_id == "update":
+            self.action_update()
         elif option_id == "logs":
             self.action_logs()
         elif option_id == "env":
@@ -1508,9 +1537,62 @@ class MainScreen(Screen):
         # unlocking the menu once it's done.
         self.app.call_from_thread(self._begin_start, progress)
 
+    def action_update(self) -> None:
+        self.query_one(OptionList).disabled = True
+        progress = StartupProgressScreen("Updating server", UPDATE_STEPS, on_close=self._after_update)
+        self.app.push_screen(progress)
+        self._update_worker(progress)
+
+    @work(thread=True, exclusive=True)
+    def _update_worker(self, progress: StartupProgressScreen) -> None:
+        try:
+            self.app.call_from_thread(progress.set_step, "pull", "active")
+            ok, out = MANAGER.git_pull()
+            if not ok:
+                self.app.call_from_thread(progress.set_step, "pull", "failed")
+                self.app.call_from_thread(progress.finish, False, f"git pull failed:\n{out[-500:]}")
+                self.app.call_from_thread(self._unlock_menu)
+                return
+            self.app.call_from_thread(progress.set_step, "pull", "done")
+
+            self.app.call_from_thread(progress.set_step, "stop", "active")
+            status = MANAGER.status()
+            if status.running:
+                MANAGER.stop()
+            self.app.call_from_thread(progress.set_step, "stop", "done")
+        except Exception as exc:  # noqa: BLE001 - never leave the menu stuck
+            self.app.call_from_thread(progress.finish, False, f"Update failed: {exc}")
+            self.app.call_from_thread(self._unlock_menu)
+            return
+        # Same hand-off as restart -- _start_rest takes over unlocking the
+        # menu. Once the operator closes the progress screen, _after_update
+        # decides whether to re-exec the panel process itself (see its
+        # docstring for why that's needed on top of the Go binaries restart).
+        self.app.call_from_thread(self._begin_start, progress)
+
+    def _after_update(self, success: bool) -> None:
+        """git pull can change server-panel.py itself (or any module it
+        imports) -- restarting the Go binaries alone leaves this already-
+        running Python process on the old code. Re-exec'ing replaces the
+        process image with a fresh interpreter run of the (now updated)
+        script, so the panel picks up its own changes too. Only fires once
+        the operator has actually seen and dismissed the "Server started"
+        confirmation, and only on success -- a failed pull/build leaves the
+        panel exactly as it was, still showing the failure, nothing to
+        re-exec into."""
+        if not success:
+            return
+        self.app.request_restart = True
+        self.app.exit()
+
 
 class ServerPanelApp(App):
     TITLE = "OwpenGram Server Panel"
+    # Set by MainScreen._after_update once a git pull + rebuild succeeds;
+    # __main__ checks this after run() returns to decide whether to re-exec
+    # the whole process (picking up changes to this script itself) instead
+    # of just exiting.
+    request_restart = False
     CSS = """
     #banner {
         width: 100%;
@@ -1649,4 +1731,7 @@ class ServerPanelApp(App):
 
 
 if __name__ == "__main__":
-    ServerPanelApp().run()
+    app = ServerPanelApp()
+    app.run()
+    if app.request_restart:
+        os.execv(sys.executable, [sys.executable] + sys.argv)
