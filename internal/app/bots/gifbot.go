@@ -4,6 +4,9 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"unicode"
+
+	"go.uber.org/zap"
 
 	"telesrv/internal/domain"
 	"telesrv/internal/seed/catalog"
@@ -45,7 +48,8 @@ func (s *Service) OnInlineQuery(ctx context.Context, botUserID, _ int64, query, 
 	if err != nil {
 		return domain.BotInlineResults{}, false, err
 	}
-	if category := gifCategoryFromQuery(query); category != "" {
+	category := gifCategoryFromQuery(query)
+	if category != "" {
 		// A category-icon tap, not a typed word (see gifCategoryFromQuery) --
 		// filter by domain.GifCatalogEntry.Category instead of ranking by
 		// title, since the query is an emoji/emoji-blob a title never
@@ -53,6 +57,11 @@ func (s *Service) OnInlineQuery(ctx context.Context, botUserID, _ int64, query, 
 		entries = filterGifCatalogEntriesByCategory(entries, category)
 	} else {
 		entries = rankGifCatalogEntries(entries, query)
+	}
+	if s.log != nil {
+		s.log.Info("gif inline query",
+			zap.String("query", query), zap.String("detected_category", category),
+			zap.Int("result_count", len(entries)))
 	}
 	if len(entries) == 0 {
 		return domain.BotInlineResults{Gallery: true}, true, nil
@@ -103,26 +112,18 @@ func (s *Service) OnInlineQuery(ctx context.Context, botUserID, _ int64, query, 
 // (sort_order, id) order the store already applied.
 // gifCategoryFromQuery recognizes a GIF-picker category-icon tap and returns
 // which domain.GifCatalogCategories entry it names, or "" for an ordinary
-// typed search.
-//
-// The two clients encode a tap completely differently, and neither sends the
-// category's name:
-//   - Android (StickerCategoriesListView.EmojiCategory.remote, EmojiView.java)
-//     concatenates the whole tapped group's emoticons with no separator and
-//     sends that as the query -- an exact match against
-//     strings.Join(group.Emoticons, "").
-//   - TDesktop (GifSectionsValue, stickers_list_footer.cpp) reads a *separate*
-//     fixed emoji list (app config's gif_search_emojies, defaulting to 10
-//     emoji including some this server never configured) and sends the
-//     single tapped emoji as the query -- an exact match against one
-//     Emoticons entry.
-//
-// Both are checked against the same internal/seed/catalog data (the source of
-// truth messages.getEmojiGroups itself serves), so no client-side changes or
-// server-side emoji-list duplication are needed.
+// typed search. Neither client sends the category's name -- both instead
+// send the tapped group's own Emoticons back as the query, observed (see
+// the "gif inline query" log line this handler emits) to differ only in
+// whitespace between clients: Android sends them concatenated with no
+// separator, TDesktop space-separated. Comparing with all whitespace
+// stripped from the query handles both without caring which client asked,
+// and is why this checks against internal/seed/catalog data directly (the
+// same source messages.getEmojiGroups itself serves) rather than hardcoding
+// either shape.
 func gifCategoryFromQuery(query string) string {
-	query = strings.TrimSpace(query)
-	if query == "" {
+	stripped := stripWhitespace(query)
+	if stripped == "" {
 		return ""
 	}
 	groups, _ := catalog.EmojiGroups()
@@ -130,18 +131,27 @@ func gifCategoryFromQuery(query string) string {
 		if len(g.Emoticons) == 0 {
 			continue
 		}
-		if strings.Join(g.Emoticons, "") == query {
+		if strings.Join(g.Emoticons, "") == stripped {
 			return g.Title
 		}
 	}
 	for _, g := range groups {
 		for _, e := range g.Emoticons {
-			if e == query {
+			if e == stripped {
 				return g.Title
 			}
 		}
 	}
 	return ""
+}
+
+func stripWhitespace(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // filterGifCatalogEntriesByCategory keeps only entries tagged with category,
