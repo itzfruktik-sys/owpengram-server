@@ -59,6 +59,7 @@ const (
 	ActionSetGifCatalogSortOrder   = "gif_catalog.set_sort_order"
 	ActionSetGifCatalogCategory    = "gif_catalog.set_category"
 	ActionAutoCategorizeGifCatalog = "gif_catalog.auto_categorize"
+	ActionDeleteUncategorizedGifs  = "gif_catalog.delete_uncategorized"
 	ActionDeleteGifCatalogEntry    = "gif_catalog.delete"
 	// Collectible (Fragment-style) username lifecycle.
 	ActionMintCollectibleUsername     = "usernames.collectible.mint"
@@ -312,6 +313,10 @@ type GifCatalogService interface {
 	// currently-uncategorized entry's title and returns how many got a
 	// category assigned.
 	AdminAutoCategorizeGifCatalog(ctx context.Context) (int, error)
+	// AdminDeleteUncategorizedGifs removes every catalog entry with no
+	// category, plus its document/blob when nothing else references it.
+	// Returns (catalog entries deleted, documents actually deleted).
+	AdminDeleteUncategorizedGifs(ctx context.Context) (int, int, error)
 	AdminDeleteGifCatalogEntry(ctx context.Context, id int64) (bool, error)
 }
 
@@ -714,6 +719,10 @@ type SetGifCatalogCategoryRequest struct {
 }
 
 type AutoCategorizeGifCatalogRequest struct {
+	CommandMeta
+}
+
+type DeleteUncategorizedGifsRequest struct {
 	CommandMeta
 }
 
@@ -2894,6 +2903,36 @@ func (s *Service) AutoCategorizeGifCatalog(ctx context.Context, req AutoCategori
 		count, err := s.gifCatalog.AdminAutoCategorizeGifCatalog(ctx)
 		details["categorized"] = count
 		return CommandResult{Message: "gif catalog auto-categorized", Details: details}, err
+	})
+}
+
+func (s *Service) DeleteUncategorizedGifs(ctx context.Context, req DeleteUncategorizedGifsRequest) (CommandResult, error) {
+	if s == nil || s.gifCatalog == nil {
+		return CommandResult{}, fmt.Errorf("gif catalog service is not configured")
+	}
+	return s.runCommand(ctx, req.CommandMeta, ActionDeleteUncategorizedGifs, 0, domain.Peer{}, req, func() (CommandResult, error) {
+		details := map[string]any{}
+		if req.DryRun {
+			// A real count, not just "validated" -- this is a bulk delete, and
+			// an operator confirming it deserves to know how many entries
+			// they're about to lose before they do.
+			entries, err := s.gifCatalog.AdminListGifCatalog(ctx)
+			if err != nil {
+				return CommandResult{}, err
+			}
+			uncategorized := 0
+			for _, e := range entries {
+				if e.Category == "" {
+					uncategorized++
+				}
+			}
+			details["would_delete"] = uncategorized
+			return CommandResult{Message: fmt.Sprintf("would delete %d uncategorized gif(s)", uncategorized), Details: details}, nil
+		}
+		deletedEntries, deletedDocuments, err := s.gifCatalog.AdminDeleteUncategorizedGifs(ctx)
+		details["deleted_entries"] = deletedEntries
+		details["deleted_documents"] = deletedDocuments
+		return CommandResult{Message: "uncategorized gifs deleted", Details: details}, err
 	})
 }
 

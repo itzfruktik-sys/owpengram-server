@@ -126,6 +126,7 @@ func (s *server) routes() http.Handler {
 	mux.Handle("POST /api/actions/set-gif-catalog-sort-order", s.requireAuthAPI(http.HandlerFunc(s.handleSetGifCatalogSortOrderAPI)))
 	mux.Handle("POST /api/actions/set-gif-catalog-category", s.requireAuthAPI(http.HandlerFunc(s.handleSetGifCatalogCategoryAPI)))
 	mux.Handle("POST /api/actions/auto-categorize-gif-catalog", s.requireAuthAPI(http.HandlerFunc(s.handleAutoCategorizeGifCatalogAPI)))
+	mux.Handle("POST /api/actions/delete-uncategorized-gifs", s.requireAuthAPI(http.HandlerFunc(s.handleDeleteUncategorizedGifsAPI)))
 	mux.Handle("POST /api/actions/delete-gif-catalog-entry", s.requireAuthAPI(http.HandlerFunc(s.handleDeleteGifCatalogEntryAPI)))
 	mux.Handle("POST /api/actions/mint-collectible-username", s.requireAuthAPI(http.HandlerFunc(s.handleMintCollectibleUsernameAPI)))
 	mux.Handle("POST /api/actions/transfer-collectible-username", s.requireAuthAPI(http.HandlerFunc(s.handleTransferCollectibleUsernameAPI)))
@@ -1958,6 +1959,24 @@ func (s *server) handleAutoCategorizeGifCatalogAPI(w http.ResponseWriter, r *htt
 		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "auto-categorize-gif-catalog"),
 	}
 	result, err := s.callAdminAPI(r.Context(), "/v1/gif-catalog/auto-categorize", req)
+	writeCommandResultAPI(w, result, err)
+}
+
+type deleteUncategorizedGifsAPIRequest struct {
+	CommandID string `json:"command_id"`
+	Reason    string `json:"reason"`
+	Confirm   bool   `json:"confirm"`
+}
+
+func (s *server) handleDeleteUncategorizedGifsAPI(w http.ResponseWriter, r *http.Request) {
+	var body deleteUncategorizedGifsAPIRequest
+	if !decodeAction(w, r, &body) {
+		return
+	}
+	req := admin.DeleteUncategorizedGifsRequest{
+		CommandMeta: s.commandMetaFromAPI(r, body.CommandID, body.Reason, body.Confirm, "delete-uncategorized-gifs"),
+	}
+	result, err := s.callAdminAPI(r.Context(), "/v1/gif-catalog/delete-uncategorized", req)
 	writeCommandResultAPI(w, result, err)
 }
 

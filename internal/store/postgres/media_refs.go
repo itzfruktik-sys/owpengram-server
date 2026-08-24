@@ -107,6 +107,27 @@ RETURNING media_kind, media_id`, string(refKind), refKey)
 
 // ---- storage retention sweep ----
 
+// OrphanDocumentIfUnreferenced marks a document orphaned right now if
+// nothing currently references it (media_references), for a caller that
+// wants an immediate answer instead of waiting for the age-based
+// ListOrphanedDocumentIDsOlderThan sweep -- e.g. a human deliberately
+// pruning catalog entries, not an accidental delete the sweep's grace period
+// exists to protect against. Returns whether it just became orphaned; false
+// if something still references it (safe: the document is left alone) or it
+// was already orphaned.
+func (s *MediaStore) OrphanDocumentIfUnreferenced(ctx context.Context, id int64) (bool, error) {
+	tag, err := s.db.Exec(ctx, `
+UPDATE documents SET orphaned_at = now()
+WHERE id = $1
+  AND orphaned_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM media_references WHERE media_kind = 'document' AND media_id = $1)`,
+		id)
+	if err != nil {
+		return false, fmt.Errorf("orphan document if unreferenced: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // ListOrphanedDocumentIDsOlderThan returns document ids whose orphaned_at is
 // set and older than cutoff, oldest first, up to limit.
 func (s *MediaStore) ListOrphanedDocumentIDsOlderThan(ctx context.Context, cutoff time.Time, limit int) ([]int64, error) {

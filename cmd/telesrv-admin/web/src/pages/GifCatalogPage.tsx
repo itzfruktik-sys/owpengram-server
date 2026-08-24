@@ -104,6 +104,13 @@ export function GifCatalogPage() {
             payload={() => ({})}
             onDone={() => void load()}
           />
+          <ActionButton
+            tone="danger"
+            label={"Delete uncategorized"}
+            path="/api/actions/delete-uncategorized-gifs"
+            payload={() => ({})}
+            onDone={() => void load()}
+          />
           <button className="btn primary" type="button" onClick={() => setCreateOpen(true)}>
             <Plus size={15} /> {"Add GIF"}
           </button>

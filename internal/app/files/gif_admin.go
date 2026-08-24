@@ -249,6 +249,47 @@ func (s *Service) AdminAutoCategorizeGifCatalog(ctx context.Context) (int, error
 	return changed, nil
 }
 
+// AdminDeleteUncategorizedGifs removes every gif_catalog entry with no
+// category (Category == "") -- both the catalog row and, when safe, the
+// underlying document/blob. "Safe" means deleteDocumentNowIfUnreferenced
+// found nothing else pointing at that document (see its doc comment): a
+// user who already saved or forwarded one of these GIFs before this ran
+// keeps their copy, only the catalog listing (and the document, if no
+// longer referenced anywhere) goes away. Returns how many catalog entries
+// and how many documents were actually deleted.
+func (s *Service) AdminDeleteUncategorizedGifs(ctx context.Context) (deletedEntries, deletedDocuments int, err error) {
+	if s.gifCatalog == nil {
+		return 0, 0, domain.ErrGifCatalogUnavailable
+	}
+	entries, err := s.gifCatalog.ListGifCatalog(ctx, false, 0)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, e := range entries {
+		if e.Category != "" {
+			continue
+		}
+		ok, err := s.gifCatalog.DeleteGifCatalogEntry(ctx, e.ID)
+		if err != nil {
+			return deletedEntries, deletedDocuments, err
+		}
+		if !ok {
+			continue
+		}
+		deletedEntries++
+		deleted, err := s.deleteDocumentNowIfUnreferenced(ctx, e.DocumentID)
+		if err != nil {
+			s.log.Warn("delete uncategorized gif document failed",
+				zap.Int64("catalog_entry_id", e.ID), zap.Int64("document_id", e.DocumentID), zap.Error(err))
+			continue
+		}
+		if deleted {
+			deletedDocuments++
+		}
+	}
+	return deletedEntries, deletedDocuments, nil
+}
+
 // AdminDeleteGifCatalogEntry removes an entry from the catalog. The
 // referenced document is left alone.
 func (s *Service) AdminDeleteGifCatalogEntry(ctx context.Context, id int64) (bool, error) {

@@ -468,6 +468,10 @@ func (fakeService) AutoCategorizeGifCatalog(_ context.Context, req admin.AutoCat
 	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
 }
 
+func (fakeService) DeleteUncategorizedGifs(_ context.Context, req admin.DeleteUncategorizedGifsRequest) (admin.CommandResult, error) {
+	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
+}
+
 func (fakeService) DeleteGifCatalogEntry(_ context.Context, req admin.DeleteGifCatalogEntryRequest) (admin.CommandResult, error) {
 	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
 }

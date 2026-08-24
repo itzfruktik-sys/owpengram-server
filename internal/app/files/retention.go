@@ -21,6 +21,9 @@ type mediaRetentionStore interface {
 	CountFileBlobRefs(ctx context.Context, backend, objectKey string) (int, error)
 	DeleteDocumentAndBlobs(ctx context.Context, id int64) ([]domain.FileBlob, error)
 	DeletePhotoAndBlobs(ctx context.Context, id int64) ([]domain.FileBlob, error)
+	// OrphanDocumentIfUnreferenced is the immediate (no grace period)
+	// counterpart to the age-based sweep above -- see its doc comment.
+	OrphanDocumentIfUnreferenced(ctx context.Context, id int64) (bool, error)
 }
 
 // DeleteOrphanedOlderThan implements maintenance.OrphanedMediaRetentionStore:
@@ -63,6 +66,33 @@ func (s *Service) DeleteOrphanedOlderThan(ctx context.Context, cutoff time.Time,
 		deleted++
 	}
 	return deleted, nil
+}
+
+// deleteDocumentNowIfUnreferenced is the immediate counterpart to the
+// age-based sweep DeleteOrphanedOlderThan runs in the background: orphans
+// id right now (skipping the grace period) and, only if that succeeds --
+// i.e. nothing else currently references it -- physically deletes it and
+// its blobs immediately. Returns whether it was actually deleted; false
+// (with no error) means something still references the document, so it and
+// its blob(s) were deliberately left alone.
+func (s *Service) deleteDocumentNowIfUnreferenced(ctx context.Context, id int64) (bool, error) {
+	store, ok := s.media.(mediaRetentionStore)
+	if !ok {
+		return false, nil
+	}
+	orphaned, err := store.OrphanDocumentIfUnreferenced(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("orphan document: %w", err)
+	}
+	if !orphaned {
+		return false, nil
+	}
+	blobs, err := store.DeleteDocumentAndBlobs(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("delete document: %w", err)
+	}
+	s.deleteOrphanedBlobs(ctx, store, blobs)
+	return true, nil
 }
 
 // deleteOrphanedBlobs removes each blob from its backend once confirming
