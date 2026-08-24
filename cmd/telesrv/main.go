@@ -765,6 +765,7 @@ func run(logger *zap.Logger) error {
 	filesService := filesapp.NewService(mediaStore, blobBackend, cfg.DC,
 		filesapp.WithLogger(logger),
 		filesapp.WithGifCatalog(gifCatalogStore),
+		filesapp.WithGifSeedDir(cfg.GifSeedDir),
 		filesapp.WithUploadPartQuota(domain.UploadPartQuota{
 			MaxBytes: cfg.UploadInFlightMaxBytes,
 			MaxParts: cfg.UploadInFlightMaxParts,

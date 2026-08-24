@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -281,10 +283,21 @@ func (s *Service) AdminDeleteUncategorizedGifs(ctx context.Context) (deletedEntr
 		if err != nil {
 			s.log.Warn("delete uncategorized gif document failed",
 				zap.Int64("catalog_entry_id", e.ID), zap.Int64("document_id", e.DocumentID), zap.Error(err))
-			continue
-		}
-		if deleted {
+		} else if deleted {
 			deletedDocuments++
+		}
+		// SeedGifs re-imports any file under the seed dir that doesn't have a
+		// matching gif_catalog row (that's the whole point -- drop a new file
+		// in, it shows up on next restart), so a seed-imported entry's source
+		// file has to go too, or the next restart just re-imports the very
+		// gif this call deleted. Admin-panel uploads never set
+		// SourceFilename, so this is a no-op for those.
+		if e.SourceFilename != "" && s.gifSeedDir != "" {
+			path := filepath.Join(s.gifSeedDir, e.SourceFilename)
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				s.log.Warn("delete uncategorized gif seed file failed",
+					zap.Int64("catalog_entry_id", e.ID), zap.String("path", path), zap.Error(err))
+			}
 		}
 	}
 	return deletedEntries, deletedDocuments, nil

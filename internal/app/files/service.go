@@ -89,6 +89,13 @@ type Service struct {
 	premiumPromoReady bool
 
 	gifCatalog store.GifCatalogStore
+	// gifSeedDir is cfg.GifSeedDir, the same root SeedGifs scans at startup.
+	// AdminDeleteUncategorizedGifs needs it too: a seed-imported entry's
+	// underlying file still sits in this directory, and SeedGifs re-imports
+	// any file there without a matching gif_catalog row on the very next
+	// restart -- deleting only the DB row would make a "deleted" GIF come
+	// back on its own.
+	gifSeedDir string
 }
 
 // Option 配置 files 服务的可选能力。
@@ -177,6 +184,16 @@ func WithGifCatalog(c store.GifCatalogStore) Option {
 		if c != nil {
 			s.gifCatalog = c
 		}
+	}
+}
+
+// WithGifSeedDir records the gif seed directory (cfg.GifSeedDir) so
+// AdminDeleteUncategorizedGifs can remove a seed-imported entry's source
+// file alongside its DB row -- see the field's doc comment for why that
+// matters.
+func WithGifSeedDir(dir string) Option {
+	return func(s *Service) {
+		s.gifSeedDir = dir
 	}
 }
 
