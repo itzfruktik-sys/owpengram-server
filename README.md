@@ -68,13 +68,11 @@ or sponsored by Telegram or the official Telegram team.
 | ✅ | Message translation | Telegram `messages.translateText`, provider-backed batch translation, peer language settings, per-account rate limits, and privacy-conscious logging defaults. |
 | ✅ | Supergroups and channels | Create, join, leave, invite links, participants, admins, forum topics, linked discussion guests, history, send/edit/delete/read, reactions, public search, and previews. |
 | ✅ | Media and files | Upload, download, local-disk **or** S3/MinIO-compatible object storage (switchable per deployment, existing files stay reachable after a switch), low-space upload guard, automatic stale-media cleanup, photos, documents, thumbnails, canonical GIFv conversion, external media fetch, web page previews, map tile cache hooks, profile/channel photos. |
-| ✅ | Stickers and reactions | Sticker/reaction catalog, seed support, saved GIFs, recent reactions, top reactions, default reactions, and moderation-oriented reaction paths. |
-| ✅ | Gifts and stars | Dynamic star gift catalog, admin import tools, collectible/unique gift upgrade flows, prepaid upgrade tracking, and local stars ledger foundations. |
+| ✅ | Stickers, reactions, and GIFs | Sticker/reaction catalog, seed support, recent/top/default reactions, moderation-oriented reaction paths, and an admin-curated `@gif` inline catalog (categorized, auto-save-to-Saved-GIFs on send, category-icon filtering in the client's GIF picker) served alongside the client's Saved GIFs. |
 | ✅ | Collectible usernames and verification | Fragment-style NFT/collectible usernames (mint, transfer, activate/deactivate), the official platform-checkmark flow (`@verifybot`), and a third-party bot-verification mark mechanism (`@marksbot`, icon + description before a name) — the latter is experimental and hidden by default. |
-| ✅ | Account rating | Local composite reputation score (stars, activity, moderation history), exposed to every viewer via `userFull.stars_rating`. |
 | ✅ | Bots and mini apps | Bot service foundations, callbacks, inline helpers, webview/mini-app paths, a minimal Bot API gateway for libraries such as `python-telegram-bot`, persistent `getUpdates` delivery, and demo tools. |
 | ✅ | Calls and live streams | Private call signaling foundations, group call state, RTMP live streaming, scheduled video chats, channel `join_as`, SFU/TURN building blocks, liveness, and expiry workers. |
-| ✅ | Admin and operations | Admin API/UI backend, per-account freeze (admin-set read-only restriction, advertised to the client via appConfig), broadcast messaging (announce from the official account to every user or a picked list), shared-device detection across accounts, RBAC-scoped admin API tokens, PostgreSQL migrations, Redis volatile state, retention workers, pprof/debug hooks, load-test helpers, and a bundled TUI server panel (setup wizard, start/stop/restart, live logs, `.env` editor) as an alternative to manual builds. |
+| ✅ | Admin and operations | Admin API/UI backend, per-account freeze (admin-set read-only restriction, advertised to the client via appConfig), broadcast messaging (announce from the official account to every user or a picked list), shared-device detection across accounts, RBAC-scoped admin API tokens, PostgreSQL migrations, Redis volatile state, retention workers, pprof/debug hooks, load-test helpers, and a bundled TUI server panel (setup wizard, start/stop/restart, one-click update via `git pull` + rebuild, live logs, `.env` editor) as an alternative to manual builds. |
 | ✅ | Desktop, Android, iOS, and Web focus | Telegram Desktop is the primary target, with Android, iOS, and Web compatibility paths actively covered by the same server. |
 
 Some items are compatibility-first or experimental, but they are real open
@@ -154,6 +152,9 @@ What it does:
   `owpengram-admin-panel` as detached background processes; closing the panel
   does **not** stop them, only "Stop" does. Reopening the panel later picks
   the same processes back up and reports live status.
+- ⬆️ **Update** — `git pull --ff-only`, rebuilds both binaries, restarts them,
+  and re-execs the panel itself so it also picks up any change to its own
+  code — one menu action instead of a manual pull/build/restart sequence.
 - 📜 **Live log viewer** — tail either binary's log, or both in a split view.
 - ⚙️ **`.env` editor** — edit configuration from inside the panel, grouped by
   feature, without hand-editing the file.
@@ -375,7 +376,7 @@ you changed `TELESRV_DEV_AUTH_CODE`. Recommended checks:
 ```text
 cmd/telesrv/              server entrypoint
 cmd/telesrv-admin/        admin backend and web UI
-tui-panel/                interactive TUI server panel (setup, start/stop, logs, .env editor)
+tui-panel/                interactive TUI server panel (setup, start/stop, update, logs, .env editor)
 deploy/                   docker-compose (incl. MinIO), migrations, deploy helpers
 data/                     bundled language packs and optional seed data
 internal/mtprotoedge/     MTProto transport, auth key, session, ack/resend
