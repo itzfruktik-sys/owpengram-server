@@ -19,11 +19,16 @@ func (s *Service) HandlesInlineBot(botUserID int64) bool {
 }
 
 // OnInlineQuery serves @gif's admin-curated catalog as inline gif results,
-// ordered by title relevance to query (see rankGifCatalogEntries).
+// ordered by title relevance to query (see rankGifCatalogEntries) or, for a
+// category-icon tap, filtered to that category (see gifCategoryFromQuery).
 //
-// offset/paging is not implemented: the catalog is bounded by
-// MaxGifCatalogEntries, which is MaxBotInlineResults, so one response always
-// carries all of it.
+// offset/paging is not implemented: filtering/ranking runs over the whole
+// catalog (an operator's library can run into the thousands, see
+// files.Service.ListGifCatalog's doc comment for why that fetch is
+// deliberately unbounded), then the result is truncated to
+// MaxGifCatalogEntries -- the real per-response cap the client enforces --
+// so one response always carries as much of the *relevant* slice as fits,
+// not an arbitrary (sort_order, id) prefix of the whole catalog.
 //
 // Note TDesktop only ever calls this with a non-empty query: its GIF tab has
 // no trending panel, and GifsListWidget::searchForGifs returns early on an
@@ -51,6 +56,9 @@ func (s *Service) OnInlineQuery(ctx context.Context, botUserID, _ int64, query, 
 	}
 	if len(entries) == 0 {
 		return domain.BotInlineResults{Gallery: true}, true, nil
+	}
+	if len(entries) > domain.MaxGifCatalogEntries {
+		entries = entries[:domain.MaxGifCatalogEntries]
 	}
 	ids := make([]int64, len(entries))
 	for i, e := range entries {

@@ -152,13 +152,18 @@ func (s *Service) AdminListGifCatalog(ctx context.Context) ([]domain.GifCatalogE
 }
 
 // ListGifCatalog is bots.gifCatalogSource's read: onlyEnabled=true is what
-// @gif actually serves, capped at domain.MaxGifCatalogEntries -- the real
-// per-response limit the client enforces.
+// @gif actually serves. Deliberately unbounded, not capped at
+// domain.MaxGifCatalogEntries here -- bots.Service filters/ranks by category
+// or query text over the *whole* catalog and only then takes the top
+// MaxGifCatalogEntries for one response. Capping the fetch itself would
+// silently limit that filtering to an arbitrary (sort_order, id) slice of a
+// large catalog, e.g. a category tap finding none of its members among the
+// first 50 rows and falling back to showing the unfiltered catalog instead.
 func (s *Service) ListGifCatalog(ctx context.Context, onlyEnabled bool) ([]domain.GifCatalogEntry, error) {
 	if s.gifCatalog == nil {
 		return nil, nil
 	}
-	return s.gifCatalog.ListGifCatalog(ctx, onlyEnabled, domain.MaxGifCatalogEntries)
+	return s.gifCatalog.ListGifCatalog(ctx, onlyEnabled, 0)
 }
 
 // AdminSetGifCatalogEnabled toggles whether an entry is served.
