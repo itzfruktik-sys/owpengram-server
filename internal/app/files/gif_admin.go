@@ -142,22 +142,23 @@ func (s *Service) createGifCatalogEntry(ctx context.Context, title string, docum
 	return entry, nil
 }
 
-// AdminListGifCatalog returns every entry (enabled and disabled), for the
-// admin panel's list view.
+// AdminListGifCatalog returns every entry (enabled and disabled), unbounded,
+// for the admin panel's list view.
 func (s *Service) AdminListGifCatalog(ctx context.Context) ([]domain.GifCatalogEntry, error) {
 	if s.gifCatalog == nil {
 		return nil, domain.ErrGifCatalogUnavailable
 	}
-	return s.gifCatalog.ListGifCatalog(ctx, false)
+	return s.gifCatalog.ListGifCatalog(ctx, false, 0)
 }
 
 // ListGifCatalog is bots.gifCatalogSource's read: onlyEnabled=true is what
-// @gif actually serves.
+// @gif actually serves, capped at domain.MaxGifCatalogEntries -- the real
+// per-response limit the client enforces.
 func (s *Service) ListGifCatalog(ctx context.Context, onlyEnabled bool) ([]domain.GifCatalogEntry, error) {
 	if s.gifCatalog == nil {
 		return nil, nil
 	}
-	return s.gifCatalog.ListGifCatalog(ctx, onlyEnabled)
+	return s.gifCatalog.ListGifCatalog(ctx, onlyEnabled, domain.MaxGifCatalogEntries)
 }
 
 // AdminSetGifCatalogEnabled toggles whether an entry is served.
@@ -219,7 +220,7 @@ func (s *Service) AdminAutoCategorizeGifCatalog(ctx context.Context) (int, error
 	if s.gifCatalog == nil {
 		return 0, domain.ErrGifCatalogUnavailable
 	}
-	entries, err := s.gifCatalog.ListGifCatalog(ctx, false)
+	entries, err := s.gifCatalog.ListGifCatalog(ctx, false, 0)
 	if err != nil {
 		return 0, err
 	}

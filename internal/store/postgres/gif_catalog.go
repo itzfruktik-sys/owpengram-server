@@ -48,13 +48,19 @@ func (s *GifCatalogStore) HasGifCatalogSourceFilename(ctx context.Context, filen
 	return exists, nil
 }
 
-func (s *GifCatalogStore) ListGifCatalog(ctx context.Context, onlyEnabled bool) ([]domain.GifCatalogEntry, error) {
+func (s *GifCatalogStore) ListGifCatalog(ctx context.Context, onlyEnabled bool, limit int) ([]domain.GifCatalogEntry, error) {
+	// Postgres treats LIMIT NULL as "no limit" -- a nil *int parameter gets
+	// there without a second query string for the unbounded (admin) case.
+	var limitParam *int
+	if limit > 0 {
+		limitParam = &limit
+	}
 	rows, err := s.db.Query(ctx, `
 SELECT id, title, document_id, enabled, sort_order, created_by, created_at, updated_at, source_filename, category
 FROM gif_catalog
 WHERE NOT $1 OR enabled
 ORDER BY sort_order, id
-LIMIT `+fmt.Sprint(domain.MaxGifCatalogEntries), onlyEnabled)
+LIMIT $2`, onlyEnabled, limitParam)
 	if err != nil {
 		return nil, fmt.Errorf("list gif catalog: %w", err)
 	}

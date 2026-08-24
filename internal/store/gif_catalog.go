@@ -19,9 +19,14 @@ type GifCatalogStore interface {
 	// Always false for an empty filename (that's the panel-upload sentinel,
 	// never a real seed match).
 	HasGifCatalogSourceFilename(ctx context.Context, filename string) (bool, error)
-	// ListGifCatalog returns every entry ordered by (sort_order, id).
-	// onlyEnabled=true is what @gif serves; the admin panel lists everything.
-	ListGifCatalog(ctx context.Context, onlyEnabled bool) ([]domain.GifCatalogEntry, error)
+	// ListGifCatalog returns entries ordered by (sort_order, id).
+	// onlyEnabled=true is what @gif serves. limit>0 caps the result (@gif's
+	// live-serving path passes domain.MaxGifCatalogEntries -- the real TL-level
+	// cap one inline response can carry); limit<=0 means unbounded, which is
+	// what the admin panel and bulk operations like auto-categorize need --
+	// capping those at the same 50 the client renders per response would
+	// silently only ever touch the first page of a real catalog.
+	ListGifCatalog(ctx context.Context, onlyEnabled bool, limit int) ([]domain.GifCatalogEntry, error)
 	// SetGifCatalogEnabled toggles whether an entry is served. changed=false
 	// if the id doesn't exist.
 	SetGifCatalogEnabled(ctx context.Context, id int64, enabled bool) (bool, error)
