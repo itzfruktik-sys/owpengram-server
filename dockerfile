@@ -1,14 +1,11 @@
 FROM golang:1.22-alpine AS builder
 WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
 COPY . .
-RUN go build -o owpengram-server .
+RUN go build -o telesrv ./cmd/telesrv
 
 FROM alpine:latest
 WORKDIR /app
-RUN apk --no-libc-dev add ca-certificates
-COPY --from=builder /app/owpengram-server .
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /app/telesrv .
 EXPOSE 2398
-CMD ["./owpengram-server"]
-  
+CMD ["./telesrv"]
